@@ -1,8 +1,9 @@
-/* ============================================================
-   多平台视频下载工具 WebUI - 主脚本
-   从 web_page.py 内联脚本提取，方便独立修改
-   SESSION_TOKEN 由服务端模板注入
-   ============================================================ */
+/**
+ * 多平台视频下载工具 WebUI - 主脚本
+ *
+ * SESSION_TOKEN 由服务端模板注入。
+ * 图标定义在 icons.js 中（本脚本之前加载）。
+ */
 
 let evtSource = null;
 let currentPlatform = "YouTube";
@@ -13,9 +14,9 @@ const PLATFORMS = [
   {name:"YouTube",color:"#FF0000"},
   {name:"Bilibili",color:"#FB7299"},
   {name:"Twitch",color:"#9146FF"},
-  {name:"Niconico",color:"#00A0D1"},
+  {name:"Niconico",color:"#4B4B4D"},
   {name:"Fantia",color:"#E6399B"},
-  {name:"TwitCasting",color:"#4B4B4D"}
+  {name:"TwitCasting",color:"#00A0D1"}
 ];
 const PAGE_TITLES = {
   download: '下载任务', logs: '运行日志', settings: '下载设置', history: '下载历史',
@@ -24,48 +25,16 @@ const PAGE_TITLES = {
 
 function $(id){return document.getElementById(id);}
 
-// ========== 图标系统（lucide，内联 SVG） ==========
-const ICONS = {
-  'download':'<path d="M12 15V3"/><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 10 5 5 5-5"/>',
-  'history':'<path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l4 2"/>',
-  'wrench':'<path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/>',
-  'settings':'<path d="M20 7h-9"/><path d="M14 17H5"/><circle cx="17" cy="17" r="3"/><circle cx="7" cy="7" r="3"/>',
-  'help':'<circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><path d="M12 17h.01"/>',
-  'info':'<circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/>',
-  'power':'<path d="M12 2v10"/><path d="M18.36 6.64a9 9 0 1 1-12.73 0"/>',
-  'refresh':'<path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/>',
-  'list':'<path d="M8 6h13"/><path d="M8 12h13"/><path d="M8 18h13"/><path d="M3 6h.01"/><path d="M3 12h.01"/><path d="M3 18h.01"/>',
-  'link':'<path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>',
-  'plus':'<path d="M5 12h14"/><path d="M12 5v14"/>',
-  'square':'<rect width="18" height="18" x="3" y="3" rx="2"/>',
-  'check':'<path d="M20 6 9 17l-5-5"/>',
-  'x':'<path d="M18 6 6 18"/><path d="M6 6l12 12"/>',
-  'layers':'<path d="M12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 0-1.83Z"/><path d="m22 17.65-9.17 4.16a2 2 0 0 1-1.66 0L2 17.65"/><path d="m22 12.65-9.17 4.16a2 2 0 0 1-1.66 0L2 12.65"/>',
-  'trash':'<path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" x2="10" y1="11" y2="17"/><line x1="14" x2="14" y1="11" y2="17"/>',
-  'bookmark':'<path d="m19 21-7-4-7 4V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/>',
-  'film':'<rect width="18" height="18" x="3" y="3" rx="2"/><path d="M7 3v18"/><path d="M3 7.5h4"/><path d="M3 12h18"/><path d="M3 16.5h4"/><path d="M17 3v18"/><path d="M17 7.5h4"/><path d="M17 16.5h4"/>',
-  'globe':'<circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/>',
-  'cookie':'<path d="M12 2a10 10 0 1 0 10 10 4 4 0 0 1-5-5 4 4 0 0 1-5-5"/><path d="M8.5 8.5v.01"/><path d="M16 15.5v.01"/><path d="M12 12v.01"/><path d="M11 17v.01"/><path d="M7 14v.01"/>',
-  'cpu':'<rect width="16" height="16" x="4" y="4" rx="2"/><rect width="6" height="6" x="9" y="9" rx="1"/><path d="M15 2v2"/><path d="M15 20v2"/><path d="M2 15h2"/><path d="M2 9h2"/><path d="M20 15h2"/><path d="M20 9h2"/><path d="M9 2v2"/><path d="M9 20v2"/>',
-  'rotate':'<path d="M3 2v6h6"/><path d="M21 12A9 9 0 1 1 6.5 4.7L3 8"/>',
-  'save':'<path d="M15.2 3a2 2 0 0 1 1.4.6l3.8 3.8a2 2 0 0 1 .6 1.4V19a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z"/><path d="M17 21v-7a1 1 0 0 0-1-1H8a1 1 0 0 0-1 1v7"/><path d="M7 3v4a1 1 0 0 0 1 1h7"/>',
-  'music':'<path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/>',
-  'folder-open':'<path d="m6 14 1.5-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.54 6a2 2 0 0 1-1.95 1.5H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H18a2 2 0 0 1 2 2v2"/>',
-  'folder':'<path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/>',
-  'file-text':'<path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M10 9H8"/><path d="M16 13H8"/><path d="M16 17H8"/>',
-  'play':'<path d="M6 3 20 12 6 21Z"/>',
-  'rocket':'<path d="M4.5 16.5c-1.5 1.26-2 5-2 5s3.74-.5 5-2c.71-.84.7-2.13-.09-2.91a2.18 2.18 0 0 0-2.91-.09z"/><path d="M12 15l-3-3a22 22 0 0 1 2-3.95A12.88 12.88 0 0 1 22 2c0 2.72-.78 7.5-6 11a22.35 22.35 0 0 1-4 2z"/><path d="M9 12H4s.55-3.03 2-4c1.62-1.08 5 0 5 0"/><path d="M12 15v5s3.03-.55 4-2c1.08-1.62 0-5 0-5"/>',
-  'tv':'<rect width="20" height="15" x="2" y="7" rx="2"/><path d="M17 2l-5 5-5-5"/>',
-  'arrow-up':'<path d="m5 12 7-7 7 7"/><path d="M12 19V5"/>',
-  'inbox':'<path d="M22 12h-6l-2 3h-4l-2-3H2"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/>',
-  'terminal':'<path d="m4 17 6-6-6-6"/><path d="M12 19h8"/>',
-};
+// ========== 图标系统（使用 icons.js 中的 ICONS） ==========
 
 function svgIcon(name){
   return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS[name]||''}</svg>`;
 }
 
-// 把 [data-ico] 占位替换为对应 SVG（幂等）
+/**
+ * 将 [data-ico] 占位元素替换为对应 SVG 图标（幂等操作）。
+ * @param {HTMLElement} [root] - 搜索根节点，默认为 document。
+ */
 function hydrateIcons(root){
   (root || document).querySelectorAll('[data-ico]:not([data-ico-done])').forEach(el => {
     el.innerHTML = svgIcon(el.dataset.ico);
@@ -73,13 +42,16 @@ function hydrateIcons(root){
   });
 }
 
-// 品牌连接状态点
+/**
+ * 设置品牌连接状态指示点。
+ * @param {boolean} online - 是否在线。
+ */
 function setConn(online){
   const m = $('brandMark');
   if(m){ m.classList.toggle('online', !!online); m.classList.toggle('offline', !online); }
 }
 
-// 按时间问候
+/** 根据当前时间更新问候语。 */
 function updateGreeting(){
   const el = $('greeting');
   if(!el) return;
@@ -97,17 +69,23 @@ function setActivePage(page) {
   if(page === 'history') setHistoryDot(false);
 }
 
-// 下载历史新记录提示绿点
+/**
+ * 设置下载历史新记录提示绿点的显隐。
+ * @param {boolean} show - 是否显示绿点。
+ */
 function setHistoryDot(show) {
   const dot = $('historyDot');
   if(dot) dot.classList.toggle('show', show);
 }
 
 function init() {
+  initTheme();
   hydrateIcons();
   updateGreeting();
+  if(typeof initAudioConverter === 'function') initAudioConverter();
+  if(typeof initAudioVolumeTools === 'function') initAudioVolumeTools();
 
-  // 平台选择（芯片）
+  // 平台选择芯片组
   const pc = $('platforms');
   PLATFORMS.forEach((p,i) => {
     const b = document.createElement('button');
@@ -131,14 +109,14 @@ function init() {
   fillSelect('s_hwaccel', [['cpu','CPU软编码'],['h264_nvenc','N卡 NVENC'],['h264_qsv','Intel QSV'],['h264_amf','AMD AMF']]);
   fillSelect('s_browser', [['chrome','Chrome'],['edge','Edge'],['firefox','Firefox'],['brave','Brave'],['opera','Opera']]);
 
-  // 标签页切换
+  // 标签页切换事件绑定
   document.querySelectorAll('.tab').forEach(t => {
     t.onclick = () => {
       setActivePage(t.dataset.page);
     };
   });
 
-  // 回车下载；Shift/Ctrl+回车换行；输入法组词时的回车不触发
+  // 回车触发下载；Shift/Ctrl+回车换行；输入法组词期间的回车不触发
   const urlInput = $('urlInput');
   urlInput.addEventListener('keydown', e => {
     if(e.key === 'Enter' && !e.shiftKey && !e.ctrlKey && !e.altKey && !e.metaKey && !e.isComposing) {
@@ -146,19 +124,18 @@ function init() {
       startDl();
     }
   });
-  // 随内容增高（粘贴多行也会触发 input 事件）
+  // 随内容自适应高度（粘贴多行也会触发 input 事件）
   urlInput.addEventListener('input', autoGrowUrlInput);
 
   // 加载配置
   loadConfig();
   loadDeps();
 
-  // SSE
+  // 建立 SSE 事件流连接
   connectSSE();
 
-  // 页面关闭前提示
+  // 页面关闭前提示用户下载仍在进行中
   window.addEventListener('beforeunload', (e) => {
-    // 如果正在下载，提示用户
     if(download_running) {
       e.preventDefault();
       e.returnValue = '正在下载中！关闭页面后下载将继续在后台运行。如需彻底关闭工具，请先点击「✕ 退出」按钮。';
@@ -167,6 +144,11 @@ function init() {
   });
 }
 
+/**
+ * 填充 select 下拉选项。
+ * @param {string} id - select 元素 ID。
+ * @param {Array<Array<string>>} opts - [value, label] 选项数组。
+ */
 function fillSelect(id, opts) {
   const s = $(id);
   opts.forEach(([v,l]) => { const o=document.createElement('option');o.value=v;o.textContent=l;s.appendChild(o); });
@@ -177,14 +159,24 @@ function selectPlatform(name) {
   document.querySelectorAll('.plat-btn').forEach(b => {
     b.classList.toggle('active', b.dataset.name===name);
   });
-  // Bilibili 1080p Cookie 提示
+  // Bilibili 1080p Cookie 提示显隐
   const hintEl = $('bilibiliHint');
   if (hintEl) hintEl.style.display = name === 'Bilibili' ? 'block' : 'none';
 }
 
+/** 切换开关状态。 */
 function toggleSwitch(el) { el.classList.toggle('on'); }
+/** 判断开关是否处于开启状态。 */
 function isOn(id) { return $(id).classList.contains('on'); }
 
+/**
+ * 通用 API 请求封装。
+ * 自动附加 Session Token 和 JSON Content-Type 头。
+ *
+ * @param {string} path - API 路径。
+ * @param {RequestInit} [opts] - fetch 选项。
+ * @returns {Promise<object>} 解析后的 JSON 响应。
+ */
 async function api(path, opts={}) {
   const headers = Object.assign({'Content-Type':'application/json', 'X-Session-Token':SESSION_TOKEN}, opts.headers || {});
   const r = await fetch(path, Object.assign({}, opts, {headers}));
@@ -195,22 +187,41 @@ async function api(path, opts={}) {
   return data;
 }
 
-// 工具箱通用操作
+/**
+ * 工具箱通用操作入口。
+ * 调用后端 /api/tool 接口并显示状态反馈。
+ *
+ * @param {string} name - 操作名称（如 'gen-template', 'update-ytdlp'）。
+ */
 async function toolAction(name) {
-  const r = await api('/api/tool', {method:'POST', body:JSON.stringify({action:name})});
-  if(r.error) { alert(r.error); return; }
-  if(r.message) { addLog('logBox', {time:new Date().toTimeString().slice(0,8), msg:r.message, level:'success'}); }
+  const labels = {
+    'gen-template': '正在生成批量下载模板…',
+    'gen-cookie-template': '正在生成 Cookie 模板…',
+    'update-ytdlp': '正在更新 yt-dlp…',
+    'clean-temp': '正在清理临时文件…',
+    'open-downloads': '正在打开下载目录…',
+    'open-logs': '正在打开日志目录…'
+  };
+  showToolStatus(labels[name] || '正在执行…', 'working');
+  try {
+    const r = await api('/api/tool', {method:'POST', body:JSON.stringify({action:name})});
+    if(r.error) {
+      showToolStatus('操作失败: ' + r.error, 'error');
+      showToast(r.error, 'error');
+      return;
+    }
+    const msg = r.message || '操作完成';
+    addLog('logBox', {time:new Date().toTimeString().slice(0,8), msg:msg, level:'success'});
+    showToolStatus(msg, 'success');
+    showToast(msg, 'success');
+  } catch(e) {
+    showToolStatus('请求失败: ' + e.message, 'error');
+    showToast(e.message, 'error');
+  }
 }
 
 // 浏览文件夹
-async function browseFolder() {
-  const r = await api('/api/browse-folder', {method:'POST'});
-  if(r.path) {
-    $('wav_dir').value = r.path;
-  } else if(r.error) {
-    alert(r.error);
-  }
-}
+// browseFolder → 已由 audio-convert.js 中的 browseAudioDir() 替代
 
 async function loadConfig() {
   const cfg = await api('/api/config');
@@ -246,19 +257,23 @@ function applyConfig(s) {
   setSwitch('sw_nicorec', s.NICO_RECODE);
   setSwitch('sw_log', s.ENABLE_LOG);
   if(s.BILI_MULTIP_POLICY !== undefined) $('s_bili_policy').value = s.BILI_MULTIP_POLICY;
-  if(s.MP3_BITRATE !== undefined) $('wav_bitrate').value = String(s.MP3_BITRATE);
-  setSwitch('sw_delwav', s.DEL_WAV_AFTER_CONVERT);
+  // 音频输出格式设置（audio-convert.js 负责 UI 初始化）
+  if(s.AUDIO_OUTPUT_FORMAT !== undefined && $('audioOutFormat')) $('audioOutFormat').value = s.AUDIO_OUTPUT_FORMAT;
+  setSwitch('sw_audioDelSrc', s.DEL_SRC_AFTER_CONVERT);
+  setSwitch('sw_audioRecursive', s.AUDIO_RECURSIVE);
   toggleCookieMode();
 }
 
+/** 根据值设置开关的开关状态。 */
 function setSwitch(id, val) {
   if(val) $(id).classList.add('on'); else $(id).classList.remove('on');
 }
 
+/** 音频模式切换时更新格式选择器的可用状态。 */
 function onAudioModeChange() {
   const mode = $('s_audiomode').value;
   const fmtEl = $('s_audiofmt');
-  // 模式 0（不处理）和模式 1（分离音画）不需要音频输出格式
+  // 模式 0（不处理音频）和模式 1（分离音画）不需要音频输出格式选择
   if(mode === '0' || mode === '1') {
     fmtEl.disabled = true;
     fmtEl.style.opacity = '0.4';
@@ -268,12 +283,14 @@ function onAudioModeChange() {
   }
 }
 
+/** Cookie 模式切换时显示/隐藏浏览器相关设置行。 */
 function toggleCookieMode() {
   const browserMode = $('s_cookiemode').value === '2';
   $('row_browser').style.display = browserMode ? 'flex' : 'none';
   $('row_profile').style.display = browserMode ? 'flex' : 'none';
 }
 
+/** 从设置表单中收集当前全部配置项。 */
 function collectCfg() {
   return {
     PLATFORM: currentPlatform,
@@ -305,6 +322,7 @@ function collectCfg() {
   };
 }
 
+/** 保存当前设置并在成功后弹出提示。 */
 async function saveSettings() {
   const cfg = collectCfg();
   try {
@@ -315,6 +333,7 @@ async function saveSettings() {
   }
 }
 
+/** 静默保存设置，不弹窗提示。 */
 async function saveSettingsNoAlert() {
   const cfg = collectCfg();
   return api('/api/save-config', {method:'POST', body:JSON.stringify(cfg)});
@@ -343,7 +362,11 @@ async function loadDeps() {
   hydrateIcons(box);
 }
 
-// 清理单个链接：去除前后空白、反引号、引号
+/**
+ * 清理单个链接：去除前后空白、反引号、引号（最多 3 轮）。
+ * @param {string} url - 待清理的链接字符串。
+ * @returns {string} 清理后的链接。
+ */
 function cleanOneUrl(url) {
   for(let i=0;i<3;i++) {
     const old = url;
@@ -353,7 +376,7 @@ function cleanOneUrl(url) {
   return url.trim();
 }
 
-// 链接输入框随内容增高（CSS 限制最多 3 行，超出后固定滚动）
+/** 链接输入框随内容自适应高度（CSS 限制最多 3 行，超出后固定滚动）。 */
 function autoGrowUrlInput() {
   const el = $('urlInput');
   if(!el) return;
@@ -367,14 +390,14 @@ async function startDl() {
   const urls = $('urlInput').value.split(/\r?\n/).map(cleanOneUrl).filter(Boolean);
   if(urls.length === 0) { alert('请输入链接'); return; }
 
-  // 多链接：走批量下载（每行一个），不做单条的 Bilibili 分P 选择
+  // 多链接：走批量下载（每行一个），跳过单条 Bilibili 分P 选择
   if(urls.length > 1) {
     try { await saveSettingsNoAlert(); } catch(e) { alert('设置保存失败: ' + e.message); return; }
     doStartUrls(urls);
     return;
   }
 
-  // 单链接：沿用原有单任务流程（含 Bilibili 分P 选择）
+  // 单链接：沿用单任务流程（含 Bilibili 分P 选择）
   const url = urls[0];
   $('urlInput').value = url;
   autoGrowUrlInput();
@@ -407,7 +430,11 @@ async function startDl() {
   doStartDl(url);
 }
 
-// 判断是否为 Bilibili 视频链接（BV/AV/b23.tv）
+/**
+ * 判断是否为 Bilibili 视频链接（支持 BV/AV/b23.tv）。
+ * @param {string} url - 待检测链接。
+ * @returns {boolean} 是否为 Bilibili 链接。
+ */
 function isBilibiliUrl(url) {
   try {
     const host = new URL(url).hostname.toLowerCase();
@@ -415,7 +442,11 @@ function isBilibiliUrl(url) {
   } catch(e) { return false; }
 }
 
-// 判断是否为Bilibili直播链接
+/**
+ * 判断是否为 Bilibili 直播链接。
+ * @param {string} url - 待检测链接。
+ * @returns {boolean} 是否为 Bilibili 直播链接。
+ */
 function isBilibiliLive(url) {
   try { return new URL(url).hostname.includes('live.bilibili.com'); } catch(e) { return false; }
 }
@@ -449,7 +480,8 @@ async function doStartUrls(urls) {
 
 async function startBatch() {
   if(!confirm('将从 urls.txt 文件读取链接进行批量下载，是否继续？')) return;
-  try { await saveSettingsNoAlert(); } catch(e) { alert('设置保存失败: ' + e.message); return; }
+  showToolStatus('正在启动批量下载…', 'working');
+  try { await saveSettingsNoAlert(); } catch(e) { showToolStatus('设置保存失败: ' + e.message, 'error'); return; }
   doStartBatch();
 }
 
@@ -478,20 +510,9 @@ async function stopDl() {
   }
 }
 
-async function doWavConvert() {
-  const dir = $('wav_dir').value.trim();
-  if(!dir) { alert('请输入目录路径'); return; }
-  try {
-    const result = await api('/api/wav2mp3', {method:'POST', body:JSON.stringify({
-      dir, bitrate:parseInt($('wav_bitrate').value),
-      recursive:isOn('sw_recursive'), del_src:isOn('sw_delwav')
-    })});
-    if(result.error) throw new Error(result.error);
-  } catch(e) {
-    alert('转换启动失败: ' + e.message);
-  }
-}
+// doWavConvert → 已由 audio-convert.js 中的 startAudioConvert() 替代
 
+/** 展开/折叠批量任务统计详情。 */
 function toggleTaskStats() {
   const detail = $('taskStatsDetail');
   const btn = $('btnStatsToggle');
@@ -502,6 +523,16 @@ function toggleTaskStats() {
   btn.style.color = collapsed ? 'var(--text-highlighted)' : 'var(--text-toned)';
 }
 
+/** 触发统计数字弹出动画。 */
+function popStat(id) {
+  const el = $(id);
+  if(!el) return;
+  el.classList.remove('stat-pop');
+  void el.offsetWidth; // 强制重绘以触发动画
+  el.classList.add('stat-pop');
+}
+
+/** 根据批量统计数据更新汇总区域显隐和内容。 */
 function updateStatsVisibility() {
   const wrap = $('taskStatsWrap');
   const detail = $('taskStatsDetail');
@@ -514,7 +545,7 @@ function updateStatsVisibility() {
   if(total < 2) { wrap.style.display = 'none'; return; }
   wrap.style.display = '';
   if(summary) summary.textContent = `完成 ${ok + fail}/${total}` + (fail > 0 ? ` · 失败 ${fail}` : '');
-  // 自动展开：total >= 2 且存在失败时
+  // 自动展开条件：总数 ≥ 2 且存在失败记录
   const shouldExpand = total >= 2 && fail > 0;
   if(shouldExpand) {
     detail.style.display = '';
@@ -523,6 +554,7 @@ function updateStatsVisibility() {
   }
 }
 
+/** 折叠/展开主日志面板。 */
 function toggleLogBox() {
   const wrap = $('logBoxWrap');
   const btn = $('btnLogToggle');
@@ -532,13 +564,26 @@ function toggleLogBox() {
   btn.innerHTML = collapsed ? '▲' : '▼';
 }
 
+/** 清空主日志面板内容。 */
 function clearConsole() {
   const logBox = $('logBox');
   if(logBox) logBox.innerHTML = '';
 }
 
 function addLog(container, entry) {
-  const box = $(container);
+  // 写入主面板
+  _addToBox(container, entry);
+  // 同步写入另一个日志面板（如果存在）
+  if (container === 'logBox' && $('toolLogBox')) {
+    _addToBox('toolLogBox', entry);
+  } else if (container === 'toolLogBox' && $('logBox')) {
+    _addToBox('logBox', entry);
+  }
+}
+
+function _addToBox(id, entry) {
+  const box = $(id);
+  if(!box) return;
   const line = document.createElement('div');
   line.className = 'log-line log-' + entry.level;
   const timestamp = document.createElement('span');
@@ -551,8 +596,63 @@ function addLog(container, entry) {
   while(box.children.length > 300) box.removeChild(box.firstChild);
 }
 
-let sseRetryDelay = 1000;      // 初始重连间隔 1 秒
-const SSE_MAX_RETRY = 16000;   // 最大重连间隔 16 秒
+/** 折叠/展开工具日志面板。 */
+function toggleToolLog() {
+  const wrap = $('toolLogBoxWrap');
+  const btn = $('btnToolLogToggle');
+  if(!wrap || !btn) return;
+  const collapsed = wrap.style.display === 'none';
+  wrap.style.display = collapsed ? '' : 'none';
+  btn.innerHTML = collapsed ? '▲' : '▼';
+}
+
+/** 清空工具日志面板内容。 */
+function clearToolConsole() {
+  const box = $('toolLogBox');
+  if(box) box.innerHTML = '';
+}
+
+// ========== Toast 通知系统 ==========
+/**
+ * 显示 Toast 通知弹窗。
+ * @param {string} msg - 通知消息文本。
+ * @param {string} level - 通知级别（'success' | 'error' | 'working'）。
+ */
+function showToast(msg, level) {
+  // 确保 Toast 容器存在
+  let container = document.querySelector('.toast-container');
+  if(!container) {
+    container = document.createElement('div');
+    container.className = 'toast-container';
+    document.body.appendChild(container);
+  }
+  const toast = document.createElement('div');
+  toast.className = 'toast ' + (level || '');
+  const icon = level === 'success' ? 'check' : level === 'error' ? 'x' : 'refresh';
+  toast.innerHTML = `<span class="icon">${svgIcon(icon)}</span><span>${msg}</span>`;
+  container.appendChild(toast);
+  hydrateIcons(toast);
+  // 自动消失（3 秒后）
+  setTimeout(() => {
+    toast.classList.add('removing');
+    setTimeout(() => toast.remove(), 260);
+  }, 3000);
+}
+
+// 工具操作状态内联反馈
+function showToolStatus(msg, type) {
+  const el = $('toolStatus');
+  if(!el) return;
+  el.style.display = 'flex';
+  el.className = 'tool-status ' + (type || '');
+  el.innerHTML = (type === 'working' ? '<span class="status-icon">⏳</span>' : '') + '<span>' + msg + '</span>';
+  if(type !== 'working') {
+    setTimeout(() => { el.style.display = 'none'; }, 5000);
+  }
+}
+
+let sseRetryDelay = 1000;
+const SSE_MAX_RETRY = 16000;
 
 function connectSSE() {
   if(evtSource) evtSource.close();
@@ -569,7 +669,7 @@ function connectSSE() {
       const d = evt.data;
       const fill = $('progressFill');
       if(d.percent < 0) {
-        // 直播模式：动画进度条
+        // 直播模式：无限动画进度条
         fill.classList.add('live');
         $('progressText').textContent = 'LIVE';
       } else {
@@ -582,6 +682,11 @@ function connectSSE() {
       $('etaText').textContent = d.eta ? 'ETA '+d.eta : '';
       if(d.percent >= 1 || d.status.includes('失败') || d.status.includes('完成') || d.status.includes('已停止') || d.status.includes('已取消') || d.status.includes('异常终止')) {
         fill.classList.remove('live');
+        // 完成脉冲动画
+        if(d.percent >= 1) {
+          fill.classList.add('complete');
+          setTimeout(() => fill.classList.remove('complete'), 700);
+        }
       }
     } else if(evt.type === 'download_state') {
       const d = evt.data;
@@ -590,9 +695,9 @@ function connectSSE() {
       $('btnStop').disabled = !download_running || d.phase === 'stopping';
     } else if(evt.type === 'stats') {
       const d = evt.data;
-      if(d.ok !== undefined) $('statOk').textContent = d.ok;
-      if(d.fail !== undefined) $('statFail').textContent = d.fail;
-      if(d.total !== undefined) $('statTotal').textContent = d.total;
+      if(d.ok !== undefined) { popStat('statOk'); $('statOk').textContent = d.ok; }
+      if(d.fail !== undefined) { popStat('statFail'); $('statFail').textContent = d.fail; }
+      if(d.total !== undefined) { popStat('statTotal'); $('statTotal').textContent = d.total; }
       updateStatsVisibility();
     } else if(evt.type === 'password_required') {
       const d = evt.data;
@@ -653,7 +758,7 @@ function connectSSE() {
   evtSource.onerror = () => {
     setConn(false);
     evtSource.close();
-    // 指数退避：1s → 2s → 4s → 8s → 16s（上限）
+    // 指数退避重连：1s → 2s → 4s → 8s → 16s（上限）
     setTimeout(connectSSE, sseRetryDelay);
     sseRetryDelay = Math.min(sseRetryDelay * 2, SSE_MAX_RETRY);
   };
@@ -787,7 +892,7 @@ async function clearHistoryUI() {
   if(r && r.ok) loadHistory();
 }
 
-// 工具函数
+/** HTML 转义，防止 XSS。 */
 function escHtml(s) {
   const d = document.createElement('div');
   d.textContent = s;
@@ -806,7 +911,7 @@ function handleUpdateAvailable(data) {
   $('updateCurVer').textContent = data.current_version || '';
   $('updateNewVer').textContent = data.latest_version || '';
   $('updateNotes').textContent = data.release_notes || '暂无更新说明';
-  // 自动弹出面板
+  // 自动弹出更新面板
   showUpdatePanel();
 }
 
@@ -820,7 +925,7 @@ function handleUpdateProgress(data) {
     $('btnDoUpdate').textContent = '重试';
     return;
   }
-  // 显示进度条
+  // 显示更新进度条
   $('updateProgress').classList.add('show');
   $('updateActions').style.display = 'none';
   const pct = Math.round(data.percent || 0);
@@ -866,7 +971,7 @@ async function doUpdateNow() {
   }
 }
 
-// ========== Bilibili 分P选择对话框 ==========
+// ========== Bilibili 分P 选择对话框 ==========
 let pendingPartCallback = null;
 let pendingTcUrl = null;
 
@@ -924,7 +1029,7 @@ function confirmPartSelection() {
   if(checked.length === 0) { alert('请至少选择一个分P'); return; }
   const indices = Array.from(checked).map(cb => cb.value).join(',');
   const cb = pendingPartCallback;  // 先保存回调引用
-  closePartSelector();             // closePartSelector 会清掉 pendingPartCallback
+  closePartSelector();             // closePartSelector 会清除 pendingPartCallback
   if(cb) {                         // 使用之前保存的引用
     cb(indices);
   }

@@ -213,6 +213,8 @@ class AppContainer:
         clean_temp = tool_service.clean_temp
         gen_url_template = tool_service.gen_url_template
         wav_to_mp3 = tool_service.wav_to_mp3
+        audio_loudnorm = tool_service.audio_loudnorm
+        audio_volume = tool_service.audio_volume
         browse_folder = tool_service.browse_folder
         handle_tool_action = tool_service.handle_tool_action
         read_urls_file = tool_service.read_urls_file
@@ -271,6 +273,8 @@ class AppContainer:
                 clean_temp=clean_temp,
                 gen_url_template=gen_url_template,
                 wav_to_mp3=wav_to_mp3,
+                audio_loudnorm=audio_loudnorm,
+                audio_volume=audio_volume,
                 request_exit=request_exit,
             )
             return HttpService(lambda: create_handler(deps), port=0)

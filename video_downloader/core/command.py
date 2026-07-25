@@ -1,4 +1,22 @@
 def build_ytdlp_cmd(url, config, tool_dir, exe_suffix="", *, is_live=False, platform_override=None, cookie_file=None, bili_parts=None):
+    """构建 yt-dlp 下载命令行参数。
+
+    根据配置项组装完整的 yt-dlp 命令行参数列表，包括输出模板、格式选择、
+    音频处理、代理、Cookie、编码器等全部选项。
+
+    Args:
+        url: 目标视频/直播链接。
+        config: 配置字典，包含分辨率、编码、音频质量等全部设置项。
+        tool_dir: 工具目录路径（yt-dlp.exe/ffmpeg.exe 所在目录）。
+        exe_suffix: 可执行文件后缀，Windows 下为 ".exe"，其他平台为空。
+        is_live: 是否为直播下载，直播使用 --live-from-start 并归入直播目录。
+        platform_override: 平台覆盖名，如果不为 None 则替代 config 中的 PLATFORM。
+        cookie_file: Cookie 文件路径，用于文件模式 Cookie 鉴权。
+        bili_parts: Bilibili 分P 选择参数，如 "1,3,5" 或 "all"，通过 -I 传递给 yt-dlp。
+
+    Returns:
+        list[str]: 完整的 yt-dlp 命令行参数列表。
+    """
     cfg = config
     ytdlp = str(tool_dir / f"yt-dlp{exe_suffix}")
     cmd = [ytdlp, "--newline", "--continue", "--encoding", "utf-8"]

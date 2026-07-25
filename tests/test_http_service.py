@@ -69,6 +69,8 @@ def make_dependencies(exit_event):
         clean_temp=value,
         gen_url_template=value,
         wav_to_mp3=lambda *args: {"args": args},
+        audio_loudnorm=lambda *args, **kwargs: {"args": args},
+        audio_volume=lambda *args, **kwargs: {"args": args},
         request_exit=exit_event.set,
     )
 
