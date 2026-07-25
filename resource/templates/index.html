@@ -1,19 +1,26 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="zh-CN" data-theme="dark">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>多平台视频下载工具 WebUI</title>
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23818cf8' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 15V3'/%3E%3Cpath d='M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4'/%3E%3Cpath d='m7 10 5 5 5-5'/%3E%3C/svg%3E">
-<link rel="stylesheet" href="/static/css/style.css">
+<meta name="color-scheme" content="dark light">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%237fbbb3' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 15V3'/%3E%3Cpath d='M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4'/%3E%3Cpath d='m7 10 5 5 5-5'/%3E%3C/svg%3E">
+<!-- 设计系统：Everforest 主题 + 模块化 CSS -->
+<link rel="stylesheet" href="/static/css/theme.css">
+<link rel="stylesheet" href="/static/css/core.css">
+<link rel="stylesheet" href="/static/css/animations.css">
+<link rel="stylesheet" href="/static/css/responsive.css">
 </head>
 <body>
 <div class="app-shell">
+  <!-- ====== SIDEBAR ====== -->
   <aside class="app-sidebar" aria-label="应用侧栏">
     <a class="brand" href="#" aria-label="多平台视频下载工具首页">
       <span class="brand-mark" id="brandMark"><span class="icon" data-ico="download"></span></span>
       <span class="brand-text"><b>多平台视频下载工具</b><small>video downloader</small></span>
     </a>
+
     <nav class="sidebar-nav" aria-label="主导航">
       <div class="nav-group">
         <span class="sidebar-label">下载</span>
@@ -34,24 +41,34 @@
         <button class="tab sidebar-link" data-page="about"><span class="icon" data-ico="info"></span><span>关于软件</span></button>
       </div>
     </nav>
+
     <div class="sidebar-footer">
-      <span class="ver" id="ver"></span>
+      <div class="sidebar-footer-row">
+        <span class="ver" id="ver"></span>
+        <button class="theme-toggle" id="themeToggle" title="切换明暗主题" aria-label="切换明暗主题">
+          <span class="icon icon-sun" data-ico="sun"></span>
+          <span class="icon icon-moon" data-ico="moon"></span>
+        </button>
+      </div>
       <button class="btn-exit" onclick="exitApp()" title="彻底关闭工具"><span class="icon" data-ico="power"></span>退出工具</button>
     </div>
   </aside>
 
+  <!-- ====== MAIN CONTENT ====== -->
   <div class="app-content">
     <header class="content-header">
       <div class="crumb"><span class="muted">工作区 /</span>&nbsp;<span id="pageTitle">下载任务</span></div>
       <div class="header-actions">
         <button class="update-badge" id="updateBadge" style="display:none" onclick="showUpdatePanel()" title="有新版本可用"><span class="icon" data-ico="info"></span>有更新</button>
-        <!-- <button class="icon-btn" onclick="location.reload()" title="重新载入页面"><span class="icon" data-ico="refresh"></span><span>重载</span></button> -->
-        <!-- <button class="icon-btn danger" onclick="exitApp()" title="彻底关闭工具"><span class="icon" data-ico="power"></span><span>退出</span></button> -->
+        <button class="theme-toggle theme-toggle-mobile" id="themeToggleMobile" title="切换主题" aria-label="切换明暗主题" style="display:none">
+          <span class="icon icon-sun" data-ico="sun"></span>
+          <span class="icon icon-moon" data-ico="moon"></span>
+        </button>
       </div>
     </header>
 
     <main class="main">
-      <!-- 下载页 -->
+      <!-- ====== DOWNLOAD PAGE ====== -->
       <div class="page active" id="page-download">
         <div class="page-header">
           <div class="page-header-lead">
@@ -70,11 +87,7 @@
           <div class="platforms" id="platforms"></div>
 
           <div class="bili-hint" id="bilibiliHint">
-            <strong>🔑 Bilibili 1080p 下载提示：</strong>
-            请在浏览器中将视频画质切换到 <b>1080P 高清</b> 后再导出 Cookie，
-            或直接使用「浏览器 Cookie 模式」自动提取。
-            <a href="#" onclick="setActivePage('help');return false;">查看详细教程 →</a>
-            <button class="hint-close" onclick="document.getElementById('bilibiliHint').style.display='none'" title="关闭提示">&times;</button>
+            <b>Bilibili 1080p 提示：</b>请在浏览器中将画质切换至 <b>1080P 高清</b> 后导出 Cookie，或使用「浏览器 Cookie 模式」自动提取。<a href="#" onclick="setActivePage('help');return false;">查看教程 →</a>
           </div>
 
           <div class="url-row">
@@ -90,20 +103,20 @@
           </div>
 
           <div class="task-stats" id="taskStatsWrap" aria-label="任务统计" style="display:none">
-            <div style="display:flex;align-items:center;gap:4px;padding:6px 10px;background:var(--surface-elevated);border-radius:6px;border:1px solid var(--border);font-size:0.75rem;cursor:pointer" onclick="toggleTaskStats()" title="点击展开/折叠">
-              <span id="statsSummary" style="color:var(--text-toned)"></span>
-              <span id="btnStatsToggle" style="margin-left:auto;color:var(--text-toned);font-size:0.65rem">&#9654;</span>
+            <div style="display:flex;align-items:center;gap:4px;padding:6px 10px;background:var(--bg-elevated);border-radius:6px;border:1px solid var(--border);font-size:0.75rem;cursor:pointer" onclick="toggleTaskStats()" title="点击展开/折叠">
+              <span id="statsSummary" style="color:var(--fg-muted)"></span>
+              <span id="btnStatsToggle" style="margin-left:auto;color:var(--fg-muted);font-size:0.65rem">&#9654;</span>
             </div>
             <div id="taskStatsDetail" style="display:none;gap:8px;margin-top:6px">
-              <div class="stat-mini" style="flex:1;text-align:center;padding:4px 6px;background:rgb(34 197 94 / 0.08);border-radius:5px">
+              <div class="stat-mini" style="flex:1;text-align:center;padding:4px 6px;background:var(--success-dim);border-radius:5px">
                 <span style="font-size:0.65rem;color:var(--success)">成功</span>
                 <span class="stat-value" id="statOk" style="display:block;font-size:0.9rem;font-weight:700;color:var(--success)">0</span>
               </div>
-              <div class="stat-mini" style="flex:1;text-align:center;padding:4px 6px;background:rgb(239 68 68 / 0.08);border-radius:5px">
-                <span style="font-size:0.65rem;color:var(--red)">失败</span>
-                <span class="stat-value" id="statFail" style="display:block;font-size:0.9rem;font-weight:700;color:var(--red)">0</span>
+              <div class="stat-mini" style="flex:1;text-align:center;padding:4px 6px;background:var(--danger-dim);border-radius:5px">
+                <span style="font-size:0.65rem;color:var(--danger)">失败</span>
+                <span class="stat-value" id="statFail" style="display:block;font-size:0.9rem;font-weight:700;color:var(--danger)">0</span>
               </div>
-              <div class="stat-mini" style="flex:1;text-align:center;padding:4px 6px;background:rgb(79 195 247 / 0.08);border-radius:5px">
+              <div class="stat-mini" style="flex:1;text-align:center;padding:4px 6px;background:var(--accent-dim);border-radius:5px">
                 <span style="font-size:0.65rem;color:var(--accent)">总计</span>
                 <span class="stat-value" id="statTotal" style="display:block;font-size:0.9rem;font-weight:700;color:var(--accent)">0</span>
               </div>
@@ -113,7 +126,7 @@
 
         <section class="card log-card" aria-labelledby="logHeading" style="margin-top:16px">
           <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
-            <span id="logHeading" style="color:var(--ink);font-weight:600;font-size:0.9rem;"><span class="icon" data-ico="terminal"></span> 运行日志</span>
+            <span id="logHeading" style="color:var(--fg-high);font-weight:600;font-size:0.9rem;"><span class="icon" data-ico="terminal"></span> 运行日志</span>
             <button class="btn btn-quiet" onclick="toggleLogBox()" id="btnLogToggle" title="折叠/展开" style="margin-left:auto">▲</button>
             <button class="btn btn-quiet" onclick="clearConsole()"><span class="icon" data-ico="trash"></span>清空</button>
           </div>
@@ -123,7 +136,7 @@
         </section>
       </div>
 
-      <!-- 设置页 -->
+      <!-- ====== SETTINGS PAGE ====== -->
       <div class="page" id="page-settings">
         <div class="page-header">
           <div class="page-header-lead">
@@ -209,7 +222,7 @@
         </section>
       </div>
 
-      <!-- 历史页 -->
+      <!-- ====== HISTORY PAGE ====== -->
       <div class="page" id="page-history">
         <div class="page-header">
           <div class="page-header-lead">
@@ -228,7 +241,7 @@
         <div class="history-list" id="historyList"></div>
       </div>
 
-      <!-- 工具箱 -->
+      <!-- ====== TOOLS PAGE ====== -->
       <div class="page" id="page-tools">
         <div class="page-header">
           <div class="page-header-lead">
@@ -247,31 +260,180 @@
           <button class="tool-card" onclick="toolAction('gen-cookie-template')"><span class="tool-ico"><span class="icon" data-ico="cookie"></span></span><span class="name">生成 Cookie 模板</span></button>
           <button class="tool-card" onclick="toolAction('update-ytdlp')"><span class="tool-ico"><span class="icon" data-ico="refresh"></span></span><span class="name">更新 yt-dlp</span></button>
           <button class="tool-card" onclick="toolAction('clean-temp')"><span class="tool-ico"><span class="icon" data-ico="trash"></span></span><span class="name">清理临时文件</span></button>
-          <button class="tool-card" onclick="document.getElementById('wavDialog').classList.add('show')"><span class="tool-ico"><span class="icon" data-ico="music"></span></span><span class="name">WAV 转 MP3</span></button>
+          <button class="tool-card" onclick="showAudioConverter()"><span class="tool-ico"><span class="icon" data-ico="music"></span></span><span class="name">音频格式转换</span></button>
+          <button class="tool-card" onclick="showAudioLoudnorm()"><span class="tool-ico"><span class="icon" data-ico="sliders"></span></span><span class="name">音频响度统一</span></button>
+          <button class="tool-card" onclick="showAudioVolume()"><span class="tool-ico"><span class="icon" data-ico="volume-2"></span></span><span class="name">音频音量调整</span></button>
           <button class="tool-card" onclick="toolAction('open-downloads')"><span class="tool-ico"><span class="icon" data-ico="folder-open"></span></span><span class="name">打开下载目录</span></button>
           <button class="tool-card" onclick="toolAction('open-logs')"><span class="tool-ico"><span class="icon" data-ico="folder"></span></span><span class="name">打开日志目录</span></button>
         </div>
 
-        <div class="card wav-dialog" id="wavDialog">
-          <div class="card-lead"><span class="icon" data-ico="music"></span><div class="card-title">WAV 批量转 MP3</div></div>
+        <!-- Audio Format Converter Dialog -->
+        <div class="card audio-convert-dialog" id="audioConvertDialog">
+          <div class="card-lead"><span class="icon" data-ico="music"></span><div class="card-title">音频格式转换<small>借助 ffmpeg，支持 9 种常见/专业音频格式互相转换</small></div></div>
+
           <div class="setting-row">
-            <label>WAV 目录路径</label>
-            <input type="text" id="wav_dir" style="flex:1" placeholder="点击浏览选择文件夹，或手动输入路径">
-            <button class="btn btn-neutral btn-sm" onclick="browseFolder()"><span class="icon" data-ico="folder-open"></span>浏览</button>
+            <label>源文件目录</label>
+            <input type="text" id="audioDir" style="flex:1" placeholder="选择或输入包含音频文件的目录路径…">
+            <button class="btn btn-neutral btn-sm" onclick="browseAudioDir()"><span class="icon" data-ico="folder-open"></span>浏览</button>
           </div>
-          <div class="setting-row"><label>MP3 比特率</label>
-            <select id="wav_bitrate"><option>128</option><option>192</option><option>256</option><option selected>320</option></select><span style="color:var(--text-toned);font-size:0.8125rem">kbps</span>
+
+          <div class="setting-row">
+            <label>目标格式</label>
+            <select id="audioOutFormat" style="flex:1"></select>
           </div>
-          <div class="setting-row"><label>递归子目录</label><div class="switch" id="sw_recursive" onclick="toggleSwitch(this)"></div></div>
-          <div class="setting-row"><label>转换后删除 WAV</label><div class="switch" id="sw_delwav" onclick="toggleSwitch(this)"></div></div>
+
+          <div class="setting-row" id="audioQualityRow">
+            <label>质量参数</label>
+            <select id="audioQuality" style="flex:1"></select>
+          </div>
+
+          <div class="setting-row"><label>包含子目录</label><div class="switch" id="sw_audioRecursive" onclick="toggleSwitch(this)"></div></div>
+          <div class="setting-row"><label>转换后删除源文件</label><div class="switch" id="sw_audioDelSrc" onclick="toggleSwitch(this)"></div></div>
+
+          <div class="setting-row" style="border-top:1px solid var(--border);padding-top:0.75rem;color:var(--fg-muted);font-size:0.75rem">
+            <span class="icon" data-ico="info" style="width:0.875rem;height:0.875rem;flex:none"></span>
+            <span>ffmpeg 将自动识别源文件格式（支持所有常见音频格式）。无损格式（WAV/FLAC/ALAC）无需设置质量参数。</span>
+          </div>
+
           <div style="display:flex;gap:0.5rem;margin-top:0.75rem">
-            <button class="btn btn-primary" onclick="doWavConvert()"><span class="icon" data-ico="play"></span>开始转换</button>
-            <button class="btn btn-neutral" onclick="document.getElementById('wavDialog').classList.remove('show')">关闭</button>
+            <button class="btn btn-primary" onclick="startAudioConvert()"><span class="icon" data-ico="play"></span>开始转换</button>
+            <button class="btn btn-neutral" onclick="hideAudioConverter()">关闭</button>
           </div>
         </div>
+
+        <!-- Audio Loudness Normalization Dialog -->
+        <div class="card audio-convert-dialog" id="audioLoudnormDialog">
+          <div class="card-lead"><span class="icon" data-ico="sliders"></span><div class="card-title">音频响度统一<small>基于 EBU R128 标准，使用 FFmpeg loudnorm 滤镜统一音频响度</small></div></div>
+
+          <div class="setting-row">
+            <label>源文件目录</label>
+            <input type="text" id="loudnormDir" style="flex:1" placeholder="选择或输入包含音频文件的目录路径…">
+            <button class="btn btn-neutral btn-sm" onclick="browseLoudnormDir()"><span class="icon" data-ico="folder-open"></span>浏览</button>
+          </div>
+
+          <div class="setting-row">
+            <label>处理模式</label>
+            <select id="loudnormMode" style="flex:1">
+              <option value="single">单次标准处理 — 使用 EBU R128 默认参数，速度快</option>
+              <option value="double">双次精准处理 — 先分析后处理，质量更高</option>
+            </select>
+          </div>
+          <div style="font-size:0.75rem;color:var(--fg-muted);margin:-0.5rem 0 0.5rem 8.5rem" id="loudnormModeDesc"></div>
+
+          <div class="setting-row">
+            <label>目标响度 (I)</label>
+            <span style="display:flex;align-items:center;gap:0.5rem;flex:1">
+              <input type="range" id="loudnormI" min="-70" max="-5" value="-24" step="0.5" style="flex:1" oninput="$('loudnormIVal').textContent = this.value + ' LUFS'">
+              <span class="range-val" id="loudnormIVal" style="min-width:5.5rem">-24 LUFS</span>
+            </span>
+          </div>
+          <div style="font-size:0.72rem;color:var(--fg-muted);margin:-0.25rem 0 0.25rem 8.5rem">EBU R128 广播标准为 -23 LUFS，流媒体通常 -16 ~ -14 LUFS</div>
+
+          <div class="setting-row">
+            <label>响度范围 (LRA)</label>
+            <span style="display:flex;align-items:center;gap:0.5rem;flex:1">
+              <input type="range" id="loudnormLRA" min="1" max="20" value="7" step="0.5" style="flex:1" oninput="$('loudnormLRAVal').textContent = this.value + ' LU'">
+              <span class="range-val" id="loudnormLRAVal" style="min-width:4rem">7 LU</span>
+            </span>
+          </div>
+
+          <div class="setting-row">
+            <label>真峰值上限 (TP)</label>
+            <span style="display:flex;align-items:center;gap:0.5rem;flex:1">
+              <input type="range" id="loudnormTP" min="-9" max="0" value="-2" step="0.5" style="flex:1" oninput="$('loudnormTPVal').textContent = this.value + ' dBTP'">
+              <span class="range-val" id="loudnormTPVal" style="min-width:4.5rem">-2 dBTP</span>
+            </span>
+          </div>
+          <div style="font-size:0.72rem;color:var(--fg-muted);margin:-0.25rem 0 0.25rem 8.5rem">EBU R128 标准为 -2 dBTP，CD 母带通常 -1 dBTP</div>
+
+          <div class="setting-row">
+            <label>输出格式</label>
+            <select id="loudnormOutFormat" style="flex:1"></select>
+          </div>
+
+          <div class="setting-row">
+            <label>输出目录</label>
+            <input type="text" id="loudnormOutDir" style="flex:1" placeholder="留空 = 源目录下 loudnorm_output/">
+          </div>
+
+          <div class="setting-row"><label>包含子目录</label><div class="switch" id="sw_loudnormRecursive" onclick="toggleSwitch(this)"></div></div>
+
+          <div class="setting-row" style="border-top:1px solid var(--border);padding-top:0.75rem;color:var(--fg-muted);font-size:0.75rem">
+            <span class="icon" data-ico="info" style="width:0.875rem;height:0.875rem;flex:none"></span>
+            <span>双次处理先用默认参数分析音频实际响度，再填入测量值进行精准归一化。支持 MP3 / WAV / FLAC / AAC / OGG / Opus 等常见格式。</span>
+          </div>
+
+          <div style="display:flex;gap:0.5rem;margin-top:0.75rem">
+            <button class="btn btn-primary" onclick="startAudioLoudnorm()"><span class="icon" data-ico="play"></span>开始处理</button>
+            <button class="btn btn-neutral" onclick="hideAudioLoudnorm()">关闭</button>
+          </div>
+        </div>
+
+        <!-- Audio Volume Adjustment Dialog -->
+        <div class="card audio-convert-dialog" id="audioVolumeDialog">
+          <div class="card-lead"><span class="icon" data-ico="volume-2"></span><div class="card-title">音频音量调整<small>调整音频增益，正增益可启用限幅器防止削波失真</small></div></div>
+
+          <div class="setting-row">
+            <label>源文件目录</label>
+            <input type="text" id="volumeDir" style="flex:1" placeholder="选择或输入包含音频文件的目录路径…">
+            <button class="btn btn-neutral btn-sm" onclick="browseVolumeDir()"><span class="icon" data-ico="folder-open"></span>浏览</button>
+          </div>
+
+          <div class="setting-row">
+            <label>音量增益</label>
+            <span style="display:flex;align-items:center;gap:0.5rem;flex:1">
+              <input type="range" id="volumeGain" min="-30" max="30" value="0" step="0.5" style="flex:1">
+              <span class="range-val" id="volumeGainVal" style="min-width:5rem;font-weight:600">0.0 dB</span>
+            </span>
+          </div>
+          <div style="font-size:0.72rem;color:var(--fg-muted);margin:-0.25rem 0 0.25rem 8.5rem">正增益（提升音量）: 建议 ≤ +6dB，过大会导致削波失真 · 负增益（降低音量）: 安全无失真</div>
+
+          <div class="setting-row" id="volumeLimiterRow" style="display:none">
+            <label>限幅器保护</label>
+            <div class="switch on" id="sw_volumeLimiter" onclick="toggleSwitch(this)"></div>
+            <span style="font-size:0.75rem;color:var(--fg-muted);margin-left:0.25rem">使用前瞻限幅器 (alimiter) 防止削波</span>
+          </div>
+
+          <div class="setting-row">
+            <label>输出格式</label>
+            <select id="volumeOutFormat" style="flex:1"></select>
+          </div>
+
+          <div class="setting-row">
+            <label>输出目录</label>
+            <input type="text" id="volumeOutDir" style="flex:1" placeholder="留空 = 源目录下 volume_output/">
+          </div>
+
+          <div class="setting-row"><label>包含子目录</label><div class="switch" id="sw_volumeRecursive" onclick="toggleSwitch(this)"></div></div>
+
+          <div class="setting-row" style="border-top:1px solid var(--border);padding-top:0.75rem;color:var(--fg-muted);font-size:0.75rem">
+            <span class="icon" data-ico="info" style="width:0.875rem;height:0.875rem;flex:none"></span>
+            <span>限幅器 (alimiter) 会在音量提升后自动限制峰值不超过 -0.1 dBTP，避免削波失真。降低音量时无需限幅。支持 MP3 / WAV / FLAC / AAC / OGG / Opus 等格式。</span>
+          </div>
+
+          <div style="display:flex;gap:0.5rem;margin-top:0.75rem">
+            <button class="btn btn-primary" onclick="startAudioVolume()"><span class="icon" data-ico="play"></span>开始处理</button>
+            <button class="btn btn-neutral" onclick="hideAudioVolume()">关闭</button>
+          </div>
+        </div>
+
+        <!-- Tool operation feedback -->
+        <div class="tool-status" id="toolStatus" style="display:none"></div>
+
+        <!-- Tools log console -->
+        <section class="card log-card" aria-labelledby="toolLogHeading" style="margin-top:16px">
+          <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
+            <span id="toolLogHeading" style="color:var(--fg-high);font-weight:600;font-size:0.9rem;"><span class="icon" data-ico="terminal"></span> 工具运行日志</span>
+            <button class="btn btn-quiet" onclick="toggleToolLog()" id="btnToolLogToggle" title="折叠/展开" style="margin-left:auto">▲</button>
+            <button class="btn btn-quiet" onclick="clearToolConsole()"><span class="icon" data-ico="trash"></span>清空</button>
+          </div>
+          <div id="toolLogBoxWrap">
+            <div class="log-box" id="toolLogBox" aria-live="polite" style="height:320px"></div>
+          </div>
+        </section>
       </div>
 
-      <!-- 帮助页 -->
+      <!-- ====== HELP PAGE ====== -->
       <div class="page" id="page-help">
         <div class="page-header">
           <div class="page-header-lead">
@@ -331,7 +493,7 @@
               <li>将导出的 <code>cookies.txt</code> 放到工具目录</li>
             </ol>
             <p><b>画质对照：</b>标准 1080p（qn=80，需登录）、1080P 高码率（qn=112，需大会员）、4K 超清（qn=120，需大会员）。</p>
-            <p><b>💡 推荐使用浏览器模式：</b>在设置中将 Cookie 模式设为「浏览器提取」，选择已登录 B站的浏览器即可自动获取最新 Cookie。</p>
+            <p><b>推荐使用浏览器模式：</b>在设置中将 Cookie 模式设为「浏览器提取」，选择已登录 B站的浏览器即可自动获取最新 Cookie。</p>
             <p><b>分P/合集下载：</b>直接粘贴视频链接，工具会自动下载所有分P。合集链接同样支持批量下载。</p>
             <p><b>直播录制：</b>粘贴 <code>https://live.bilibili.com/房间号</code> 即可录制，支持断流重连。</p>
             <p><b>BV/AV/b23.tv：</b>所有 B站链接格式均自动识别，无需手动转换。</p>
@@ -405,7 +567,7 @@
         </div>
       </div>
 
-      <!-- 关于 -->
+      <!-- ====== ABOUT PAGE ====== -->
       <div class="page" id="page-about">
         <div class="about">
           <span class="about-mark"><span class="icon" data-ico="download"></span></span>
@@ -425,7 +587,7 @@
   </div>
 </div>
 
-<!-- 更新提示面板 -->
+<!-- ====== UPDATE PANEL ====== -->
 <div class="update-panel" id="updatePanel">
   <h3><span class="icon" data-ico="arrow-up"></span>发现新版本</h3>
   <div class="ver-info">当前版本：<b id="updateCurVer"></b> &rarr; 最新版本：<b id="updateNewVer" style="color:var(--success)"></b></div>
@@ -445,7 +607,7 @@
   </div>
 </div>
 
-<!-- Bilibili 分P选择对话框 -->
+<!-- ====== BILIBILI PART SELECTOR MODAL ====== -->
 <div class="modal-overlay" id="partSelectorOverlay" style="display:none">
   <div class="modal-dialog" id="partSelectorDialog">
     <div class="modal-header">
@@ -467,7 +629,7 @@
   </div>
 </div>
 
-<!-- TwitCasting 密码输入对话框 -->
+<!-- ====== TWITCASTING PASSWORD MODAL ====== -->
 <div class="modal-overlay" id="tcPasswordOverlay" style="display:none">
   <div class="modal-dialog" id="tcPasswordDialog">
     <div class="modal-header">
@@ -475,9 +637,9 @@
       <button class="modal-close" onclick="closeTcPasswordPrompt()" aria-label="关闭">&times;</button>
     </div>
     <div class="modal-body">
-      <p id="tcPasswordMsg" style="margin-bottom:12px;color:#aaa;font-size:.9rem">该视频/直播受密码保护或为会员限定内容，请输入密码后下载。</p>
+      <p id="tcPasswordMsg" style="margin-bottom:12px;color:var(--fg-muted);font-size:.9rem">该视频/直播受密码保护或为会员限定内容，请输入密码后下载。</p>
       <label style="display:block;margin-bottom:6px;font-weight:600">密码</label>
-      <input type="password" id="tcPasswordInput" placeholder="输入 TwitCasting 密码" style="width:100%;padding:10px 14px;background:#1a1a2e;color:#e0e0e0;border:1px solid #333;border-radius:6px;font-size:1rem">
+      <input type="password" id="tcPasswordInput" placeholder="输入 TwitCasting 密码" style="width:100%;padding:10px 14px;background:var(--bg-elevated);color:var(--fg-high);border:1px solid var(--border-strong);border-radius:var(--radius);font-size:1rem">
     </div>
     <div class="modal-footer">
       <button class="btn btn-neutral" onclick="closeTcPasswordPrompt()">取消</button>
@@ -486,10 +648,14 @@
   </div>
 </div>
 
-<!-- Session Token 注入（由服务端渲染时替换） -->
+<!-- Session Token 注入（服务端模板替换） -->
 <script>
   window.SESSION_TOKEN = "__SESSION_TOKEN__";
 </script>
+<script src="/static/js/icons.js"></script>
+<script src="/static/js/theme.js"></script>
+<script src="/static/js/audio-convert.js"></script>
+<script src="/static/js/audio-volume.js"></script>
 <script src="/static/js/app.js"></script>
 </body>
 </html>

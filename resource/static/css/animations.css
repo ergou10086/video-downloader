@@ -1,0 +1,249 @@
+/* ============================================================
+   动画系统 — 关键帧 + 工具类
+   性能：所有动画均使用 transform 和 opacity（GPU 加速）
+   无障碍：所有动画均遵循 prefers-reduced-motion 设置
+   ============================================================ */
+
+/* ----------------------------------------------------------
+   页面过渡
+   ---------------------------------------------------------- */
+@keyframes page-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: none; }
+}
+
+/* ----------------------------------------------------------
+   滑入淡出预设
+   ---------------------------------------------------------- */
+@keyframes fadeSlideIn {
+  from { opacity: 0; transform: translateY(-6px); }
+  to   { opacity: 1; transform: none; }
+}
+
+@keyframes fadeSlideUp {
+  from { opacity: 0; transform: translateY(12px); }
+  to   { opacity: 1; transform: none; }
+}
+
+@keyframes list-enter {
+  from { opacity: 0; transform: translateX(-12px); }
+  to   { opacity: 1; transform: none; }
+}
+
+/* ----------------------------------------------------------
+   卡片与组件入场
+   ---------------------------------------------------------- */
+@keyframes card-rise {
+  from { opacity: 0; transform: translateY(20px); }
+  to   { opacity: 1; transform: none; }
+}
+
+@keyframes hint-reveal {
+  from { opacity: 0; max-height: 0; transform: translateY(-4px); }
+  to   { opacity: 1; max-height: 8rem; transform: none; }
+}
+
+/* ----------------------------------------------------------
+   日志条目入场
+   ---------------------------------------------------------- */
+@keyframes log-enter {
+  from { opacity: 0; transform: translateX(-8px); }
+  to   { opacity: 1; transform: none; }
+}
+
+/* ----------------------------------------------------------
+   导航指示器
+   ---------------------------------------------------------- */
+@keyframes slideIn {
+  from { transform: scaleY(0); }
+  to   { transform: scaleY(1); }
+}
+
+/* ----------------------------------------------------------
+   进度条动画
+   ---------------------------------------------------------- */
+@keyframes shimmer {
+  0%   { transform: translateX(-100%); }
+  100% { transform: translateX(200%); }
+}
+
+@keyframes live-pulse {
+  to { background-position: -200% 0; }
+}
+
+@keyframes complete-burst {
+  0%   { filter: brightness(1); }
+  40%  { filter: brightness(1.8); box-shadow: 0 0 24px var(--accent-glow); }
+  100% { filter: brightness(1); box-shadow: 0 0 10px var(--accent-glow); }
+}
+
+/* ----------------------------------------------------------
+   模态框与遮罩层
+   ---------------------------------------------------------- */
+@keyframes overlay-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+@keyframes modal-in {
+  from { opacity: 0; transform: scale(0.96) translateY(8px); }
+  to   { opacity: 1; transform: none; }
+}
+
+@keyframes panel-in {
+  from { opacity: 0; transform: translateY(-8px) scale(0.97); }
+  to   { opacity: 1; transform: none; }
+}
+
+/* ----------------------------------------------------------
+   反馈与微交互
+   ---------------------------------------------------------- */
+@keyframes icon-spin {
+  0%   { transform: rotate(0deg) scale(1); }
+  50%  { transform: rotate(180deg) scale(0.6); }
+  100% { transform: rotate(360deg) scale(1); }
+}
+
+@keyframes subtle-pulse {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.7; }
+}
+
+@keyframes success-pop {
+  0%   { transform: scale(0.8); opacity: 0; }
+  60%  { transform: scale(1.1); }
+  100% { transform: scale(1); opacity: 1; }
+}
+
+@keyframes count-up {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: none; }
+}
+
+/* ----------------------------------------------------------
+   骨架屏加载
+   ---------------------------------------------------------- */
+@keyframes skeleton-shimmer {
+  0%   { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+.skeleton {
+  background: linear-gradient(
+    90deg,
+    var(--bg-elevated) 0%,
+    var(--bg-hover) 40%,
+    var(--bg-elevated) 80%
+  );
+  background-size: 200% 100%;
+  animation: skeleton-shimmer 1.8s ease-in-out infinite;
+  border-radius: var(--radius);
+}
+
+/* ----------------------------------------------------------
+   工具类
+   ---------------------------------------------------------- */
+.anim-fade-in {
+  animation: fadeSlideIn 0.3s var(--ease-out) both;
+}
+.anim-fade-up {
+  animation: fadeSlideUp 0.4s var(--ease-out) both;
+}
+.anim-pop-in {
+  animation: success-pop 0.35s var(--ease-spring) both;
+}
+
+/* 逐个子元素延迟入场（应用于父容器） */
+.stagger-children > * {
+  animation: card-rise 0.4s var(--ease-out) both;
+}
+.stagger-children > *:nth-child(1) { animation-delay: 0ms; }
+.stagger-children > *:nth-child(2) { animation-delay: 50ms; }
+.stagger-children > *:nth-child(3) { animation-delay: 100ms; }
+.stagger-children > *:nth-child(4) { animation-delay: 150ms; }
+.stagger-children > *:nth-child(5) { animation-delay: 200ms; }
+.stagger-children > *:nth-child(6) { animation-delay: 250ms; }
+.stagger-children > *:nth-child(7) { animation-delay: 300ms; }
+.stagger-children > *:nth-child(8) { animation-delay: 350ms; }
+.stagger-children > *:nth-child(9) { animation-delay: 400ms; }
+.stagger-children > *:nth-child(10) { animation-delay: 450ms; }
+
+/* ----------------------------------------------------------
+   焦点与交互
+   ---------------------------------------------------------- */
+@keyframes focus-pulse {
+  0%   { box-shadow: 0 0 0 0 var(--accent-glow); }
+  70%  { box-shadow: 0 0 0 6px transparent; }
+  100% { box-shadow: 0 0 0 0 transparent; }
+}
+
+:focus-visible {
+  animation: focus-pulse 1.5s ease-out 1;
+}
+
+/* ----------------------------------------------------------
+   更新徽标关注动画
+   ---------------------------------------------------------- */
+@keyframes badge-glow {
+  0%, 100% { box-shadow: 0 0 0 0 rgb(245 158 11 / 0.4); }
+  50%      { box-shadow: 0 0 0 6px rgb(245 158 11 / 0); }
+}
+
+.update-badge.show {
+  animation: badge-glow 2s ease-in-out 3;
+}
+
+/* ----------------------------------------------------------
+   统计数字弹出
+   ---------------------------------------------------------- */
+@keyframes number-pop {
+  0%   { transform: scale(1); }
+  50%  { transform: scale(1.2); color: var(--accent); }
+  100% { transform: scale(1); }
+}
+
+.stat-pop {
+  animation: number-pop 0.35s var(--ease-spring);
+}
+
+/* ----------------------------------------------------------
+   涟漪效果（JS 触发）
+   ---------------------------------------------------------- */
+.ripple {
+  position: absolute;
+  border-radius: 50%;
+  background: rgb(255 255 255 / 0.2);
+  transform: scale(0);
+  animation: ripple-effect 0.6s ease-out;
+  pointer-events: none;
+}
+
+@keyframes ripple-effect {
+  to { transform: scale(4); opacity: 0; }
+}
+
+/* ----------------------------------------------------------
+   Toast 通知滑入/滑出
+   ---------------------------------------------------------- */
+@keyframes toast-in {
+  0%   { opacity: 0; transform: translateY(-100%) scale(0.95); }
+  100% { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@keyframes toast-out {
+  0%   { opacity: 1; transform: translateY(0) scale(1); }
+  100% { opacity: 0; transform: translateY(-100%) scale(0.95); }
+}
+
+/* ----------------------------------------------------------
+   减少动画（必须放在最后以覆盖以上所有规则）
+   ---------------------------------------------------------- */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}

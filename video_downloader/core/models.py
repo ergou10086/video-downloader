@@ -12,21 +12,21 @@ from typing import Any, Callable, Protocol, runtime_checkable
 
 
 # ============================================================
-# Dataclasses — 值对象
+# 数据类 — 值对象
 # ============================================================
 
 @dataclass(frozen=True)
 class TaskHandle:
     """下载任务句柄，每个任务有唯一代际号防止旧回调污染新任务状态。"""
     generation: int
-    kind: str                   # "single" | "batch"
+    kind: str                   # "single" | "batch"（单任务 | 批量任务）
     cancel_event: threading.Event
 
 
 @dataclass(frozen=True)
 class StopTicket:
     """停止请求凭证，携带当前进程引用和代际号。"""
-    process: object             # subprocess.Popen | None
+    process: object             # subprocess.Popen | None（子进程对象或空）
     active: bool
     generation: int
 
@@ -54,16 +54,16 @@ class LogEntry:
     """单条日志记录。"""
     time: str
     msg: str
-    level: str                  # "info" | "success" | "warn" | "error"
+    level: str                  # "info" | "success" | "warn" | "error"（日志级别）
 
 
 @dataclass(frozen=True)
 class ExecutorCallbacks:
     """DownloadExecutor 的回调包 -- 将 6 个独立回调合并为 1 个参数。"""
     log: Callable[[str, str], None]
-    update_progress: Callable[..., None]   # (percent, status="", speed="", eta="")
+    update_progress: Callable[..., None]   # (percent, status="", speed="", eta="") 进度回调
     broadcast_state: Callable[[], None]
-    add_history: Callable[..., None]  # (url, title, platform, status, filepath=None)
+    add_history: Callable[..., None]  # (url, title, platform, status, filepath=None) 历史记录回调
     cancel_idle_timer: Callable[[], None]
     start_idle_timer: Callable[[], None]
 
@@ -84,7 +84,7 @@ class StorageCallbacks:
 
 
 # ============================================================
-# Protocols — 结构化接口（零运行时开销）
+# 协议类 — 结构化接口（零运行时开销）
 # ============================================================
 
 @runtime_checkable

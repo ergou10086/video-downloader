@@ -43,6 +43,8 @@ class HttpHandlerDependencies:
     clean_temp: object
     gen_url_template: object
     wav_to_mp3: object
+    audio_loudnorm: object
+    audio_volume: object
     request_exit: object
 
 
@@ -305,6 +307,56 @@ def create_handler(dependencies):
                 if del_src is None:
                     return
                 self._json(dependencies.wav_to_mp3(directory, recursive, bitrate, del_src))
+            elif path == "/api/audio-loudnorm":
+                directory = self._field(data, "dir", str, "")
+                if directory is None:
+                    return
+                recursive = self._field(data, "recursive", bool, False)
+                if recursive is None:
+                    return
+                mode = self._field(data, "mode", str, "single")
+                if mode is None:
+                    return
+                i_target = self._field(data, "i_target", (int, float), -24)
+                if i_target is None:
+                    return
+                lra_target = self._field(data, "lra_target", (int, float), 7)
+                if lra_target is None:
+                    return
+                tp_target = self._field(data, "tp_target", (int, float), -2)
+                if tp_target is None:
+                    return
+                output_dir = self._field(data, "output_dir", str, "")
+                if output_dir is None:
+                    return
+                output_format = self._field(data, "output_format", str, "")
+                if output_format is None:
+                    return
+                self._json(dependencies.audio_loudnorm(
+                    directory, recursive, mode, i_target, lra_target, tp_target,
+                    output_dir, output_format))
+            elif path == "/api/audio-volume":
+                directory = self._field(data, "dir", str, "")
+                if directory is None:
+                    return
+                recursive = self._field(data, "recursive", bool, False)
+                if recursive is None:
+                    return
+                gain_db = self._field(data, "gain_db", (int, float), 0)
+                if gain_db is None:
+                    return
+                limiter_enabled = self._field(data, "limiter_enabled", bool, True)
+                if limiter_enabled is None:
+                    return
+                output_dir = self._field(data, "output_dir", str, "")
+                if output_dir is None:
+                    return
+                output_format = self._field(data, "output_format", str, "")
+                if output_format is None:
+                    return
+                self._json(dependencies.audio_volume(
+                    directory, recursive, gain_db, limiter_enabled,
+                    output_dir, output_format))
             elif path == "/api/do-update":
                 self._json(dependencies.updater.do_update())
             elif path == "/api/exit":
@@ -315,7 +367,14 @@ def create_handler(dependencies):
 
         def _field(self, data, name, expected_type, default):
             value = data.get(name, default)
-            if (expected_type is int and isinstance(value, bool)) or not isinstance(value, expected_type):
+            # bool is a subclass of int — reject it for numeric types
+            if isinstance(value, bool):
+                is_int = expected_type is int
+                is_num_tuple = isinstance(expected_type, tuple) and (int in expected_type or float in expected_type)
+                if is_int or is_num_tuple or expected_type is float:
+                    self._json({"error": f"字段 {name} 类型错误"}, status=400)
+                    return None
+            if not isinstance(value, expected_type):
                 self._json({"error": f"字段 {name} 类型错误"}, status=400)
                 return None
             return value

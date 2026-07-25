@@ -1,7 +1,22 @@
+import json
 import os
+import re
 import subprocess
 import threading
 from pathlib import Path
+
+AUDIO_EXTENSIONS = {'.mp3', '.wav', '.flac', '.m4a', '.aac', '.ogg', '.opus', '.wma', '.ac3', '.aiff', '.aif', '.wv', '.ape'}
+
+AUDIO_CODEC_CONFIG = {
+    'mp3':  {'codec': 'libmp3lame', 'bitrate': '320k'},
+    'm4a':  {'codec': 'aac',        'bitrate': '256k'},
+    'aac':  {'codec': 'aac',        'bitrate': '256k'},
+    'wav':  {'codec': 'pcm_s16le',  'bitrate': None},
+    'flac': {'codec': 'flac',       'bitrate': None, 'compression': '5'},
+    'ogg':  {'codec': 'libvorbis',  'bitrate': None, 'qscale': '7'},
+    'opus': {'codec': 'libopus',    'bitrate': '192k'},
+    'ac3':  {'codec': 'ac3',        'bitrate': '448k'},
+}
 
 
 class ToolService:
@@ -149,6 +164,339 @@ class ToolService:
             self._log(f"[WAV转MP3] 完成: 成功{success} 跳过{skip} 失败{fail}", "success")
         threading.Thread(target=run, daemon=True).start()
         return {"ok": True, "total": len(wav_files)}
+
+    # ========== 音频处理辅助方法 ==========
+
+    def _scan_audio_files(self, target_dir, recursive):
+        """扫描目录中的音频文件。
+
+        Args:
+            target_dir: 目标目录路径。
+            recursive: 是否递归扫描子目录。
+
+        Returns:
+            list[Path]: 按路径排序的音频文件 Path 对象列表。
+        """
+        target = Path(target_dir)
+        if not target.exists():
+            return []
+        pattern = "**/*" if recursive else "*"
+        return sorted([
+            f for f in target.glob(pattern)
+            if f.is_file() and f.suffix.lower() in AUDIO_EXTENSIONS
+        ])
+
+    def _build_audio_codec_args(self, fmt, ext):
+        """根据输出格式构建 ffmpeg 编码器参数。
+
+        'same' 或 None 表示从扩展名自动检测编码器。
+
+        Args:
+            fmt: 目标音频格式标识符（如 'mp3', 'flac'）或 'same'/None。
+            ext: 输出文件扩展名（如 '.mp3', '.wav'），用于自动检测。
+
+        Returns:
+            list[str]: 追加到 ffmpeg 命令的编码器参数列表。
+        """
+        if fmt in (None, 'same', ''):
+            ext_clean = ext.lstrip('.').lower()
+            cfg = AUDIO_CODEC_CONFIG.get(ext_clean, AUDIO_CODEC_CONFIG['m4a'])
+        else:
+            cfg = AUDIO_CODEC_CONFIG.get(fmt, AUDIO_CODEC_CONFIG['m4a'])
+
+        args = ['-c:a', cfg['codec']]
+        if cfg.get('bitrate'):
+            args += ['-b:a', cfg['bitrate']]
+        if cfg.get('qscale'):
+            args += ['-q:a', cfg['qscale']]
+        if cfg.get('compression'):
+            args += ['-compression_level', cfg['compression']]
+        return args
+
+    def _parse_loudnorm_json(self, stderr_text):
+        """从 ffmpeg stderr 中提取并解析 loudnorm 的 JSON 输出。
+
+        Args:
+            stderr_text: ffmpeg 的 stderr 文本输出。
+
+        Returns:
+            dict | None: 包含 measured_I, measured_LRA, measured_TP, measured_thresh
+            的字典，解析失败返回 None。
+        """
+        # Find the JSON object in stderr — it's the first { ... } block
+        # that contains "input_i"
+        try:
+            # Try to find a JSON object containing input_i
+            start = stderr_text.find('{')
+            while start != -1:
+                # Find matching closing brace
+                depth = 0
+                end = start
+                for i, ch in enumerate(stderr_text[start:], start):
+                    if ch == '{':
+                        depth += 1
+                    elif ch == '}':
+                        depth -= 1
+                        if depth == 0:
+                            end = i + 1
+                            break
+                if end > start:
+                    candidate = stderr_text[start:end]
+                    try:
+                        data = json.loads(candidate)
+                        if 'input_i' in data:
+                            return {
+                                'measured_I': data['input_i'],
+                                'measured_LRA': data['input_lra'],
+                                'measured_TP': data['input_tp'],
+                                'measured_thresh': data['input_thresh'],
+                            }
+                    except json.JSONDecodeError:
+                        pass
+                start = stderr_text.find('{', start + 1)
+        except Exception:
+            pass
+        return None
+
+    # ========== Audio Loudness Normalization (EBU R128) ==========
+
+    def audio_loudnorm(self, target_dir, recursive, mode, i_target, lra_target,
+                       tp_target, output_dir, output_format):
+        """音频响度归一化处理（EBU R128 loudnorm 滤镜）。
+
+        支持单次标准处理和双次精准处理两种模式。
+
+        Args:
+            target_dir: 包含音频文件的目录路径。
+            recursive: 是否递归扫描子目录。
+            mode: 处理模式，'single' 为单次标准处理，'double' 为双次精准处理。
+            i_target: 目标综合响度，单位 LUFS（默认 -24）。
+            lra_target: 目标响度范围，单位 LU（默认 7）。
+            tp_target: 目标真峰值上限，单位 dBTP（默认 -2）。
+            output_dir: 输出目录路径（留空则在源目录下创建 loudnorm_output/）。
+            output_format: 输出音频格式（留空则保持原格式）。
+
+        Returns:
+            dict: 包含 ok, total, output_dir 的结果字典。
+        """
+        ffmpeg = self._tool_dir / f"ffmpeg{self._exe_suffix}"
+        if not ffmpeg.exists():
+            return {"error": "ffmpeg.exe未找到"}
+
+        target = Path(target_dir)
+        if not target.exists():
+            return {"error": "目录不存在"}
+
+        audio_files = self._scan_audio_files(target_dir, recursive)
+        if not audio_files:
+            return {"error": f"目录中未找到支持的音频文件（支持: {', '.join(sorted(AUDIO_EXTENSIONS))}）"}
+
+        # Determine output directory
+        out_base = Path(output_dir) if output_dir else (target / "loudnorm_output")
+        out_base.mkdir(parents=True, exist_ok=True)
+
+        i_val = float(i_target)
+        lra_val = float(lra_target)
+        tp_val = float(tp_target)
+        fmt = output_format or 'same'
+
+        def run():
+            self._log(f"[响度统一] 找到 {len(audio_files)} 个音频文件 (模式: {'双次精准' if mode == 'double' else '单次标准'})", "info")
+            success = skip = fail = 0
+
+            for index, src in enumerate(audio_files, 1):
+                ext = src.suffix.lower()
+                out_ext = ext if fmt == 'same' else f".{fmt}"
+                dst = out_base / f"{src.stem}_norm{out_ext}"
+
+                self._log(f"[{index}/{len(audio_files)}] 处理: {src.name}", "info")
+
+                if dst.exists():
+                    self._log("  → 已存在，跳过", "warn")
+                    skip += 1
+                    continue
+
+                codec_args = self._build_audio_codec_args(fmt, ext)
+
+                if mode == 'single':
+                    # Single pass: apply loudnorm with specified targets
+                    loudnorm_filter = (
+                        f"loudnorm=I={i_val}:LRA={lra_val}:TP={tp_val}"
+                    )
+                    cmd = [str(ffmpeg), '-y', '-i', str(src),
+                           '-af', loudnorm_filter] + codec_args + [str(dst)]
+                else:
+                    # Double pass: analyze first, then apply with measured values
+                    # Pass 1 — analyze
+                    analyze_filter = (
+                        f"loudnorm=I={i_val}:LRA={lra_val}:TP={tp_val}:print_format=json"
+                    )
+                    cmd_analyze = [str(ffmpeg), '-y', '-i', str(src),
+                                   '-af', analyze_filter, '-f', 'null', '-']
+                    env = os.environ.copy()
+                    env["PYTHONUTF8"] = "1"
+                    try:
+                        proc = subprocess.run(cmd_analyze, cwd=self._tool_dir, env=env,
+                                              capture_output=True, text=True, timeout=300)
+                        stderr_output = proc.stderr or ''
+                        measured = self._parse_loudnorm_json(stderr_output)
+                    except Exception as exc:
+                        self._log(f"  → 分析失败: {exc}", "error")
+                        fail += 1
+                        continue
+
+                    if measured is None:
+                        self._log("  → 未能解析响度分析结果，回退为单次处理", "warn")
+                        loudnorm_filter = (
+                            f"loudnorm=I={i_val}:LRA={lra_val}:TP={tp_val}"
+                        )
+                    else:
+                        loudnorm_filter = (
+                            f"loudnorm=I={i_val}:LRA={lra_val}:TP={tp_val}:"
+                            f"measured_I={measured['measured_I']}:"
+                            f"measured_LRA={measured['measured_LRA']}:"
+                            f"measured_TP={measured['measured_TP']}:"
+                            f"measured_thresh={measured['measured_thresh']}:"
+                            f"linear=true:print_format=summary"
+                        )
+                        self._log(f"  → 分析完成: I={measured['measured_I']}, "
+                                  f"LRA={measured['measured_LRA']}, "
+                                  f"TP={measured['measured_TP']}", "info")
+
+                    cmd = [str(ffmpeg), '-y', '-i', str(src),
+                           '-af', loudnorm_filter] + codec_args + [str(dst)]
+
+                env = os.environ.copy()
+                env["PYTHONUTF8"] = "1"
+                try:
+                    proc = subprocess.run(cmd, cwd=self._tool_dir, env=env,
+                                          stdout=subprocess.DEVNULL,
+                                          stderr=subprocess.DEVNULL, timeout=600)
+                    if proc.returncode == 0 and dst.exists():
+                        self._log("  → 完成", "success")
+                        success += 1
+                    else:
+                        self._log("  → 失败", "error")
+                        fail += 1
+                        if dst.exists():
+                            try:
+                                dst.unlink()
+                            except Exception:
+                                pass
+                except Exception as exc:
+                    self._log(f"  → 错误: {exc}", "error")
+                    fail += 1
+
+            self._log(f"[响度统一] 完成: 成功{success} 跳过{skip} 失败{fail}", "success")
+
+        threading.Thread(target=run, daemon=True).start()
+        return {"ok": True, "total": len(audio_files), "output_dir": str(out_base)}
+
+    # ========== Audio Volume Adjustment with Anti-Clipping ==========
+
+    def audio_volume(self, target_dir, recursive, gain_db, limiter_enabled,
+                     output_dir, output_format):
+        """调整音频音量，可选削波保护限幅器。
+
+        提升音量时使用前瞻限幅器（alimiter）防止削波失真，
+        降低音量时无需限幅器。
+
+        Args:
+            target_dir: 包含音频文件的目录路径。
+            recursive: 是否递归扫描子目录。
+            gain_db: 音量增益，单位 dB（正值提升，负值降低）。
+            limiter_enabled: 是否启用限幅器防止削波。
+            output_dir: 输出目录路径（留空则在源目录下创建 volume_output/）。
+            output_format: 输出音频格式（留空则保持原格式）。
+
+        Returns:
+            dict: 包含 ok, total, output_dir 的结果字典。
+        """
+        ffmpeg = self._tool_dir / f"ffmpeg{self._exe_suffix}"
+        if not ffmpeg.exists():
+            return {"error": "ffmpeg.exe未找到"}
+
+        target = Path(target_dir)
+        if not target.exists():
+            return {"error": "目录不存在"}
+
+        audio_files = self._scan_audio_files(target_dir, recursive)
+        if not audio_files:
+            return {"error": f"目录中未找到支持的音频文件（支持: {', '.join(sorted(AUDIO_EXTENSIONS))}）"}
+
+        # Determine output directory
+        out_base = Path(output_dir) if output_dir else (target / "volume_output")
+        out_base.mkdir(parents=True, exist_ok=True)
+
+        gain = float(gain_db)
+        use_limiter = bool(limiter_enabled)
+        fmt = output_format or 'same'
+
+        def run():
+            self._log(f"[音量调整] 找到 {len(audio_files)} 个音频文件 "
+                      f"(增益: {gain:+.1f}dB{', 限幅器: 开启' if use_limiter else ''})", "info")
+            success = skip = fail = 0
+
+            for index, src in enumerate(audio_files, 1):
+                ext = src.suffix.lower()
+                out_ext = ext if fmt == 'same' else f".{fmt}"
+                dst = out_base / f"{src.stem}_vol{out_ext}"
+
+                self._log(f"[{index}/{len(audio_files)}] 处理: {src.name}", "info")
+
+                if dst.exists():
+                    self._log("  → 已存在，跳过", "warn")
+                    skip += 1
+                    continue
+
+                # Build audio filter chain
+                if gain == 0:
+                    # No gain change, skip
+                    self._log("  → 增益为0，跳过", "warn")
+                    skip += 1
+                    continue
+
+                if gain > 0 and use_limiter:
+                    # Boost with look-ahead limiter to prevent clipping
+                    # alimiter: limit=0.98 (~-0.1dBTP headroom), level=disabled (no input scaling)
+                    filter_chain = f"volume={gain}dB,alimiter=limit=0.98:level=disabled:attack=5:release=50"
+                elif gain > 0:
+                    # Boost without limiter (user explicitly disabled it)
+                    self._log("  → 警告: 正增益未开启限幅器，可能存在削波失真", "warn")
+                    filter_chain = f"volume={gain}dB"
+                else:
+                    # Reduce volume: simple and safe, no limiter needed
+                    filter_chain = f"volume={gain}dB"
+
+                codec_args = self._build_audio_codec_args(fmt, ext)
+                cmd = [str(ffmpeg), '-y', '-i', str(src),
+                       '-af', filter_chain] + codec_args + [str(dst)]
+
+                env = os.environ.copy()
+                env["PYTHONUTF8"] = "1"
+                try:
+                    proc = subprocess.run(cmd, cwd=self._tool_dir, env=env,
+                                          stdout=subprocess.DEVNULL,
+                                          stderr=subprocess.DEVNULL, timeout=600)
+                    if proc.returncode == 0 and dst.exists():
+                        self._log("  → 完成", "success")
+                        success += 1
+                    else:
+                        self._log("  → 失败", "error")
+                        fail += 1
+                        if dst.exists():
+                            try:
+                                dst.unlink()
+                            except Exception:
+                                pass
+                except Exception as exc:
+                    self._log(f"  → 错误: {exc}", "error")
+                    fail += 1
+
+            self._log(f"[音量调整] 完成: 成功{success} 跳过{skip} 失败{fail}", "success")
+
+        threading.Thread(target=run, daemon=True).start()
+        return {"ok": True, "total": len(audio_files), "output_dir": str(out_base)}
 
     def browse_folder(self):
         folder = ""

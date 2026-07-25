@@ -32,6 +32,7 @@ build/
 dist/
 release-output/
 *.spec
+temp/
 
 # 依赖工具（从官方下载，不放入仓库）
 yt-dlp.exe
@@ -60,3 +61,4 @@ Desktop.ini
 node_modules/
 package-lock.json
 package.json
+.ai/

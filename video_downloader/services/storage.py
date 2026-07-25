@@ -209,9 +209,16 @@ class StorageService:
                    (".png", "image/png"), (".webp", "image/webp"))
 
     def find_cover(self, filepath):
-        """给定历史记录里的视频路径，返回同基名封面图 (bytes, mime)，找不到返回 (None, None)。
+        """给定历史记录中的视频路径，返回同基名封面图。
 
         仅接受工具目录内的路径，防止请求方通过构造路径读取任意文件。
+
+        Args:
+            filepath: 视频文件的绝对路径。
+
+        Returns:
+            tuple[bytes | None, str | None]: (封面图字节数据, MIME 类型)，
+            找不到封面时返回 (None, None)。
         """
         if not filepath or not isinstance(filepath, str):
             return None, None

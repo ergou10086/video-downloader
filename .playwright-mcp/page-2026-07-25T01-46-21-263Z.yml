@@ -1,0 +1,74 @@
+- generic [ref=e2]:
+  - complementary "应用侧栏" [ref=e3]:
+    - link "多平台视频下载工具首页" [ref=e4] [cursor=pointer]:
+      - /url: "#"
+      - generic [ref=e10]:
+        - generic [ref=e11]: 视频下载工具
+        - generic [ref=e12]: video downloader
+    - navigation "主导航" [ref=e13]:
+      - generic [ref=e14]:
+        - generic [ref=e15]: 下载
+        - button "下载任务" [ref=e16] [cursor=pointer]
+        - button "下载历史" [ref=e22] [cursor=pointer]
+      - generic [ref=e30]:
+        - generic [ref=e31]: 工具
+        - button "实用工具" [ref=e32] [cursor=pointer]
+      - generic [ref=e37]:
+        - generic [ref=e38]: 配置
+        - button "下载设置" [ref=e39] [cursor=pointer]
+      - generic [ref=e45]:
+        - generic [ref=e46]: 文档
+        - button "使用帮助" [ref=e47] [cursor=pointer]
+        - button "关于软件" [ref=e53] [cursor=pointer]
+    - button [ref=e59] [cursor=pointer]
+  - generic [ref=e63]:
+    - banner [ref=e64]:
+      - generic [ref=e66]:
+        - generic [ref=e67]: workspace /
+        - generic [ref=e68]: 下载任务
+      - button "切换明暗主题" [ref=e70] [cursor=pointer]
+    - main [ref=e78]:
+      - generic [ref=e79]:
+        - generic [ref=e80]:
+          - paragraph [ref=e81]: 工作台 · 下载队列
+          - heading [level=1] [ref=e82]:
+            - text: 粘贴链接，
+            - emphasis [ref=e83]: 即刻开始下载
+            - text: 。
+          - paragraph [ref=e84]: 早上好，想下载点什么？
+        - region "平台选择" [ref=e85]:
+          - generic [ref=e86]: 目标平台
+          - generic [ref=e87]:
+            - button "YouTube" [ref=e88] [cursor=pointer]
+            - button "Bilibili" [ref=e90] [cursor=pointer]
+            - button "Twitch" [ref=e92] [cursor=pointer]
+            - button "Niconico" [ref=e94] [cursor=pointer]
+            - button "Fantia" [ref=e96] [cursor=pointer]
+            - button "TwitCasting" [ref=e98] [cursor=pointer]
+        - generic [ref=e100]:
+          - generic [ref=e106]: 视频链接
+          - textbox "视频链接" [ref=e107]:
+            - /placeholder: 粘贴视频 / 播放列表 / 频道 / 直播链接，回车开始（每行一个，Shift/Ctrl+回车换行）…
+          - generic [ref=e108]:
+            - button [ref=e109] [cursor=pointer]
+            - button [disabled] [ref=e113]
+        - region "下载进度" [ref=e117]:
+          - generic [ref=e118]:
+            - generic [ref=e119]: 就绪
+            - generic [ref=e120]: 0%
+        - generic [ref=e123]:
+          - generic [ref=e124]: 运行日志 / LOG
+          - button "▲" [ref=e128] [cursor=pointer]
+          - button [ref=e129] [cursor=pointer]
+    - contentinfo [ref=e136]:
+      - generic [ref=e137]: 多平台视频下载工具
+      - generic [ref=e138]: ·
+      - link "maomaoyexi" [ref=e139] [cursor=pointer]:
+        - /url: https://github.com/maomaoyexi
+      - generic [ref=e140]: ·
+      - link "DarkKandaoMaster" [ref=e141] [cursor=pointer]:
+        - /url: https://github.com/DarkKandaoMaster
+      - generic [ref=e142]: ·
+      - link "ergou10086" [ref=e143] [cursor=pointer]:
+        - /url: https://github.com/ergou10086
+      - generic [ref=e144]: yt-dlp · ffmpeg

@@ -10,7 +10,14 @@ from video_downloader.core.platform import clean_url, detect_platform, is_live_u
 
 
 def _win_startup_info():
-    """Windows 下隐藏子进程窗口（全局函数，避免在多处重复）。"""
+    """获取 Windows 下隐藏子进程窗口的启动信息。
+
+    返回 (STARTUPINFO, creationflags) 元组供 subprocess.Popen 使用。
+    非 Windows 平台返回 (None, 0)。
+
+    Returns:
+        tuple: (STARTUPINFO | None, int) — Windows 下为隐藏窗口配置，其他平台为 (None, 0)。
+    """
     if os.name != "nt":
         return None, 0
     startupinfo = subprocess.STARTUPINFO()
@@ -149,7 +156,14 @@ class DownloadExecutor:
         return pw if received else None
 
     def _extract_audio_from_video(self, video_path, audio_fmt):
-        """用 ffmpeg 从视频文件中提取指定格式的纯音频。"""
+        """用 ffmpeg 从视频文件中提取指定格式的纯音频。
+
+        仅用于音频模式 2（同时输出音频），从合并后的视频文件中提取音频轨。
+
+        Args:
+            video_path: 视频文件的完整路径。
+            audio_fmt: 目标音频格式（mp3/m4a/wav）。
+        """
         base, _ = os.path.splitext(video_path)
         audio_ext = {"mp3": "mp3", "m4a": "m4a", "wav": "wav"}.get(audio_fmt, "mp3")
         audio_path = base + "." + audio_ext
@@ -193,7 +207,16 @@ class DownloadExecutor:
             self._log(f"[音频提取] 异常: {exc}", "warn")
 
     def fetch_bili_playlist(self, url):
-        """获取 Bilibili 视频的分P列表。返回 {parts: [...], total: N} 或 {error: ...}。"""
+        """获取 Bilibili 视频的分P列表。
+
+        通过 yt-dlp --flat-playlist --dump-json 获取播放列表元数据，不实际下载视频。
+
+        Args:
+            url: Bilibili 视频链接。
+
+        Returns:
+            dict: 成功时返回 {"parts": [...], "total": N}，失败时返回 {"error": "..."}。
+        """
         url = clean_url(url)
         if not url:
             return {"error": "无效链接"}
