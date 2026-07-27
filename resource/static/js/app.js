@@ -16,7 +16,8 @@ const PLATFORMS = [
   {name:"Twitch",color:"#9146FF"},
   {name:"Niconico",color:"#4B4B4D"},
   {name:"Fantia",color:"#E6399B"},
-  {name:"TwitCasting",color:"#00A0D1"}
+  {name:"TwitCasting",color:"#00A0D1"},
+  {name:"Twitter",color:"#1DA1F2"}
 ];
 const PAGE_TITLES = {
   download: '下载任务', logs: '运行日志', settings: '下载设置', history: '下载历史',
@@ -162,6 +163,9 @@ function selectPlatform(name) {
   // Bilibili 1080p Cookie 提示显隐
   const hintEl = $('bilibiliHint');
   if (hintEl) hintEl.style.display = name === 'Bilibili' ? 'block' : 'none';
+  // Twitter/X Cookie 提示显隐
+  const twHintEl = $('twitterHint');
+  if (twHintEl) twHintEl.style.display = name === 'Twitter' ? 'block' : 'none';
 }
 
 /** 切换开关状态。 */

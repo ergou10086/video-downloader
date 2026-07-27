@@ -68,4 +68,5 @@ PLATFORM_INFO = [
     {"name": "Niconico", "color": "#00A0D1", "domains": ["nicovideo.jp", "nico.ms"]},
     {"name": "Fantia", "color": "#E6399B", "domains": ["fantia.jp"]},
     {"name": "TwitCasting", "color": "#4B4B4D", "domains": ["twitcasting.tv"]},
+    {"name": "Twitter", "color": "#1DA1F2", "domains": ["twitter.com", "x.com", "t.co"]},
 ]

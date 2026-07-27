@@ -75,6 +75,11 @@ def is_live_url(url, platform=None):
         segments = [segment for segment in path.split("/") if segment]
         # 单段路径（/主播名）为当前直播；含 movie/twplayer/show/archive 为录播或历史列表。
         return len(segments) == 1 and segments[0] not in {"movie", "twplayer", "show", "archive"}
+    if platform_name == "Twitter":
+        # Twitter Space: x.com/i/spaces/xxx 或 twitter.com/i/spaces/xxx
+        return host in {"x.com", "twitter.com", "www.x.com", "www.twitter.com"} and (
+            path.startswith("/i/spaces/")
+        )
     return False
 
 
