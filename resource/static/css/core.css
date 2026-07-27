@@ -406,32 +406,17 @@ textarea.url-input {
   font-size: 0.875rem; resize: none; overflow-y: auto; white-space: pre-wrap; word-break: break-all;
 }
 
-/* —— Bilibili 内联提示（重新设计为浮动标注） —— */
-.bili-hint {
-  position: relative;
-  margin: 0.5rem 0 0;
-  padding: 0.5rem 0.75rem 0.5rem 1.5rem;
-  font-size: 0.75rem;
-  line-height: 1.55;
+/* —— 平台内联提示（Bilibili / Twitter 等） —— */
+.platform-hint {
+  margin: 0.35rem 0 0;
+  padding: 0.35rem 0.5rem;
+  font-size: 0.6875rem;
+  line-height: 1.45;
   color: var(--fg-muted);
-  border-left: 2px solid var(--accent);
-  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
-  animation: hint-reveal 0.35s var(--ease-out);
 }
-.bili-hint::before {
-  content: "";
-  position: absolute;
-  left: -0.375rem;
-  top: 0.55rem;
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--accent);
-  opacity: 0.8;
-}
-.bili-hint b { color: var(--fg-high); font-weight: 600; }
-.bili-hint a { color: var(--accent); font-weight: 600; white-space: nowrap; }
-.bili-hint a:hover { color: var(--accent-hover); }
+.platform-hint b { color: var(--fg-high); font-weight: 600; }
+.platform-hint a { color: var(--accent); font-weight: 600; white-space: nowrap; }
+.platform-hint a:hover { color: var(--accent-hover); }
 
 /* —— 进度条 —— */
 .progress-section { margin-top: 1.25rem; padding-top: 1rem; border-top: 1px solid var(--border); }

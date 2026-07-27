@@ -86,8 +86,12 @@
 
           <div class="platforms" id="platforms"></div>
 
-          <div class="bili-hint" id="bilibiliHint">
+          <div class="platform-hint" id="bilibiliHint">
             <b>Bilibili 1080p 提示：</b>请在浏览器中将画质切换至 <b>1080P 高清</b> 后导出 Cookie，或使用「浏览器 Cookie 模式」自动提取。<a href="#" onclick="setActivePage('help');return false;">查看教程 →</a>
+          </div>
+
+          <div class="platform-hint" id="twitterHint" style="display:none">
+            <b>Twitter/X 提示：</b>部分内容需要登录才能下载，建议使用「浏览器 Cookie 模式」自动提取登录状态。
           </div>
 
           <div class="url-row">
@@ -520,6 +524,16 @@
         </div>
 
         <div class="help-section">
+          <h3><span class="icon" data-ico="info"></span>Twitter/X 视频下载</h3>
+          <div class="help-content">
+            <p><b>下载推文视频：</b>粘贴推文链接（如 <code>https://x.com/用户名/status/推文ID</code> 或 <code>https://twitter.com/用户名/status/推文ID</code>），自动提取视频。</p>
+            <p><b>下载 Space 录音：</b>粘贴 Space 链接（<code>https://x.com/i/spaces/空间ID</code>），将下载音频录制。</p>
+            <p><b>Cookie 建议：</b>部分内容需要登录才能访问，强烈建议使用「浏览器 Cookie 模式」自动提取登录状态，或手动导出 cookies.txt。</p>
+            <p><b>注意：</b>Twitter 对未登录访问有较严格的频率限制，登录后可获得更好的下载体验。</p>
+          </div>
+        </div>
+
+        <div class="help-section">
           <h3><span class="icon" data-ico="bookmark"></span>配置预设</h3>
           <div class="help-content">
             <p>在「设置」页面顶部的「配置预设」区域可以保存当前设置为命名预设，例如：</p>
@@ -557,6 +571,7 @@
 ├── Nico/             # Niconico下载<br>
 ├── Fantia/           # Fantia下载<br>
 ├── TwitCasting/      # TwitCasting下载<br>
+├── Twitter/          # Twitter/X下载<br>
 │   ├── 主播名/<br>
 │   │   └── 直播/     # 直播录制<br>
 ├── urls.txt          # TXT批量链接文件<br>
@@ -573,7 +588,7 @@
           <span class="about-mark"><span class="icon" data-ico="download"></span></span>
           <h2>多平台视频下载工具</h2>
           <p id="aboutVer"></p>
-          <p>支持平台：YouTube / Bilibili / Twitch / Niconico / Fantia / TwitCasting</p>
+          <p>支持平台：YouTube / Bilibili / Twitch / Niconico / Fantia / TwitCasting / Twitter</p>
           <p class="small">基于 yt-dlp + ffmpeg ｜ 原版作者：<a href="https://github.com/maomaoyexi" target="_blank" rel="noopener noreferrer">猫猫葉汐A_spy (@maomaoyexi)</a></p>
           <p class="small">v2.1.0 UI 重构：<a href="https://github.com/DarkKandaoMaster" target="_blank" rel="noopener noreferrer">DarkKandaoMaster（强壮的砍刀）</a></p>
           <p class="small">MP3 音频单独下载：<a href="https://github.com/ergou10086" target="_blank" rel="noopener noreferrer">ErgouTree (@ergou10086)</a></p>
