@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="zh-CN" data-theme="dark">
+<html lang="zh-CN" data-theme="dark" data-palette="normal">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -45,6 +45,9 @@
     <div class="sidebar-footer">
       <div class="sidebar-footer-row">
         <span class="ver" id="ver"></span>
+        <button class="theme-toggle palette-toggle" id="paletteToggle" title="切换为正常中性配色" aria-label="切换为正常中性配色">
+          <span class="icon" data-ico="droplet"></span>
+        </button>
         <button class="theme-toggle" id="themeToggle" title="切换明暗主题" aria-label="切换明暗主题">
           <span class="icon icon-sun" data-ico="sun"></span>
           <span class="icon icon-moon" data-ico="moon"></span>
@@ -60,6 +63,9 @@
       <div class="crumb"><span class="muted">工作区 /</span>&nbsp;<span id="pageTitle">下载任务</span></div>
       <div class="header-actions">
         <button class="update-badge" id="updateBadge" style="display:none" onclick="showUpdatePanel()" title="有新版本可用"><span class="icon" data-ico="info"></span>有更新</button>
+        <button class="theme-toggle palette-toggle theme-toggle-mobile" id="paletteToggleMobile" title="切换为正常中性配色" aria-label="切换为正常中性配色" style="display:none">
+          <span class="icon" data-ico="droplet"></span>
+        </button>
         <button class="theme-toggle theme-toggle-mobile" id="themeToggleMobile" title="切换主题" aria-label="切换明暗主题" style="display:none">
           <span class="icon icon-sun" data-ico="sun"></span>
           <span class="icon icon-moon" data-ico="moon"></span>
@@ -92,6 +98,10 @@
 
           <div class="platform-hint" id="twitterHint" style="display:none">
             <b>Twitter/X 提示：</b>部分内容需要登录才能下载，建议使用「浏览器 Cookie 模式」自动提取登录状态。
+          </div>
+
+          <div class="platform-hint" id="withnyHint" style="display:none">
+            <b>Withny 历史存档：</b>请选择浏览器导出的“包含内容”HAR，此模式不接受普通 URL。HAR 可能包含登录信息，请勿分享，完成后建议删除。<a href="#" onclick="setActivePage('help');return false;">查看教程 →</a>
           </div>
 
           <div class="url-row">
@@ -322,7 +332,7 @@
               <option value="double">双次精准处理 — 先分析后处理，质量更高</option>
             </select>
           </div>
-          <div style="font-size:0.75rem;color:var(--fg-muted);margin:-0.5rem 0 0.5rem 8.5rem" id="loudnormModeDesc"></div>
+          <div style="font-size:0.75rem;color:var(--fg-muted);margin:0.125rem 0 0.625rem 10.75rem" id="loudnormModeDesc"></div>
 
           <div class="setting-row">
             <label>目标响度 (I)</label>
@@ -331,7 +341,7 @@
               <span class="range-val" id="loudnormIVal" style="min-width:5.5rem">-24 LUFS</span>
             </span>
           </div>
-          <div style="font-size:0.72rem;color:var(--fg-muted);margin:-0.25rem 0 0.25rem 8.5rem">EBU R128 广播标准为 -23 LUFS，流媒体通常 -16 ~ -14 LUFS</div>
+          <div style="font-size:0.72rem;color:var(--fg-muted);margin:0.125rem 0 0.625rem 10.75rem">EBU R128 广播标准为 -23 LUFS，流媒体通常 -16 ~ -14 LUFS</div>
 
           <div class="setting-row">
             <label>响度范围 (LRA)</label>
@@ -348,7 +358,7 @@
               <span class="range-val" id="loudnormTPVal" style="min-width:4.5rem">-2 dBTP</span>
             </span>
           </div>
-          <div style="font-size:0.72rem;color:var(--fg-muted);margin:-0.25rem 0 0.25rem 8.5rem">EBU R128 标准为 -2 dBTP，CD 母带通常 -1 dBTP</div>
+          <div style="font-size:0.72rem;color:var(--fg-muted);margin:0.125rem 0 0.625rem 10.75rem">EBU R128 标准为 -2 dBTP，CD 母带通常 -1 dBTP</div>
 
           <div class="setting-row">
             <label>输出格式</label>
@@ -390,7 +400,7 @@
               <span class="range-val" id="volumeGainVal" style="min-width:5rem;font-weight:600">0.0 dB</span>
             </span>
           </div>
-          <div style="font-size:0.72rem;color:var(--fg-muted);margin:-0.25rem 0 0.25rem 8.5rem">正增益（提升音量）: 建议 ≤ +6dB，过大会导致削波失真 · 负增益（降低音量）: 安全无失真</div>
+          <div style="font-size:0.72rem;color:var(--fg-muted);margin:0.125rem 0 0.625rem 10.75rem">正增益（提升音量）: 建议 ≤ +6dB，过大会导致削波失真 · 负增益（降低音量）: 安全无失真</div>
 
           <div class="setting-row" id="volumeLimiterRow" style="display:none">
             <label>限幅器保护</label>
@@ -467,6 +477,15 @@
             <p><b>音频分离：</b>可单独提取音频为 MP3/FLAC/WAV/m4a 格式。</p>
             <p><b>代理设置：</b>支持 HTTP 和 SOCKS5 代理，格式如 <code>http://127.0.0.1:7890</code>。</p>
             <p><b>硬件加速：</b>根据你的显卡选择编码器，可大幅提升合并速度。</p>
+          </div>
+        </div>
+
+        <div class="help-section">
+          <h3><span class="icon" data-ico="file-text"></span>Withny 历史存档</h3>
+          <div class="help-content">
+            <p><b>使用方式：</b>在下载任务页选择 Withny，点击「选择 HAR 并下载」，依次选择浏览器导出的“包含内容”HAR 和保存位置。</p>
+            <p><b>安全限制：</b>仅处理已授权的普通未加密 HLS 历史存档；检测到 DRM、加密 HLS、无媒体播放列表正文或缺失签名 Cookie 时会拒绝下载。</p>
+            <p><b>隐私提示：</b>HAR 可能包含登录 Cookie 和签名地址，请勿上传或分享，使用完成后建议立即删除。</p>
           </div>
         </div>
 
@@ -570,6 +589,7 @@
 │   │   └── 直播/     # 直播录制<br>
 ├── Nico/             # Niconico下载<br>
 ├── Fantia/           # Fantia下载<br>
+├── Withny/           # Withny历史存档<br>
 ├── TwitCasting/      # TwitCasting下载<br>
 ├── Twitter/          # Twitter/X下载<br>
 │   ├── 主播名/<br>
@@ -589,9 +609,11 @@
           <h2>多平台视频下载工具</h2>
           <p id="aboutVer"></p>
           <p>支持平台：YouTube / Bilibili / Twitch / Niconico / Fantia / TwitCasting / Twitter</p>
+          <p class="small">另提供 Withny 已授权历史存档 HAR 保存功能</p>
           <p class="small">基于 yt-dlp + ffmpeg ｜ 原版作者：<a href="https://github.com/maomaoyexi" target="_blank" rel="noopener noreferrer">猫猫葉汐A_spy (@maomaoyexi)</a></p>
           <p class="small">v2.1.0 UI 重构：<a href="https://github.com/DarkKandaoMaster" target="_blank" rel="noopener noreferrer">DarkKandaoMaster（强壮的砍刀）</a></p>
-          <p class="small">MP3 音频单独下载：<a href="https://github.com/ergou10086" target="_blank" rel="noopener noreferrer">ErgouTree (@ergou10086)</a></p>
+          <p class="small">v2.2.0 Twitter/X、TwitCasting、UI 与音频工具：<a href="https://github.com/ergou10086" target="_blank" rel="noopener noreferrer">ErgouTree (@ergou10086)</a></p>
+          <p class="small">v2.2.0 Withny 下载与 UI 调整：<a href="https://github.com/maomaoyexi" target="_blank" rel="noopener noreferrer">猫猫葉汐A_spy (@maomaoyexi)</a></p>
           <section class="card" style="margin-top:1.5rem;text-align:left">
             <div class="card-lead"><span class="icon" data-ico="check"></span><div class="card-title">依赖文件状态</div></div>
             <div class="dep-status" id="depStatus"></div>

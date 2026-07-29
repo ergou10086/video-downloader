@@ -184,6 +184,7 @@ a:hover { color: var(--accent-hover); text-decoration: underline; }
 [data-theme="light"] .theme-toggle .icon-sun { display: inline-flex; }
 [data-theme="light"] .theme-toggle .icon-moon { display: none; }
 .theme-toggle.spin .icon { animation: icon-spin 0.4s var(--ease-out); }
+.palette-toggle.active { color: var(--accent); background: var(--accent-dim); border-color: var(--accent); }
 
 .btn-exit {
   display: flex; align-items: center; justify-content: center; gap: 0.5rem;
@@ -405,6 +406,7 @@ textarea.url-input {
   padding: 0.5rem 0.75rem; line-height: 1.45; font-family: var(--font-sans);
   font-size: 0.875rem; resize: none; overflow-y: auto; white-space: pre-wrap; word-break: break-all;
 }
+textarea.url-input:disabled { cursor: not-allowed; opacity: 0.72; color: var(--fg-muted); background: var(--bg-dim); }
 
 /* —— 平台内联提示（Bilibili / Twitter 等） —— */
 .platform-hint {
@@ -529,6 +531,8 @@ textarea.url-input {
 .history-platform.Fantia { background: #e6399b; }
 .history-platform.TwitCasting { background: #00a0d1; }
 .history-platform.Bilibili { background: #fb7299; }
+.history-platform.Twitter { background: #1da1f2; }
+.history-platform.Withny { background: #22c55e; }
 
 .history-info { flex: 1; min-width: 0; }
 .history-title { overflow: hidden; color: var(--fg-high); font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }

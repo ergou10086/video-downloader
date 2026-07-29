@@ -289,23 +289,23 @@ ul.compact li::before {
 <body>
 <div class="container">
 
-  <!-- v2.1.0 WebUI 更新 -->
+  <!-- v2.2.0 WebUI 更新 -->
   <div class="hero">
-    <div class="version-badge">v2.1.0 WebUI</div>
+    <div class="version-badge">v2.2.0 WebUI</div>
     <h1>多平台视频下载工具</h1>
-    <div class="subtitle">WebUI 重构 · 多行批量 · CLI · 历史封面展示</div>
-    <div class="date">发布日期：2026-07-22 · 原版作者：<a href="https://github.com/maomaoyexi">猫猫葉汐A_spy (@maomaoyexi)</a></div>
+    <div class="subtitle">Twitter/X · TwitCasting · Withny · 音频工具 · 双配色 UI</div>
+    <div class="date">发布日期：2026-07-29 · 原版作者：<a href="https://github.com/maomaoyexi">猫猫葉汐A_spy (@maomaoyexi)</a></div>
   </div>
 
   <div class="notice-box info">
     <div class="notice-title">ℹ️ 更新说明</div>
-    <p>v2.1.0 重构 WebUI 界面与交互，新增多行 URL 批量下载、命令行模式、下载历史中的已下载封面预览和 MP3 音频单独下载。原有封面下载与嵌入功能保持不变。</p>
-    <p><strong>本次贡献者：</strong><a href="https://github.com/DarkKandaoMaster">DarkKandaoMaster（强壮的砍刀）</a> 重构 WebUI；<a href="https://github.com/ergou10086">ErgouTree (@ergou10086)</a> 贡献 MP3 音频单独下载。</p>
+    <p>v2.2.0 新增 Twitter/X 与 TwitCasting 直播和录播支持、Withny 已授权历史存档 HAR 下载、音频格式转换、响度统一和音量调整，并完成模块化 UI 与正常中性配色。</p>
+    <p><strong>本次贡献者：</strong><a href="https://github.com/ergou10086">ErgouTree (@ergou10086)</a> 制作 Twitter/X、TwitCasting、UI 改版与音频工具；<a href="https://github.com/maomaoyexi">猫猫葉汐A_spy (@maomaoyexi)</a> 添加 Withny 下载、中性配色及本版 UI 调整。</p>
   </div>
 
   <div class="summary-grid">
     <div class="stat-card">
-      <div class="number">5</div>
+      <div class="number">7 + 1</div>
       <div class="label">支持平台</div>
     </div>
     <div class="stat-card">
@@ -316,7 +316,7 @@ ul.compact li::before {
 
   <div class="notice-box success">
     <div class="notice-title">✅ 兼容性说明</div>
-    <p>v2.1.0 向下兼容，原有 <code>settings.ini</code>、<code>presets.json</code>、<code>cookies.txt</code>、<code>download_history.json</code>、各平台下载目录均可直接沿用，无需迁移。</p>
+    <p>v2.2.0 向下兼容，原有 <code>settings.ini</code>、<code>presets.json</code>、<code>cookies.txt</code>、<code>download_history.json</code>、各平台下载目录均可直接沿用，无需迁移。</p>
   </div>
 
   <!-- 变更内容 -->
@@ -329,44 +329,44 @@ ul.compact li::before {
     <div class="bug-card fix">
       <div class="header">
         <span class="tag critical">安全</span>
-        <span class="title">全新侧栏 WebUI</span>
-        <span class="severity">界面重构</span>
+        <span class="title">Twitter/X 与 TwitCasting</span>
+        <span class="severity">平台扩展</span>
       </div>
       <div class="desc">
-        采用侧栏工作区、独立日志页、统一图标系统和响应式导航，提升桌面与移动端使用体验。
+        支持推文视频、Twitter Space、TwitCasting 直播、录播、历史列表和密码保护内容。
       </div>
     </div>
 
     <div class="bug-card fix">
       <div class="header">
         <span class="tag critical">安全</span>
-        <span class="title">多行 URL 与命令行下载</span>
-        <span class="severity">批量能力</span>
+        <span class="title">Withny 已授权历史存档</span>
+        <span class="severity">HAR 工作流</span>
       </div>
       <div class="desc">
-        下载页支持直接粘贴多行 URL；命令行支持直接传入 URL、<code>--batch</code> 和 <code>--help</code>。
+        从包含内容的 HAR 验证并保存普通未加密 HLS，强制检查来源、媒体清单和签名 Cookie，并拒绝 DRM 与加密内容。
       </div>
     </div>
 
     <div class="bug-card fix">
       <div class="header">
         <span class="tag major">加固</span>
-        <span class="title">历史封面展示与 MP3 音频</span>
-        <span class="severity">媒体增强</span>
+        <span class="title">音频处理工具扩展</span>
+        <span class="severity">媒体工具</span>
       </div>
       <div class="desc">
-        下载历史新增已下载封面的缩略图展示与点击大图预览，原有封面下载和嵌入功能保持不变；同时支持下载视频时单独保存 MP3 音频。
+        新增批量音频格式转换、EBU R128 单次/双次响度统一、增益调节和前瞻限幅器保护。
       </div>
     </div>
 
     <div class="bug-card improve">
       <div class="header">
         <span class="tag minor">优化</span>
-        <span class="title">统计与回归保护</span>
-        <span class="severity">可靠性</span>
+        <span class="title">双配色 UI 与回归保护</span>
+        <span class="severity">界面与可靠性</span>
       </div>
       <div class="desc">
-        单任务统计与批量任务统一，自动化测试扩展至 98 项。
+        提供正常蓝灰中性配色与原始暖色配色切换，优化音频工具文字对齐；自动化测试扩展至 111 项。
       </div>
     </div>
   </div>
@@ -382,8 +382,8 @@ ul.compact li::before {
       <div class="notice-title">📦 Release 附件说明</div>
       <p>本次发布分为两个附件：</p>
       <ul class="compact" style="margin-top: 0.8rem;">
-        <li><strong>主程序</strong>：<code>视频下载工具v2.1.0-GUI.exe</code> - 单文件绿色版，双击即可运行</li>
-        <li><strong>完整依赖包</strong>：<code>视频下载工具v2.1.0-依赖包.zip</code> - 包含全部依赖 exe（yt-dlp/ffmpeg/ffprobe/deno/fantiadl）+ 帮助文档，解压即用</li>
+        <li><strong>主程序</strong>：<code>视频下载工具v2.2.0-GUI.exe</code> - 单文件绿色版，双击即可运行</li>
+        <li><strong>完整依赖包</strong>：<code>视频下载工具v2.2.0-依赖包.zip</code> - 包含全部依赖 exe（yt-dlp/ffmpeg/ffprobe/deno/fantiadl）+ 帮助文档，解压即用</li>
       </ul>
     </div>
   </div>
@@ -398,10 +398,10 @@ ul.compact li::before {
     <div class="notice-box success">
       <div class="notice-title">✅ 安装步骤（超简单，4步搞定）</div>
       <ul class="compact">
-        <li>下载 <code>视频下载工具v2.1.0-GUI.exe</code> 和 <code>视频下载工具v2.1.0-依赖包.zip</code> 两个文件</li>
-        <li>新建一个文件夹（如「视频下载工具」），将 <code>视频下载工具v2.1.0-GUI.exe</code> 放入其中</li>
+        <li>下载 <code>视频下载工具v2.2.0-GUI.exe</code> 和 <code>视频下载工具v2.2.0-依赖包.zip</code> 两个文件</li>
+        <li>新建一个文件夹（如「视频下载工具」），将 <code>视频下载工具v2.2.0-GUI.exe</code> 放入其中</li>
         <li>解压依赖包，将里面的<strong>全部内容</strong>（所有 exe 文件 + <code>docs</code> 文件夹 + <code>changelog.html</code> 等）解压到 exe 同一目录</li>
-        <li>双击 <code>视频下载工具v2.1.0-GUI.exe</code> 启动，自动打开浏览器进入 WebUI 界面即可使用！</li>
+        <li>双击 <code>视频下载工具v2.2.0-GUI.exe</code> 启动，自动打开浏览器进入 WebUI 界面即可使用！</li>
       </ul>
       <p style="margin-top: 0.8rem; font-size: 0.85rem;">💡 <strong>提示</strong>：依赖包已包含所有必需 exe（<code>yt-dlp.exe</code>、<code>ffmpeg.exe</code>、<code>ffprobe.exe</code>、<code>deno.exe</code>、<code>fantiadl.exe</code>），解压后无需再下载任何文件。</p>
     </div>
@@ -418,7 +418,7 @@ ul.compact li::before {
       <div class="notice-title">✅ 升级步骤（超简单）</div>
       <ul class="compact">
         <li>关闭正在运行的旧版本程序（点击右上角「✕ 退出」按钮，或直接关闭命令行窗口）</li>
-        <li>只需下载新版 <code>视频下载工具v2.1.0-GUI.exe</code>，替换旧版 exe 即可</li>
+        <li>只需下载新版 <code>视频下载工具v2.2.0-GUI.exe</code>，替换旧版 exe 即可</li>
         <li>原有 <code>settings.ini</code>、<code>cookies.txt</code>、下载文件、配置预设<strong>无需任何改动</strong></li>
         <li>原有依赖文件（<code>yt-dlp.exe</code>、<code>ffmpeg.exe</code> 等）<strong>无需重新下载</strong>，继续使用即可</li>
         <li>双击运行新版 exe，自动打开浏览器进入 WebUI 界面即可使用</li>
@@ -427,8 +427,8 @@ ul.compact li::before {
   </div>
 
   <div class="footer">
-    多平台视频下载工具 v2.1.0 WebUI <br>
-    2026-07-22 · 支持 YouTube / Bilibili / Twitch / Niconico / Fantia / TwitCasting
+    多平台视频下载工具 v2.2.0 WebUI <br>
+    2026-07-29 · 支持 YouTube / Bilibili / Twitch / Niconico / Fantia / TwitCasting / Twitter，另提供 Withny HAR 保存
   </div>
 
 </div>

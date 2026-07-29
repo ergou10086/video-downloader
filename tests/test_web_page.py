@@ -48,7 +48,8 @@ class WebPageTests(unittest.TestCase):
         self.assertIn("https://github.com/DarkKandaoMaster", html)
         self.assertIn("https://github.com/maomaoyexi", html)
         # 引用了外部 CSS/JS（重构为自建深色设计系统，不再依赖 Tabler）
-        self.assertIn("/static/css/style.css", html)
+        self.assertIn("/static/css/core.css", html)
+        self.assertIn("/static/css/theme.css", html)
         self.assertIn("/static/js/app.js", html)
         self.assertNotIn("tabler.min.css", html)
         self.assertNotIn("tabler.min.js", html)
@@ -64,6 +65,22 @@ class WebPageTests(unittest.TestCase):
         # reset-config 使用 POST 在 JS 中
         self.assertIn("api('/api/reset-config', {method:'POST'})", js)
 
+    def test_normal_palette_toggle_is_available(self):
+        _skip_if_frozen()
+        base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        with open(os.path.join(base, "resource", "templates", "index.html"), "r", encoding="utf-8") as f:
+            html = f.read()
+        with open(os.path.join(base, "resource", "static", "js", "theme.js"), "r", encoding="utf-8") as f:
+            js = f.read()
+        with open(os.path.join(base, "resource", "static", "css", "theme.css"), "r", encoding="utf-8") as f:
+            css = f.read()
+        self.assertIn('id="paletteToggle"', html)
+        self.assertIn('id="paletteToggleMobile"', html)
+        self.assertIn("video-dl-palette", js)
+        self.assertIn("togglePalette", js)
+        self.assertIn('[data-palette="normal"]', css)
+        self.assertIn('[data-theme="light"][data-palette="normal"]', css)
+
     def test_app_js_has_api_endpoints(self):
         _skip_if_frozen()
         base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -73,6 +90,8 @@ class WebPageTests(unittest.TestCase):
         # 关键 API 端点仍在 JS 中
         self.assertIn("/api/events?token=", js)
         self.assertIn("/api/start", js)
+        self.assertIn("/api/start-withny-archive", js)
+        self.assertIn('{name:"Withny",color:"#22C55E"}', js)
         self.assertIn("/api/do-update", js)
 
     def test_bilibili_part_title_uses_safe_dom_properties(self):
@@ -86,7 +105,7 @@ class WebPageTests(unittest.TestCase):
         self.assertNotIn("list.innerHTML = parts.map", js)
 
     def test_serve_static_file_css(self):
-        content, mime = serve_static_file("/static/css/style.css")
+        content, mime = serve_static_file("/static/css/theme.css")
         self.assertIsNotNone(content)
         self.assertIn("text/css", mime)
         self.assertIn(b":root", content)

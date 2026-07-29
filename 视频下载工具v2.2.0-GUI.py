@@ -1,7 +1,8 @@
 # -*- coding: utf-8 -*-
 """
-多平台视频下载工具 v2.1.0 WebUI版
-支持 YouTube / Bilibili / Twitch / Niconico / Fantia / TwitCasting
+多平台视频下载工具 v2.2.0 WebUI版
+支持 YouTube / Bilibili / Twitch / Niconico / Fantia / TwitCasting / Twitter
+提供 Withny 已授权历史存档 HAR 保存功能
 使用内置HTTP服务器 + 浏览器界面，无需额外GUI库
 自动更新通过 GitHub Releases 检查和分发
 """

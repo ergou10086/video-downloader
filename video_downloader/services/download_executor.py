@@ -5,8 +5,10 @@ import re
 import subprocess
 import threading
 import time
+from pathlib import Path
 
 from video_downloader.core.platform import clean_url, detect_platform, is_live_url, safe_decode
+from video_downloader.services.withny_archive import WithnyArchiveError, build_ffmpeg_command, load_and_select, redact_line
 
 
 def _win_startup_info():
@@ -42,6 +44,7 @@ class DownloadExecutor:
         cancel_idle_timer,
         start_idle_timer,
         emit_event,
+        pick_withny_archive=None,
     ):
         self._tool_dir = tool_dir
         self._exe_suffix = exe_suffix
@@ -55,6 +58,7 @@ class DownloadExecutor:
         self._cancel_idle_timer = cancel_idle_timer
         self._start_idle_timer = start_idle_timer
         self._emit_event = emit_event
+        self._pick_withny_archive = pick_withny_archive
         # 批量下载密码阻塞等待机制
         self._password_event = threading.Event()
         self._password_value: str | None = None
@@ -124,6 +128,120 @@ class DownloadExecutor:
             self._start_idle_timer()
             return {"error": f"下载线程启动失败: {exc}"}
         return {"ok": True}
+
+    def start_withny_archive(self):
+        if self._pick_withny_archive is None:
+            return {"error": "Withny 存档文件选择器不可用"}
+        selection = self._pick_withny_archive()
+        if selection.get("error"):
+            return {"error": selection["error"]}
+        if selection.get("cancelled"):
+            return {"ok": True, "cancelled": True}
+
+        ffmpeg = self._tool_dir / f"ffmpeg{self._exe_suffix}"
+        if not ffmpeg.is_file():
+            return {"error": f"缺少依赖: {ffmpeg.name}"}
+        try:
+            selected, archive_url, duration, cookie_header = load_and_select(selection["har_path"])
+            output = Path(selection["output_path"]).expanduser().resolve()
+            if output.suffix.lower() not in {".mp4", ".mkv", ".ts"}:
+                return {"error": "输出格式只允许 mp4、mkv 或 ts"}
+            if output.exists():
+                return {"error": "输出文件已存在，请选择其他文件名"}
+            output.parent.mkdir(parents=True, exist_ok=True)
+            command, temp = build_ffmpeg_command(ffmpeg, selected["raw_url"], output, cookie_header)
+        except WithnyArchiveError as exc:
+            return {"error": str(exc)}
+        except OSError as exc:
+            return {"error": f"无法准备输出文件: {exc}"}
+
+        handle = self._download_manager.begin("withny-archive")
+        if handle is None:
+            return {"error": "已有下载任务在运行"}
+        self._cancel_idle_timer()
+        self._broadcast_download_state()
+        stats = self._app_state.batch_stats
+        stats.clear()
+        stats.update({"ok": 0, "fail": 0, "total": 1, "current": 1})
+        self._app_state.publish({"type": "stats", "data": dict(stats)})
+        self._update_progress(0, "正在连接 Withny 存档...")
+        self._log(f"[Withny] 已验证普通 HLS: {selected['display_url']}", "info")
+        try:
+            threading.Thread(
+                target=self._run_withny_archive,
+                args=(handle, command, temp, output, selected["raw_url"], archive_url, duration),
+                daemon=True,
+            ).start()
+        except Exception as exc:
+            self._download_manager.finish(handle)
+            self._broadcast_download_state()
+            self._start_idle_timer()
+            return {"error": f"下载线程启动失败: {exc}"}
+        return {"ok": True}
+
+    def _run_withny_archive(self, handle, command, temp, output, raw_url, archive_url, duration):
+        self._app_state.download_thread_context.task_id = handle.generation
+        stats = self._app_state.batch_stats
+        proc = None
+        try:
+            proc = self._spawn(command)
+            if not self._download_manager.publish_process(handle, proc):
+                self.kill_process_tree(proc)
+                return
+            self._broadcast_download_state()
+            line_q, read_done = self._start_reader(proc)
+            self._update_progress(-1 if duration <= 0 else 0, "正在下载 Withny 存档...")
+            while not read_done.is_set() or not line_q.empty():
+                if handle.cancel_event.is_set():
+                    break
+                try:
+                    line = line_q.get(timeout=0.5).strip()
+                except queue.Empty:
+                    continue
+                if not line:
+                    continue
+                if line.startswith("out_time_ms=") or line.startswith("out_time_us="):
+                    try:
+                        seconds = int(line.split("=", 1)[1]) / 1_000_000
+                        if duration > 0:
+                            self._update_progress(min(seconds / duration, 0.99), "正在下载 Withny 存档...")
+                    except ValueError:
+                        pass
+                elif not line.startswith("progress="):
+                    cleaned = redact_line(line, raw_url)
+                    if cleaned:
+                        self._log(f"[FFmpeg] {cleaned[:300]}", "warn" if "error" in cleaned.lower() else "info")
+            self._close_process(proc)
+            rc = proc.returncode if proc.returncode is not None else -1
+            if handle.cancel_event.is_set():
+                self._log("[Withny] 下载已取消", "warn")
+                self._update_progress(0, "已停止", "", "")
+            elif rc == 0 and temp.is_file() and temp.stat().st_size > 0:
+                os.replace(temp, output)
+                stats["ok"] = 1
+                self._app_state.publish({"type": "stats", "data": dict(stats)})
+                self._log(f"[Withny] 保存完成: {output.name}", "success")
+                self._update_progress(1, "下载完成", "", "")
+                self._add_history(archive_url, output.name, "Withny", "success", str(output))
+            else:
+                stats["fail"] = 1
+                self._app_state.publish({"type": "stats", "data": dict(stats)})
+                self._log(f"[Withny] 下载失败，退出码: {rc}", "error")
+                self._update_progress(0, f"失败 (退出码 {rc})", "", "")
+                self._add_history(archive_url, output.name, "Withny", "fail")
+        except Exception as exc:
+            stats["fail"] = 1
+            self._app_state.publish({"type": "stats", "data": dict(stats)})
+            self._log(f"[Withny] 异常: {redact_line(str(exc), raw_url)}", "error")
+            self._update_progress(0, "异常终止", "", "")
+            self.kill_process_tree(proc)
+        finally:
+            if temp.exists():
+                try:
+                    temp.unlink()
+                except OSError:
+                    pass
+            self._finish(handle, proc)
 
     def submit_password(self, url: str, password: str) -> dict:
         """处理密码提交：批量下载等待中则唤醒线程，否则启动新的单链接下载（密码重试）。"""

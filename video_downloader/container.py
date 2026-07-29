@@ -160,6 +160,15 @@ class AppContainer:
                 bili_parts=bili_parts,
             )
 
+        # ---- 工具服务 ----
+        tool_service = ToolService(
+            tool_dir=tool_dir,
+            exe_suffix=exe_suffix,
+            app_state=app_state,
+            save_config=save_config,
+            log=add_log,
+        )
+
         # ---- 下载执行器 ----
         download_executor = DownloadExecutor(
             tool_dir=tool_dir,
@@ -174,6 +183,7 @@ class AppContainer:
             cancel_idle_timer=cancel_idle_timer,
             start_idle_timer=start_idle_timer,
             emit_event=emit_event,
+            pick_withny_archive=tool_service.pick_withny_archive,
         )
 
         def start_download(url: str, bili_parts: str | None = None, tc_password: str | None = None) -> dict:
@@ -181,6 +191,9 @@ class AppContainer:
 
         def submit_password(url: str, password: str) -> dict:
             return download_executor.submit_password(url, password)
+
+        def start_withny_archive() -> dict:
+            return download_executor.start_withny_archive()
 
         def stop_download() -> dict:
             return download_executor.stop_download()
@@ -200,14 +213,6 @@ class AppContainer:
             kill_process_tree=_kill_proc_tree,
         )
 
-        # ---- 工具服务 ----
-        tool_service = ToolService(
-            tool_dir=tool_dir,
-            exe_suffix=exe_suffix,
-            app_state=app_state,
-            save_config=save_config,
-            log=add_log,
-        )
         check_deps = tool_service.check_deps
         update_ytdlp = tool_service.update_ytdlp
         clean_temp = tool_service.clean_temp
@@ -255,6 +260,7 @@ class AppContainer:
                 cancel_idle_timer=cancel_idle_timer,
                 start_idle_timer=start_idle_timer,
                 start_download=start_download,
+                start_withny_archive=start_withny_archive,
                 batch_txt_download=batch_txt_download,
                 start_urls_download=start_urls_download,
                 stop_download=stop_download,

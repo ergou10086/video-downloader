@@ -46,6 +46,7 @@ def create_executor(tool_dir, manager=None):
         "cancel_idle_timer": Mock(),
         "start_idle_timer": Mock(),
         "emit_event": Mock(),
+        "pick_withny_archive": Mock(return_value={"ok": True, "cancelled": True}),
     }
     executor = DownloadExecutor(
         tool_dir=tool_dir,
@@ -118,6 +119,13 @@ class PlaylistProcess:
 
 
 class DownloadExecutorTests(unittest.TestCase):
+    def test_start_withny_archive_returns_cancelled_selection(self):
+        with tempfile.TemporaryDirectory() as directory:
+            executor, callbacks = create_executor(Path(directory))
+            result = executor.start_withny_archive()
+            self.assertEqual(result, {"ok": True, "cancelled": True})
+            callbacks["pick_withny_archive"].assert_called_once_with()
+
     def test_fetch_bili_playlist_uses_bounded_communicate(self):
         with tempfile.TemporaryDirectory() as directory:
             executor, _ = create_executor(Path(directory))

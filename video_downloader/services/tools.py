@@ -35,6 +35,40 @@ class ToolService:
         deps["fantiadl"] = (self._tool_dir / f"fantiadl{self._exe_suffix}").exists()
         return deps
 
+    def pick_withny_archive(self):
+        root = None
+        try:
+            import tkinter as tk
+            from tkinter import filedialog
+
+            root = tk.Tk()
+            root.withdraw()
+            root.attributes("-topmost", True)
+            har_path = filedialog.askopenfilename(
+                initialdir=str(self._tool_dir),
+                title="选择包含内容的 Withny HAR 文件",
+                filetypes=[("HAR 文件", "*.har"), ("所有文件", "*.*")],
+            )
+            if not har_path:
+                return {"ok": True, "cancelled": True}
+            output_path = filedialog.asksaveasfilename(
+                initialdir=str(self._tool_dir / "Withny"),
+                title="保存 Withny 历史存档",
+                defaultextension=".mp4",
+                filetypes=[("MP4 视频", "*.mp4"), ("MKV 视频", "*.mkv"), ("TS 视频", "*.ts")],
+            )
+            if not output_path:
+                return {"ok": True, "cancelled": True}
+            return {"ok": True, "har_path": har_path, "output_path": output_path}
+        except Exception as exc:
+            return {"error": f"打开文件选择失败: {exc}"}
+        finally:
+            if root is not None:
+                try:
+                    root.destroy()
+                except Exception:
+                    pass
+
     def update_ytdlp(self):
         ytdlp = self._tool_dir / f"yt-dlp{self._exe_suffix}"
         if not ytdlp.exists():

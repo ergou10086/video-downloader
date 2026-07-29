@@ -7,6 +7,7 @@
 
 let evtSource = null;
 let currentPlatform = "YouTube";
+let lastUrlPlatform = "YouTube";
 let download_running = false;
 const SESSION_TOKEN = window.SESSION_TOKEN || "";
 
@@ -17,7 +18,8 @@ const PLATFORMS = [
   {name:"Niconico",color:"#4B4B4D"},
   {name:"Fantia",color:"#E6399B"},
   {name:"TwitCasting",color:"#00A0D1"},
-  {name:"Twitter",color:"#1DA1F2"}
+  {name:"Twitter",color:"#1DA1F2"},
+  {name:"Withny",color:"#22C55E"}
 ];
 const PAGE_TITLES = {
   download: '下载任务', logs: '运行日志', settings: '下载设置', history: '下载历史',
@@ -157,6 +159,7 @@ function fillSelect(id, opts) {
 
 function selectPlatform(name) {
   currentPlatform = name;
+  if(name !== 'Withny') lastUrlPlatform = name;
   document.querySelectorAll('.plat-btn').forEach(b => {
     b.classList.toggle('active', b.dataset.name===name);
   });
@@ -166,6 +169,16 @@ function selectPlatform(name) {
   // Twitter/X Cookie 提示显隐
   const twHintEl = $('twitterHint');
   if (twHintEl) twHintEl.style.display = name === 'Twitter' ? 'block' : 'none';
+  const withnyHintEl = $('withnyHint');
+  if (withnyHintEl) withnyHintEl.style.display = name === 'Withny' ? 'block' : 'none';
+  const withnyMode = name === 'Withny';
+  const input = $('urlInput');
+  input.disabled = withnyMode;
+  input.placeholder = withnyMode
+    ? 'Withny 使用浏览器导出的“包含内容”HAR，请点击右侧按钮选择文件…'
+    : '粘贴视频 / 播放列表 / 频道 / 直播链接，回车开始下载（每行一个链接，Shift/Ctrl+回车换行）…';
+  const startLabel = $('btnStart').lastChild;
+  if(startLabel) startLabel.textContent = withnyMode ? '选择 HAR 并下载' : '开始下载';
 }
 
 /** 切换开关状态。 */
@@ -297,7 +310,7 @@ function toggleCookieMode() {
 /** 从设置表单中收集当前全部配置项。 */
 function collectCfg() {
   return {
-    PLATFORM: currentPlatform,
+    PLATFORM: currentPlatform === 'Withny' ? lastUrlPlatform : currentPlatform,
     RESOLUTION: $('s_resolution').value,
     CODEC: $('s_codec').value,
     AUDIO_QUALITY: $('s_audio').value,
@@ -390,6 +403,10 @@ function autoGrowUrlInput() {
 }
 
 async function startDl() {
+  if(currentPlatform === 'Withny') {
+    await startWithnyArchive();
+    return;
+  }
   // 按行拆分，每行一个链接，清理后过滤空行
   const urls = $('urlInput').value.split(/\r?\n/).map(cleanOneUrl).filter(Boolean);
   if(urls.length === 0) { alert('请输入链接'); return; }
@@ -432,6 +449,30 @@ async function startDl() {
     }
   }
   doStartDl(url);
+}
+
+async function startWithnyArchive() {
+  $('btnStart').disabled = true;
+  try {
+    const result = await api('/api/start-withny-archive', {method:'POST', body:'{}'});
+    if(result.error) {
+      alert(result.error);
+      $('btnStart').disabled = false;
+      return;
+    }
+    if(result.cancelled) {
+      $('btnStart').disabled = false;
+      return;
+    }
+    download_running = true;
+    $('btnStop').disabled = false;
+    $('statOk').textContent = '0';
+    $('statFail').textContent = '0';
+    $('statTotal').textContent = '1';
+  } catch(e) {
+    alert('Withny 下载启动失败: ' + e.message);
+    $('btnStart').disabled = false;
+  }
 }
 
 /**

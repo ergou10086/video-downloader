@@ -4,6 +4,7 @@ presets.json
 cookies.txt
 urls.txt
 download_history.json
+*.har
 
 # 日志
 logs/
@@ -17,6 +18,7 @@ Fantia/
 Bilibili/
 TwitCasting/
 Twitter/
+Withny/
 
 # 临时文件
 *.part

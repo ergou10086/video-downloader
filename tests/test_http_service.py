@@ -51,6 +51,7 @@ def make_dependencies(exit_event):
         cancel_idle_timer=lambda: None,
         start_idle_timer=lambda: None,
         start_download=lambda url, bili_parts=None, tc_password=None: {"url": url},
+        start_withny_archive=lambda: {"ok": True, "kind": "withny-archive"},
         batch_txt_download=value,
         start_urls_download=lambda urls: {"urls": urls},
         stop_download=value,
@@ -135,6 +136,11 @@ class HttpServiceTests(unittest.TestCase):
         self.assertEqual(json.loads(body), {"url": "https://example.com"})
         self.request("/api/exit", method="POST", payload={})
         self.assertTrue(self.exit_event.wait(1))
+
+    def test_withny_archive_route_uses_injected_dependency(self):
+        status, body, _ = self.request("/api/start-withny-archive", method="POST", payload={})
+        self.assertEqual(status, 200)
+        self.assertEqual(json.loads(body), {"ok": True, "kind": "withny-archive"})
 
     def test_post_rejects_unsupported_media_type(self):
         with self.assertRaises(HTTPError) as raised:
