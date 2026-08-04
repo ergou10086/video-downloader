@@ -82,11 +82,11 @@ class DownloadExecutor:
         else:
             self._log(f"[提示] 未识别平台，使用: {config_snapshot['PLATFORM']}", "warn")
 
-        missing = self._missing_dependency()
+        is_live_download = is_live_url(url, detected)
+
+        missing = self._missing_dependency(platform=detected, config=config_snapshot, is_live=is_live_download)
         if missing:
             return {"error": f"缺少依赖: {missing}"}
-
-        is_live_download = is_live_url(url, detected)
         try:
             cmd = self._build_command(
                 url,
@@ -454,6 +454,7 @@ class DownloadExecutor:
                 line = line.strip()
                 if not line:
                     continue
+
                 if is_live_download and not live_connected and ("Connecting to WebSocket" in line or "Downloading m3u8" in line):
                     live_connected = True
                     live_start_time = time.time()
@@ -679,15 +680,45 @@ class DownloadExecutor:
                             self.kill_process_tree(proc)
                             break
                         line_q, read_done = self._start_reader(proc)
+                        # Niconico 直播超时控制：正在直播的链接不加 --live-from-start 时
+                        # yt-dlp 会无限等待新分片。通过 LIVE_DOWNLOAD_TIMEOUT 限制单链接
+                        # 最长下载时间，超时后自动终止并跳到下一个链接。
+                        nico_live_dl = (effective_platform == "Niconico"
+                                        and is_live_url(url, detected))
+                        live_timeout_min = int(config_snapshot.get("LIVE_DOWNLOAD_TIMEOUT", 0))
+                        download_start = time.time()
+                        download_timed_out = False
+                        # 直播进度跟踪（用于非百分比输出的场景）
+                        batch_live_size = ""
+                        batch_live_speed = ""
+                        batch_live_frag = ""
+                        batch_live_start = time.time()
                         while not read_done.is_set() or not line_q.empty():
                             if handle.cancel_event.is_set():
                                 break
+                            # 超时检查：仅对 Niconico 直播生效，0 表示不限时
+                            if nico_live_dl and live_timeout_min > 0:
+                                elapsed = (time.time() - download_start) / 60
+                                if elapsed >= live_timeout_min:
+                                    self._log(f"  ⏱ 下载超时（{live_timeout_min}分钟），已跳过", "warn")
+                                    self.kill_process_tree(proc)
+                                    download_timed_out = True
+                                    break
                             try:
                                 line = line_q.get(timeout=0.5).strip()
                             except queue.Empty:
+                                # 心跳日志：没有新输出时，对 Niconico 直播显示录制时长
+                                if nico_live_dl:
+                                    elapsed = int(time.time() - batch_live_start)
+                                    if elapsed > 0 and elapsed % 30 == 0:
+                                        frag_info = f" | {batch_live_frag}" if batch_live_frag else ""
+                                        size_info = f" | {batch_live_size}" if batch_live_size else ""
+                                        spd_info = f" | {batch_live_speed}" if batch_live_speed else ""
+                                        self._update_progress(-1, f"[{index}/{len(urls)}] 录制中 {elapsed//60}m{elapsed%60:02d}s{frag_info}{size_info}{spd_info}")
                                 continue
                             if not line:
                                 continue
+                            # === 日志输出（保持用户可见） ===
                             is_error = "ERROR" in line
                             if is_error:
                                 self._log(f"  {line}", "error")
@@ -697,16 +728,67 @@ class DownloadExecutor:
                                     password_retry = True
                             elif "WARNING" in line:
                                 self._log(f"  {line}", "warn")
+                            else:
+                                # 友好的信息日志：关键词行 + 分片/进度信息
+                                is_keyword = any(kw in line for kw in [
+                                    "Destination:", "Downloading webpage", "Extracting URL",
+                                    "Connecting to WebSocket", "Downloading m3u8",
+                                    "has already been recorded",
+                                ])
+                                is_fragment = "fragment" in line.lower()
+                                has_size = re.search(r"\d+\.?\d*\s*[KMG]iB", line)
+                                if is_keyword and len(line) < 200:
+                                    self._log(f"  {line}", "info")
+                                elif is_fragment:
+                                    # 分片下载进度：每 10 个分片或首个分片记录一次
+                                    frag_match = re.search(r"fragment\s+(\d+)", line, re.IGNORECASE)
+                                    if frag_match:
+                                        frag_num = int(frag_match.group(1))
+                                        batch_live_frag = f"分片 {frag_num}"
+                                        if frag_num <= 1 or frag_num % 10 == 0:
+                                            self._log(f"  {line}", "info")
+                                elif has_size and not line.startswith("[download] "):
+                                    # 字节量进度（如 "123.45MiB at 2.34MiB/s"）
+                                    size_match = re.search(r"(\d+\.?\d*\s*[KMG]iB)", line)
+                                    speed_match = re.search(r"(\d+\.?\d*\s*[KMG]iB/s)", line)
+                                    if size_match:
+                                        batch_live_size = "已下载 " + size_match.group(1).replace(" ", "")
+                                    if speed_match:
+                                        batch_live_speed = speed_match.group(1).replace(" ", "")
+                                    # 每 30 秒记一次数据量日志
+                                    elapsed = int(time.time() - batch_live_start)
+                                    if elapsed > 0 and elapsed % 30 == 0:
+                                        self._log(f"  {batch_live_size} | {batch_live_speed}", "info")
+                            # === 进度更新 ===
                             path_match = re.search(r"\[download\] Destination: (.+)", line) \
                                 or re.search(r'\[Merger\] Merging formats into "(.+)"', line)
                             if path_match:
                                 output_path = path_match.group(1).replace('"', "").replace("'", "").strip()
+                                self._log(f"  → {os.path.basename(output_path)}", "info")
                             progress_match = re.search(r"(\d+(?:\.\d+)?)%", line)
                             if progress_match:
                                 overall = ((index - 1) + float(progress_match.group(1)) / 100) / len(urls)
-                                self._update_progress(overall, f"批量下载 {index}/{len(urls)}")
+                                speed_match = re.search(r"(\d+(?:\.\d+)?\s*[KMG]iB/s)", line)
+                                eta_match = re.search(r"ETA (\d+:\d+)", line)
+                                self._update_progress(overall, f"批量下载 {index}/{len(urls)}",
+                                    speed=speed_match.group(1).replace(" ", "") if speed_match else "",
+                                    eta=eta_match.group(1) if eta_match else "")
+                            elif nico_live_dl and (batch_live_frag or batch_live_size):
+                                # Niconico 直播无百分比输出：用数据量/分片数显示活动状态
+                                frag_info = f" | {batch_live_frag}" if batch_live_frag else ""
+                                size_info = f" | {batch_live_size}" if batch_live_size else ""
+                                spd_info = f" | {batch_live_speed}" if batch_live_speed else ""
+                                elapsed = int(time.time() - batch_live_start)
+                                self._update_progress(-1, f"[{index}/{len(urls)}] 录制中 {elapsed//60}m{elapsed%60:02d}s{frag_info}{size_info}{spd_info}")
                         self._close_process(proc)
                         self._download_manager.clear_process(handle, proc)
+                        if download_timed_out:
+                            # 下载超时：不视为失败，已下载的部分保留，继续下一个链接
+                            self._log(f"[{index}/{len(urls)}] ⏱ 超时跳过（已下载部分保留）", "warn")
+                            self._add_history(url, "", effective_platform, "timeout", output_path)
+                            url_done = True
+                            update_stats()
+                            continue
                         if handle.cancel_event.is_set():
                             stopped = True
                             self._log(f"[{index}/{len(urls)}] ✗ 已取消", "warn")
@@ -819,7 +901,11 @@ class DownloadExecutor:
         except Exception:
             pass
 
-    def _missing_dependency(self):
+    def _missing_dependency(self, platform=None, config=None, is_live=False):
+        """检查必需的依赖可执行文件是否存在。
+
+        基础依赖（yt-dlp、ffmpeg、ffprobe）始终检查。
+        """
         for dependency in ["yt-dlp", "ffmpeg", "ffprobe"]:
             filename = f"{dependency}{self._exe_suffix}"
             if not (self._tool_dir / filename).exists():

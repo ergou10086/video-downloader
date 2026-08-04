@@ -1,4 +1,4 @@
-def build_ytdlp_cmd(url, config, tool_dir, exe_suffix="", *, is_live=False, platform_override=None, cookie_file=None, bili_parts=None):
+def build_ytdlp_cmd(url, config, tool_dir, exe_suffix="", *, is_live=False, platform_override=None, cookie_file=None, bili_parts=None, nicochannel_auth_token=None):
     """构建 yt-dlp 下载命令行参数。
 
     根据配置项组装完整的 yt-dlp 命令行参数列表，包括输出模板、格式选择、
@@ -13,27 +13,42 @@ def build_ytdlp_cmd(url, config, tool_dir, exe_suffix="", *, is_live=False, plat
         platform_override: 平台覆盖名，如果不为 None 则替代 config 中的 PLATFORM。
         cookie_file: Cookie 文件路径，用于文件模式 Cookie 鉴权。
         bili_parts: Bilibili 分P 选择参数，如 "1,3,5" 或 "all"，通过 -I 传递给 yt-dlp。
+        nicochannel_auth_token: NicoChannel 的 JWT 鉴权令牌，通过 --extractor-args 注入。
 
     Returns:
         list[str]: 完整的 yt-dlp 命令行参数列表。
     """
     cfg = config
     ytdlp = str(tool_dir / f"yt-dlp{exe_suffix}")
-    cmd = [ytdlp, "--newline", "--continue", "--encoding", "utf-8"]
+    cmd = [ytdlp, "--newline", "--continue", "--encoding", "utf-8",
+           "--socket-timeout", "30", "--plugin-dirs", str(tool_dir)]
     platform_name = platform_override if platform_override else cfg["PLATFORM"]
     is_nico_live = "live.nicovideo.jp" in url.lower() or "live2.nicovideo.jp" in url.lower()
 
     # VOD 模板：开启嵌入元数据时，在文件名前追加 [YYYYMMDD] 发布日期，便于按时间排序
     vod_date_prefix = "[%(upload_date)s] " if cfg["EMBED_META"] else ""
 
-    # 直播统一由调用方传入的 is_live 驱动（Twitch/TwitCasting 等），从头抓取并归入直播目录。
-    if is_live:
+    # 直播统一由调用方传入的 is_live 驱动（Twitch/TwitCasting 等），
+    # 使用 --live-from-start 从头抓取并归入直播目录。
+    # Niconico 直播/录播（timeshift）不加 --live-from-start：
+    #   不加时 → yt-dlp 提取器自行判断直播/录播状态，录播下载全量分片后退出，
+    #            直播从当前时刻开始录制。
+    #   加了  → 对无 timeshift 缓冲的直播直接报错 "no formats that can be
+    #            downloaded from the start"，录播也会失败。
+    # 因此 Niconico 由 yt-dlp 自行决定，仅指定输出目录。
+    #
+    # 直播文件名规则：
+    #   EMBED_META=1 → "[20260730] title - id.ext"（日期前缀，方便按时间排序归档）
+    #   EMBED_META=0 → "title - 20260730 id.ext"（日期在标题后，保持原有格式）
+    if is_live and not is_nico_live:
         out_tmpl = str(
+            tool_dir / platform_name / "%(uploader)s" / "直播" / f"{vod_date_prefix}%(title)s - %(id)s.%(ext)s") if vod_date_prefix else str(
             tool_dir / platform_name / "%(uploader)s" / "直播" / "%(title)s - %(upload_date)s %(id)s.%(ext)s")
         cmd += ["--live-from-start"]
     elif is_nico_live:
-        # Niconico 直播按 URL 识别，并固定归入直播目录。
-        out_tmpl = str(tool_dir / "Niconico" / "直播" / "%(title)s - %(upload_date)s %(id)s.%(ext)s")
+        out_tmpl = str(
+            tool_dir / "Niconico" / "直播" / f"{vod_date_prefix}%(title)s - %(id)s.%(ext)s") if vod_date_prefix else str(
+            tool_dir / "Niconico" / "直播" / "%(title)s - %(upload_date)s %(id)s.%(ext)s")
     else:
         out_tmpl = str(tool_dir / platform_name / "%(uploader)s" / f"{vod_date_prefix}%(title)s [%(id)s].%(ext)s")
 
@@ -118,6 +133,10 @@ def build_ytdlp_cmd(url, config, tool_dir, exe_suffix="", *, is_live=False, plat
         cmd += ["--write-comments"]
     if platform_name == "Niconico" and cfg["NICO_RECODE"]:
         cmd += ["--recode-video", fmt]
+    # NicoChannel: 插件通过 --username jwt_token --password <JWT> 接收鉴权令牌
+    # （而非 --extractor-args），详见插件的 _perform_login() 方法
+    if platform_name == "NicoChannel" and nicochannel_auth_token:
+        cmd += ["--username", "jwt_token", "--password", nicochannel_auth_token]
     # Bilibili 多P选择：通过 -I 指定下载哪些分P
     if bili_parts and bili_parts != "all":
         cmd += ["-I", bili_parts]

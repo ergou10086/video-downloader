@@ -104,6 +104,12 @@ def _cmd_download(url):
         print("      WebUI 中可在设置页预填密码，或在收到密码提示弹窗后输入。")
         print()
 
+    # NicoChannel: CLI 不支持自动提取 Firefox localStorage JWT
+    if platform == "NicoChannel":
+        print("提示: NicoChannel 首次下载需要在 WebUI 模式下完成（自动从 Firefox 提取 JWT 令牌）。")
+        print("      后续下载可通过 CLI 进行（令牌由 yt-dlp 插件通过 Cookie 文件自动刷新）。")
+        print()
+
     # 检查依赖
     ytdlp = tool_dir / f"yt-dlp{exe_suffix}"
     ffmpeg = tool_dir / f"ffmpeg{exe_suffix}"

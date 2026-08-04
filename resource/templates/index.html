@@ -100,8 +100,12 @@
             <b>Twitter/X 提示：</b>部分内容需要登录才能下载，建议使用「浏览器 Cookie 模式」自动提取登录状态。
           </div>
 
+          <div class="platform-hint" id="nicochannelHint" style="display:none">
+            <b>NicoChannel 提示：</b>首次下载需从 Firefox 浏览器自动提取 JWT 登录令牌，请确保已在 Firefox 中登录 <b>nicochannel.jp</b>。后续下载由插件通过 Cookie 文件自动刷新令牌。
+          </div>
+
           <div class="platform-hint" id="withnyHint" style="display:none">
-            <b>Withny 历史存档：</b>请选择浏览器导出的“包含内容”HAR，此模式不接受普通 URL。HAR 可能包含登录信息，请勿分享，完成后建议删除。<a href="#" onclick="setActivePage('help');return false;">查看教程 →</a>
+            <b>Withny 历史存档：</b>请选择浏览器导出的"包含内容"HAR，此模式不接受普通 URL。HAR 可能包含登录信息，请勿分享，完成后建议删除。<a href="#" onclick="setActivePage('help');return false;">查看教程 →</a>
           </div>
 
           <div class="url-row">
@@ -218,6 +222,11 @@
 
         <section class="card">
           <div class="card-lead"><span class="icon" data-ico="cpu"></span><div class="card-title">编码与高级</div></div>
+          <div class="setting-row"><label>直播下载方式</label>
+            <select id="s_live_stream_method">
+              <option value="yt-dlp">yt-dlp (默认)</option>
+            </select>
+          </div>
           <div class="setting-row"><label>硬件加速</label><select id="s_hwaccel"></select></div>
           <div class="setting-row"><label>嵌入元数据</label><div class="switch on" id="sw_meta" onclick="toggleSwitch(this)"></div></div>
           <div class="setting-row"><label>下载封面</label><div class="switch on" id="sw_thumb" onclick="toggleSwitch(this)"></div></div>

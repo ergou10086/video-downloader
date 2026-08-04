@@ -38,6 +38,8 @@ DEFAULT_CONFIG = {
     "STRICT_FILENAME": 0,
     "NICO_COMMENTS": 0,
     "NICO_RECODE": 0,
+    "LIVE_STREAM_METHOD": "yt-dlp",
+    "LIVE_DOWNLOAD_TIMEOUT": 0,
     "ENABLE_LOG": 1,
     "MP3_BITRATE": 320,
     "DEL_WAV_AFTER_CONVERT": 0,
@@ -60,6 +62,8 @@ BROWSER_OPTIONS = ["chrome", "edge", "firefox", "brave", "opera"]
 PROXY_TYPE_OPTIONS = ["http", "socks5"]
 MP3_BITRATE_OPTIONS = [128, 192, 256, 320]
 BILI_POLICY_OPTIONS = ["all", "select"]
+LIVE_STREAM_METHOD_OPTIONS = ["yt-dlp"]
+LIVE_STREAM_METHOD_LABELS = ["yt-dlp (默认)"]
 
 PLATFORM_INFO = [
     {"name": "YouTube", "color": "#FF0000", "domains": ["youtube.com", "youtu.be"]},
@@ -69,4 +73,5 @@ PLATFORM_INFO = [
     {"name": "Fantia", "color": "#E6399B", "domains": ["fantia.jp"]},
     {"name": "TwitCasting", "color": "#4B4B4D", "domains": ["twitcasting.tv"]},
     {"name": "Twitter", "color": "#1DA1F2", "domains": ["twitter.com", "x.com", "t.co"]},
+    {"name": "NicoChannel", "color": "#FF6B35", "domains": ["nicochannel.jp"]},
 ]

@@ -8,6 +8,7 @@ from .constants import (
     DEFAULT_CONFIG,
     FORMAT_OPTIONS,
     HWACCEL_OPTIONS,
+    LIVE_STREAM_METHOD_OPTIONS,
     MP3_BITRATE_OPTIONS,
     PLATFORM_INFO,
     PROXY_TYPE_OPTIONS,
@@ -25,6 +26,7 @@ _ERROR_REASONS = {
     "BROWSER_NAME": "浏览器选项无效",
     "HWACCEL": "硬件加速选项无效",
     "BILI_MULTIP_POLICY": "B站多P策略选项无效",
+    "LIVE_STREAM_METHOD": "直播下载方式仅支持 yt-dlp",
     "AUDIO_MODE": "音频模式选项无效",
     "AUDIO_FORMAT": "音频格式选项无效",
     "THREADS": "线程数需在 1-32 之间",
@@ -75,12 +77,14 @@ def validate_config(values, base=None):
         "BILI_MULTIP_POLICY": BILI_POLICY_OPTIONS,
         "AUDIO_MODE": AUDIO_MODE_OPTIONS,
         "AUDIO_FORMAT": AUDIO_FORMAT_OPTIONS,
+        "LIVE_STREAM_METHOD": LIVE_STREAM_METHOD_OPTIONS,
     }
     integer_ranges = {
         "THREADS": (1, 32),
         "SPEED_LIMIT": (0, 100000),
         "COOKIE_MODE": (1, 2),
         "MP3_BITRATE": (min(MP3_BITRATE_OPTIONS), max(MP3_BITRATE_OPTIONS)),
+        "LIVE_DOWNLOAD_TIMEOUT": (0, 1440),
     }
     booleans = {
         "MERGE_MODE", "PROXY_ENABLED", "USE_COOKIES", "EMBED_META",

@@ -16,6 +16,7 @@ const PLATFORMS = [
   {name:"Bilibili",color:"#FB7299"},
   {name:"Twitch",color:"#9146FF"},
   {name:"Niconico",color:"#4B4B4D"},
+  {name:"NicoChannel",color:"#FF6B35"},
   {name:"Fantia",color:"#E6399B"},
   {name:"TwitCasting",color:"#00A0D1"},
   {name:"Twitter",color:"#1DA1F2"},
@@ -169,6 +170,9 @@ function selectPlatform(name) {
   // Twitter/X Cookie 提示显隐
   const twHintEl = $('twitterHint');
   if (twHintEl) twHintEl.style.display = name === 'Twitter' ? 'block' : 'none';
+  // NicoChannel Firefox 登录提示显隐
+  const ncHintEl = $('nicochannelHint');
+  if (ncHintEl) ncHintEl.style.display = name === 'NicoChannel' ? 'block' : 'none';
   const withnyHintEl = $('withnyHint');
   if (withnyHintEl) withnyHintEl.style.display = name === 'Withny' ? 'block' : 'none';
   const withnyMode = name === 'Withny';
@@ -266,6 +270,7 @@ function applyConfig(s) {
   $('s_browser').value = s.BROWSER_NAME;
   $('s_profile').value = s.BROWSER_PROFILE;
   $('s_hwaccel').value = s.HWACCEL;
+  if(s.LIVE_STREAM_METHOD !== undefined) $('s_live_stream_method').value = s.LIVE_STREAM_METHOD;
   setSwitch('sw_meta', s.EMBED_META);
   setSwitch('sw_thumb', s.DOWNLOAD_THUMB);
   setSwitch('sw_winfn', s.WIN_FILENAMES);
@@ -328,6 +333,7 @@ function collectCfg() {
     BROWSER_NAME: $('s_browser').value,
     BROWSER_PROFILE: $('s_profile').value,
     HWACCEL: $('s_hwaccel').value,
+    LIVE_STREAM_METHOD: $('s_live_stream_method').value,
     EMBED_META: isOn('sw_meta')?1:0,
     DOWNLOAD_THUMB: isOn('sw_thumb')?1:0,
     WIN_FILENAMES: isOn('sw_winfn')?1:0,
@@ -364,7 +370,7 @@ async function resetSettings() {
 
 async function loadDeps() {
   const d = await api('/api/deps');
-  const names = {'yt-dlp':'yt-dlp',ffmpeg:'ffmpeg',ffprobe:'ffprobe',fantiadl:'fantiadl(可选)'};
+  const names = {'yt-dlp':'yt-dlp',ffmpeg:'ffmpeg',ffprobe:'ffprobe',fantiadl:'fantiadl(可选)',nicochannel_plugin:'nicochannel插件(可选)'};
   const box = $('depStatus');
   box.innerHTML = '';
   for(const [k,v] of Object.entries(d)) {

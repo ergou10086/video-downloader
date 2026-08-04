@@ -36,6 +36,7 @@ class ToolServiceTests(unittest.TestCase):
                 "ffmpeg": True,
                 "ffprobe": False,
                 "fantiadl": False,
+                "nicochannel_plugin": False,
             })
 
     def test_read_urls_file_filters_blank_and_comment_lines(self):

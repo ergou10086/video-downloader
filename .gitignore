@@ -19,6 +19,7 @@ Bilibili/
 TwitCasting/
 Twitter/
 Withny/
+NicoChannel/
 
 # 临时文件
 *.part
@@ -37,11 +38,13 @@ release-output/
 *.spec
 temp/
 
-# 依赖工具（从官方下载，不放入仓库）
+# 依赖工具
 yt-dlp.exe
 ffmpeg.exe
 ffprobe.exe
 fantiadl.exe
+nicochannel.zip
+
 
 # 主程序exe（通过Release发布，不放入源码仓库）
 *.exe

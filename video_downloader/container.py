@@ -19,6 +19,7 @@ from .core.constants import DEFAULT_CONFIG, IDLE_TIMEOUT, VERSION
 from .core.command import build_ytdlp_cmd as _build_ytdlp_cmd
 from .state.app_state import AppState
 from .services.download_executor import DownloadExecutor
+from .services.nicochannel_auth import NicochannelAuthService
 from .services.download_manager import DownloadManager
 from .services.storage import StorageService
 from .services.tools import ToolService
@@ -143,21 +144,32 @@ class AppContainer:
                 "kind": snapshot["kind"],
             }})
 
-        # ---- yt-dlp 命令构建 ----
+        # ---- NicoChannel Auth ----
+        nicochannel_auth = NicochannelAuthService(log=add_log)
+
+        # ---- 命令构建 ----
         def build_command(url: str, *, is_live: bool = False,
                           platform_override: str | None = None,
                           config_override: dict | None = None,
                           bili_parts: str | None = None) -> list[str]:
+            cfg = config_override if config_override is not None else app_state.config_snapshot()
             cookie_file = tool_dir / "cookies.txt"
+            effective_platform = platform_override if platform_override else cfg["PLATFORM"]
+
+            # NicoChannel: extract JWT from Firefox localStorage
+            nicochannel_token = None
+            if effective_platform == "NicoChannel":
+                nicochannel_token = nicochannel_auth.get_auth_token(
+                    profile=None,  # None = Firefox 自动探测，BROWSER_PROFILE 是 Chrome 命名
+                )
+
             return _build_ytdlp_cmd(
-                url,
-                config_override if config_override is not None else app_state.config_snapshot(),
-                tool_dir,
-                exe_suffix,
+                url, cfg, tool_dir, exe_suffix,
                 is_live=is_live,
                 platform_override=platform_override,
                 cookie_file=cookie_file if cookie_file.exists() else None,
                 bili_parts=bili_parts,
+                nicochannel_auth_token=nicochannel_token,
             )
 
         # ---- 工具服务 ----
@@ -299,6 +311,7 @@ class AppContainer:
             if not all(deps.get(d, False) for d in ["yt-dlp", "ffmpeg", "ffprobe"]):
                 add_log("[提示] yt-dlp: github.com/yt-dlp/yt-dlp/releases", "warn")
                 add_log("[提示] ffmpeg: www.gyan.dev/ffmpeg/builds/ (full_build)", "warn")
+            config = app_state.config_snapshot()
 
             url = http_service.start()
             start_idle_timer()

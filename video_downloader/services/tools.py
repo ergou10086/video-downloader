@@ -33,6 +33,7 @@ class ToolService:
         for dep in ["yt-dlp", "ffmpeg", "ffprobe"]:
             deps[dep] = (self._tool_dir / f"{dep}{self._exe_suffix}").exists()
         deps["fantiadl"] = (self._tool_dir / f"fantiadl{self._exe_suffix}").exists()
+        deps["nicochannel_plugin"] = (self._tool_dir / "nicochannel.zip").exists()
         return deps
 
     def pick_withny_archive(self):
@@ -127,6 +128,9 @@ class ToolService:
 
 # Niconico
 # https://www.nicovideo.jp/watch/smxxxxxxxx
+
+# NicoChannel
+# https://nicochannel.jp/channelname/video/xxxxx
 
 # Fantia
 # https://fantia.jp/posts/xxxxxxx
