@@ -1,14 +1,74 @@
+import os
 import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
 
 from video_downloader.core.constants import DEFAULT_CONFIG, DEFAULT_SUBTITLE_LANGS
-from video_downloader.core.command import build_ytdlp_cmd
+from video_downloader.core.command import build_ytdlp_cmd, parse_custom_ytdlp_args
 from video_downloader.core.platform import detect_platform
 
 
 class YtdlpCommandTests(unittest.TestCase):
+    def test_custom_args_parser_preserves_quoted_values(self):
+        self.assertEqual(
+            parse_custom_ytdlp_args('--add-header "Referer: https://example.com/a b" --sleep-requests 1'),
+            ["--add-header", "Referer: https://example.com/a b", "--sleep-requests", "1"],
+        )
+
+    def test_custom_args_parser_rejects_unclosed_quote(self):
+        with self.assertRaisesRegex(ValueError, "自定义 yt-dlp 参数无法解析"):
+            parse_custom_ytdlp_args('--add-header "unterminated')
+
+    @unittest.skipUnless(os.name == "nt", "Windows command-line parsing")
+    def test_custom_args_parser_preserves_windows_path_backslashes(self):
+        parsed = parse_custom_ytdlp_args(r'--cookies D:\VideoTools\cookies.txt')
+        self.assertEqual(parsed, ["--cookies", r"D:\VideoTools\cookies.txt"])
+
+    def test_default_and_one_time_custom_args_are_appended_before_url(self):
+        config = dict(DEFAULT_CONFIG, YTDLP_DEFAULT_ARGS="--sleep-requests 2")
+        with tempfile.TemporaryDirectory() as directory:
+            cmd = build_ytdlp_cmd(
+                "https://youtube.com/watch?v=abc",
+                config,
+                Path(directory),
+                custom_args="--retries 20",
+            )
+        self.assertEqual(cmd[-5:], ["--sleep-requests", "2", "--retries", "20", "https://youtube.com/watch?v=abc"])
+
+    def test_youtube_po_provider_base_url_is_passed_to_plugin(self):
+        with tempfile.TemporaryDirectory() as directory:
+            cmd = build_ytdlp_cmd(
+                "https://youtube.com/watch?v=abc",
+                DEFAULT_CONFIG,
+                Path(directory),
+                po_token_base_url="http://[::1]:4416",
+            )
+        extractor_args = [
+            cmd[index + 1]
+            for index, value in enumerate(cmd[:-1])
+            if value == "--extractor-args"
+        ]
+        self.assertIn(
+            "youtubepot-bgutilhttp:base_url=http://[::1]:4416",
+            extractor_args,
+        )
+
+    def test_youtube_subtitle_command_uses_po_provider_base_url(self):
+        config = dict(DEFAULT_CONFIG, DOWNLOAD_SUBTITLES=1)
+        with tempfile.TemporaryDirectory() as directory:
+            cmd = build_ytdlp_cmd(
+                "https://youtube.com/watch?v=abc",
+                config,
+                Path(directory),
+                subtitle_only=True,
+                po_token_base_url="http://[::1]:4416",
+            )
+        self.assertIn(
+            "youtubepot-bgutilhttp:base_url=http://[::1]:4416",
+            cmd,
+        )
+
     def test_subtitles_are_disabled_by_default(self):
         with tempfile.TemporaryDirectory() as directory:
             cmd = build_ytdlp_cmd("https://youtube.com/watch?v=abc", DEFAULT_CONFIG, Path(directory))

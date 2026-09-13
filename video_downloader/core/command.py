@@ -1,3 +1,6 @@
+import ctypes
+import os
+import shlex
 import sys
 from pathlib import Path
 
@@ -94,7 +97,49 @@ def _append_subtitle_options(cmd, cfg, tool_dir, platform_name, also_set_default
     return True
 
 
-def build_ytdlp_cmd(url, config, tool_dir, exe_suffix="", *, is_live=False, platform_override=None, cookie_file=None, bili_parts=None, nicochannel_auth_token=None, use_ffmpeg_for_hls=False, include_subtitles=True, subtitle_only=False):
+def parse_custom_ytdlp_args(value):
+    """把用户填写的 yt-dlp 参数安全拆成 ``Popen`` 参数列表。
+
+    参数始终通过列表传给子进程，不经过 shell，因此引号只负责把带空格的值
+    组合为同一个参数。空输入返回空列表。
+    """
+    if value is None:
+        return []
+    if isinstance(value, (list, tuple)):
+        return [str(item) for item in value]
+    text = str(value).strip()
+    if not text:
+        return []
+    try:
+        # shlex is used here to give a clear error for unclosed quotes on every OS.
+        shlex.split(text, posix=True)
+    except ValueError as exc:
+        raise ValueError(f"自定义 yt-dlp 参数无法解析: {exc}") from exc
+    if os.name != "nt":
+        return shlex.split(text, posix=True)
+
+    # Match the quoting rules users see in CMD/PowerShell and preserve unquoted
+    # backslashes in Windows paths. CommandLineToArgvW only tokenizes; no shell runs.
+    argc = ctypes.c_int()
+    command_line_to_argv = ctypes.windll.shell32.CommandLineToArgvW
+    command_line_to_argv.argtypes = [ctypes.c_wchar_p, ctypes.POINTER(ctypes.c_int)]
+    command_line_to_argv.restype = ctypes.POINTER(ctypes.c_wchar_p)
+    argv = command_line_to_argv(text, ctypes.byref(argc))
+    if not argv:
+        raise ValueError("自定义 yt-dlp 参数无法解析")
+    try:
+        return [argv[index] for index in range(argc.value)]
+    finally:
+        ctypes.windll.kernel32.LocalFree(argv)
+
+
+def _append_custom_ytdlp_args(cmd, cfg, custom_args):
+    # 默认参数在前、本次参数在后，让本次参数可以按 yt-dlp 的常规规则覆盖默认值。
+    cmd += parse_custom_ytdlp_args(cfg.get("YTDLP_DEFAULT_ARGS", ""))
+    cmd += parse_custom_ytdlp_args(custom_args)
+
+
+def build_ytdlp_cmd(url, config, tool_dir, exe_suffix="", *, is_live=False, platform_override=None, cookie_file=None, bili_parts=None, nicochannel_auth_token=None, use_ffmpeg_for_hls=False, include_subtitles=True, subtitle_only=False, custom_args=None, po_token_base_url=None):
     """构建 yt-dlp 下载命令行参数。
 
     根据配置项组装完整的 yt-dlp 命令行参数列表，包括输出模板、格式选择、
@@ -157,6 +202,12 @@ def build_ytdlp_cmd(url, config, tool_dir, exe_suffix="", *, is_live=False, plat
             cmd += ["--video-password", cfg["TC_PASSWORD"]]
         if platform_name == "NicoChannel" and nicochannel_auth_token:
             cmd += ["--username", "jwt_token", "--password", nicochannel_auth_token]
+        if platform_name == "YouTube" and po_token_base_url:
+            cmd += [
+                "--extractor-args",
+                f"youtubepot-bgutilhttp:base_url={po_token_base_url}",
+            ]
+        _append_custom_ytdlp_args(cmd, cfg, custom_args)
         cmd.append(url)
         return cmd
 
@@ -288,5 +339,11 @@ def build_ytdlp_cmd(url, config, tool_dir, exe_suffix="", *, is_live=False, plat
     # 仅当默认客户端无法提取时自动回退，不影响已有下载行为。
     if platform_name == "YouTube":
         cmd += ["--extractor-args", "youtube:player_client=default,web_embedded"]
+        if po_token_base_url:
+            cmd += [
+                "--extractor-args",
+                f"youtubepot-bgutilhttp:base_url={po_token_base_url}",
+            ]
+    _append_custom_ytdlp_args(cmd, cfg, custom_args)
     cmd.append(url)
     return cmd

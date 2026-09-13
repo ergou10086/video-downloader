@@ -43,6 +43,21 @@ class StorageServiceTests(unittest.TestCase):
         storage.load_config()
         self.assertEqual(restored.config_snapshot()["THREADS"], 8)
 
+    def test_custom_ytdlp_args_round_trip_preserves_percent_templates(self):
+        self.state.replace_config(DEFAULT_CONFIG)
+        value = "-o custom/%(uploader)s/%(title)s.%(ext)s"
+        self.state.update_config({"YTDLP_DEFAULT_ARGS": value})
+        self.storage.save_config()
+        restored = AppState()
+        StorageService(
+            Path(self.temp_dir.name),
+            restored,
+            validate_config,
+            lambda message, level="info": None,
+            lambda event_type, data=None: None,
+        ).load_config()
+        self.assertEqual(restored.config_snapshot()["YTDLP_DEFAULT_ARGS"], value)
+
     def test_config_replace_failure_preserves_existing_file(self):
         self.state.replace_config(DEFAULT_CONFIG)
         self.storage.save_config()

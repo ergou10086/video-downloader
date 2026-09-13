@@ -67,6 +67,7 @@ class ToolServiceTests(unittest.TestCase):
                 "fantiadl": False,
                 "withny_dl": False,
                 "nicochannel_plugin": False,
+                "youtube_po_token": False,
             })
 
     def test_read_urls_file_filters_blank_and_comment_lines(self):

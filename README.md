@@ -24,6 +24,8 @@
 - **字幕下载** - 支持普通下载附带字幕及独立多链接字幕下载，默认关闭，开启后默认中文
 - 🎵 **MP3 音频下载** - 支持在下载视频时单独保存 MP3 音频
 - 🍪 **Cookie支持** - 支持cookies.txt文件模式
+- 🛡️ **YouTube PO Token** - 可选自动启动本地 BgUtils Provider，缓解部分 GVS/PO Token 相关 403
+- 🧩 **自定义 yt-dlp 参数** - 支持仅本次任务参数与每次下载默认参数
 - ⚡ **硬件加速** - 支持NVIDIA NVENC、Intel QSV、AMD AMF
 - 🔄 **自动更新** - 启动后通过 GitHub Releases 检查新版本，校验通过后自动更新替换
 - 🧰 **工具箱** - 内置WAV转MP3、yt-dlp更新、临时文件清理等8个工具
@@ -39,6 +41,8 @@
 4. 双击 `视频下载工具v2.4.0-GUI.exe` 运行，自动打开浏览器界面
 
 > 💡 **提示**：依赖包包含 yt-dlp.exe、ffmpeg.exe、ffprobe.exe、deno.exe、fantiadl.exe、withny-dl-windows-amd64.exe 和 `yt-dlp-plugins` 目录。NicoChannel 还需要单独准备 `nicochannel.zip` 并放在主程序同一目录。首次运行会自动生成配置文件和下载目录。
+
+若要启用 YouTube PO Token，请同时保留 `yt-dlp-plugins/bgutil-ytdlp-pot-provider.zip` 和 `bgutil-ytdlp-pot-provider/server`（含已安装的 `node_modules`）。在「设置 → 平台专项」打开 YouTube PO Token 后，程序会在 YouTube 任务开始前自动启动 Provider，并在退出工具时关闭它；无需另开 CMD。Provider 可能缓解部分 403，但不能保证绕过所有风控或登录校验。
 
 TwitCasting 多初始化段归档会自动加载随项目提供的 `yt-dlp-plugins/video_downloader` 插件，按设置中的下载线程数并发预取 HLS 分片，再由 FFmpeg 完成本地封装；无需另装下载器。源码运行或制作依赖包时，请让整个 `yt-dlp-plugins` 目录与 `yt-dlp.exe` 保持在同一目录；若缺失，程序会安全退回 FFmpeg 串行下载。
 
@@ -125,6 +129,10 @@ YouTube 使用明确的 `/live` 直播链接，Niconico 使用 `live.nicovideo.j
 ├── ffmpeg.exe               # 音视频处理
 ├── ffprobe.exe              # 媒体信息探测
 ├── deno.exe                 # JavaScript运行时
+├── yt-dlp-plugins/
+│   └── bgutil-ytdlp-pot-provider.zip # YouTube PO Token 插件（可选）
+├── bgutil-ytdlp-pot-provider/
+│   └── server/              # BgUtils Provider 与 node_modules（可选）
 ├── fantiadl.exe             # Fantia下载器（可选）
 ├── settings.ini             # 配置文件（自动生成）
 ├── presets.json             # 预设配置（自动生成）

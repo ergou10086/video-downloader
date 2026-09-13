@@ -75,3 +75,5 @@ package-lock.json
 package.json
 .ai/
 .playwright-mcp/
+
+bgutil-ytdlp-pot-provider

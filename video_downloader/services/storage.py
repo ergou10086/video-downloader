@@ -28,7 +28,9 @@ class StorageService:
             config = dict(DEFAULT_CONFIG)
             if self._config_file.exists():
                 try:
-                    parser = configparser.ConfigParser()
+                    # yt-dlp output templates commonly contain ``%(field)s``;
+                    # configuration values must be stored literally, without INI interpolation.
+                    parser = configparser.ConfigParser(interpolation=None)
                     with open(self._config_file, "r", encoding="utf-8") as file:
                         parser.read_file(file)
                     if parser.has_section("settings"):
@@ -54,7 +56,7 @@ class StorageService:
     def save_config(self):
         with self._app_state.config_lock, self._config_lock:
             snapshot = self._app_state.config_snapshot()
-            parser = configparser.ConfigParser()
+            parser = configparser.ConfigParser(interpolation=None)
             parser["settings"] = {key: str(value) for key, value in snapshot.items()}
             descriptor, temp_name = tempfile.mkstemp(
                 prefix=f"{self._config_file.name}.",

@@ -126,7 +126,23 @@ Fantia 功能可选依赖
   FFmpeg硬件加速：CPU软编码 / N卡NVENC / Intel QSV / AMD AMF
   浏览器Cookie来源：Chrome / Edge / Firefox / Brave / Opera / cookies.txt文件
   Niconico弹幕下载开关
+  YouTube PO Token开关：下载YouTube前自动启动本地BgUtils Provider
+  默认yt-dlp参数：保存后自动附加到每次yt-dlp下载命令
   文件名兼容、元数据嵌入、下载封面等开关
+
+下载页面另有「本次 yt-dlp 参数」输入框：
+  - 对当前单条、多行批量或TXT批量任务有效，启动成功后自动清空
+  - 不会写入settings.ini
+  - 含空格的参数值请使用英文双引号包裹
+
+YouTube PO Token依赖：
+  - deno.exe
+  - yt-dlp-plugins/bgutil-ytdlp-pot-provider.zip
+  - bgutil-ytdlp-pot-provider/server/src/main.ts
+  - bgutil-ytdlp-pot-provider/server/node_modules
+开启后无需手动运行CMD。程序会检查127.0.0.1或IPv6本机回环地址的4416端口，
+复用已运行的Provider，或自动启动并等待/ping成功后再调用yt-dlp获取PO Token。
+PO Token只能缓解部分YouTube 403或机器人校验，仍可能需要有效Cookie或更换网络出口。
 
 封面说明：
   - 「下载封面」默认开启，会写出并转换为JPG封面

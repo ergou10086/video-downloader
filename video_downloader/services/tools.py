@@ -54,6 +54,12 @@ class ToolService:
         deps["fantiadl"] = (self._tool_dir / f"fantiadl{self._exe_suffix}").exists()
         deps["withny_dl"] = (self._tool_dir / f"withny-dl-windows-amd64{self._exe_suffix}").exists()
         deps["nicochannel_plugin"] = (self._tool_dir / "nicochannel.zip").exists()
+        deps["youtube_po_token"] = all(path.exists() for path in (
+            self._tool_dir / f"deno{self._exe_suffix}",
+            self._tool_dir / "yt-dlp-plugins" / "bgutil-ytdlp-pot-provider.zip",
+            self._tool_dir / "bgutil-ytdlp-pot-provider" / "server" / "src" / "main.ts",
+            self._tool_dir / "bgutil-ytdlp-pot-provider" / "server" / "node_modules",
+        ))
         return deps
 
     def pick_withny_archive(self):

@@ -7,7 +7,7 @@ import threading
 import time
 from pathlib import Path
 
-from video_downloader.core.command import twitcasting_hls_fallback_args
+from video_downloader.core.command import parse_custom_ytdlp_args, twitcasting_hls_fallback_args
 from video_downloader.core.constants import LEGACY_ALL_SUBTITLE_LANGS, RECOMMENDED_SUBTITLE_LANGS
 from video_downloader.core.platform import clean_url, detect_platform, is_live_url, safe_decode
 from video_downloader.core.subtitles import classify_subtitle_result
@@ -54,6 +54,7 @@ class DownloadExecutor:
         emit_event,
         pick_withny_archive=None,
         pick_withny_live_config=None,
+        ensure_po_token_provider=None,
     ):
         self._tool_dir = tool_dir
         self._exe_suffix = exe_suffix
@@ -69,6 +70,7 @@ class DownloadExecutor:
         self._emit_event = emit_event
         self._pick_withny_archive = pick_withny_archive
         self._pick_withny_live_config = pick_withny_live_config
+        self._ensure_po_token_provider = ensure_po_token_provider
         # 批量下载密码阻塞等待机制
         self._password_event = threading.Event()
         self._password_value: str | None = None
@@ -268,7 +270,23 @@ class DownloadExecutor:
         # 直接追加到末尾即可生效。
         return result
 
-    def start_download(self, url, bili_parts=None, tc_password=None):
+    def _validate_custom_args(self, config_snapshot, custom_args):
+        try:
+            parse_custom_ytdlp_args(config_snapshot.get("YTDLP_DEFAULT_ARGS", ""))
+            parse_custom_ytdlp_args(custom_args)
+            return None
+        except ValueError as exc:
+            return str(exc)
+
+    def _start_po_token_provider_if_needed(self, config_snapshot, platforms):
+        if not config_snapshot.get("YOUTUBE_PO_TOKEN_ENABLED", 0):
+            return {}
+        if "YouTube" not in platforms or self._ensure_po_token_provider is None:
+            return {}
+        result = self._ensure_po_token_provider()
+        return result if isinstance(result, dict) else {}
+
+    def start_download(self, url, bili_parts=None, tc_password=None, custom_args=None):
         url = clean_url(url)
         if not url:
             return {"error": "请输入有效的视频链接"}
@@ -290,25 +308,42 @@ class DownloadExecutor:
         missing = self._missing_dependency(platform=detected, config=config_snapshot, is_live=is_live_download)
         if missing:
             return {"error": f"缺少依赖: {missing}"}
+        custom_args_error = self._validate_custom_args(config_snapshot, custom_args)
+        if custom_args_error:
+            return {"error": custom_args_error}
+        provider_result = self._start_po_token_provider_if_needed(
+            config_snapshot, {effective_platform}
+        )
+        if provider_result.get("error"):
+            return {"error": provider_result["error"]}
+        po_token_base_url = provider_result.get("base_url")
         try:
-            cmd = self._build_command(
-                url,
-                is_live=is_live_download,
-                platform_override=effective_platform,
-                config_override=config_snapshot,
-                bili_parts=bili_parts,
-                include_subtitles=False,
-            )
+            build_kwargs = {
+                "is_live": is_live_download,
+                "platform_override": effective_platform,
+                "config_override": config_snapshot,
+                "bili_parts": bili_parts,
+                "include_subtitles": False,
+            }
+            if custom_args:
+                build_kwargs["custom_args"] = custom_args
+            if po_token_base_url:
+                build_kwargs["po_token_base_url"] = po_token_base_url
+            cmd = self._build_command(url, **build_kwargs)
             subtitle_cmd = None
             if config_snapshot.get("DOWNLOAD_SUBTITLES", 0):
-                subtitle_cmd = self._build_command(
-                    url,
-                    is_live=is_live_download,
-                    platform_override=effective_platform,
-                    config_override=config_snapshot,
-                    bili_parts=bili_parts,
-                    subtitle_only=True,
-                )
+                subtitle_kwargs = {
+                    "is_live": is_live_download,
+                    "platform_override": effective_platform,
+                    "config_override": config_snapshot,
+                    "bili_parts": bili_parts,
+                    "subtitle_only": True,
+                }
+                if custom_args:
+                    subtitle_kwargs["custom_args"] = custom_args
+                if po_token_base_url:
+                    subtitle_kwargs["po_token_base_url"] = po_token_base_url
+                subtitle_cmd = self._build_command(url, **subtitle_kwargs)
         except Exception as exc:
             return {"error": f"下载配置无效: {exc}"}
 
@@ -1165,17 +1200,29 @@ class DownloadExecutor:
         finally:
             self._finish(handle, proc)
 
-    def batch_download(self, urls, bili_parts_map=None):
+    def batch_download(self, urls, bili_parts_map=None, custom_args=None):
         urls = [url for raw_url in urls if (url := clean_url(raw_url))]
         if not urls:
             return {"error": "没有有效的视频链接"}
         missing = self._missing_dependency()
         if missing:
             return {"error": f"缺少依赖: {missing}"}
+        config_snapshot = self._app_state.config_snapshot()
+        custom_args_error = self._validate_custom_args(config_snapshot, custom_args)
+        if custom_args_error:
+            return {"error": custom_args_error}
+        effective_platforms = {
+            detect_platform(url) or config_snapshot["PLATFORM"] for url in urls
+        }
+        provider_result = self._start_po_token_provider_if_needed(
+            config_snapshot, effective_platforms
+        )
+        if provider_result.get("error"):
+            return {"error": provider_result["error"]}
+        po_token_base_url = provider_result.get("base_url")
         handle = self._download_manager.begin("batch")
         if handle is None:
             return {"error": "已有下载任务在运行"}
-        config_snapshot = self._app_state.config_snapshot()
         self._cancel_idle_timer()
         self._broadcast_download_state()
         stats = self._app_state.batch_stats
@@ -1184,7 +1231,7 @@ class DownloadExecutor:
         audio_fmt = config_snapshot.get("AUDIO_FORMAT", "mp3")
         stats.update({"ok": 0, "fail": 0, "total": len(urls), "current": 0})
         try:
-            threading.Thread(target=self._run_batch, args=(handle, urls, config_snapshot, stats, bili_parts_map or {}, audio_mode, audio_fmt), daemon=True).start()
+            threading.Thread(target=self._run_batch, args=(handle, urls, config_snapshot, stats, bili_parts_map or {}, audio_mode, audio_fmt, custom_args, po_token_base_url), daemon=True).start()
         except Exception as exc:
             self._download_manager.finish(handle)
             self._broadcast_download_state()
@@ -1192,7 +1239,7 @@ class DownloadExecutor:
             return {"error": f"下载线程启动失败: {exc}"}
         return {"ok": True, "total": len(urls)}
 
-    def _run_batch(self, handle, urls, config_snapshot, stats, bili_parts_map=None, audio_mode="0", audio_fmt="mp3"):
+    def _run_batch(self, handle, urls, config_snapshot, stats, bili_parts_map=None, audio_mode="0", audio_fmt="mp3", custom_args=None, po_token_base_url=None):
         # 批量统计与进度共用任务代际，避免停止后迟到事件污染下一任务。
         self._app_state.download_thread_context.task_id = handle.generation
         stopped = False
@@ -1260,29 +1307,37 @@ class DownloadExecutor:
                         cmd_config.pop("TC_PASSWORD", None)
                         if effective_platform == "TwitCasting" and tc_password:
                             cmd_config["TC_PASSWORD"] = tc_password
-                        cmd = self._build_command(
-                            url,
-                            is_live=is_live_url(url, detected),
-                            platform_override=effective_platform,
-                            config_override=cmd_config,
-                            bili_parts=bili_parts_for_url,
-                            use_ffmpeg_for_hls=use_ffmpeg_for_hls,
-                            include_subtitles=False,
-                        )
+                        build_kwargs = {
+                            "is_live": is_live_url(url, detected),
+                            "platform_override": effective_platform,
+                            "config_override": cmd_config,
+                            "bili_parts": bili_parts_for_url,
+                            "use_ffmpeg_for_hls": use_ffmpeg_for_hls,
+                            "include_subtitles": False,
+                        }
+                        if custom_args:
+                            build_kwargs["custom_args"] = custom_args
+                        if effective_platform == "YouTube" and po_token_base_url:
+                            build_kwargs["po_token_base_url"] = po_token_base_url
+                        cmd = self._build_command(url, **build_kwargs)
                         if tc_direct_tried:
                             cmd = self._with_direct_connection(cmd)
                         if tc_firefox_tried:
                             cmd = self._with_firefox_cookies(cmd)
                         subtitle_cmd = None
                         if cmd_config.get("DOWNLOAD_SUBTITLES", 0):
-                            subtitle_cmd = self._build_command(
-                                url,
-                                is_live=is_live_url(url, detected),
-                                platform_override=effective_platform,
-                                config_override=cmd_config,
-                                bili_parts=bili_parts_for_url,
-                                subtitle_only=True,
-                            )
+                            subtitle_kwargs = {
+                                "is_live": is_live_url(url, detected),
+                                "platform_override": effective_platform,
+                                "config_override": cmd_config,
+                                "bili_parts": bili_parts_for_url,
+                                "subtitle_only": True,
+                            }
+                            if custom_args:
+                                subtitle_kwargs["custom_args"] = custom_args
+                            if effective_platform == "YouTube" and po_token_base_url:
+                                subtitle_kwargs["po_token_base_url"] = po_token_base_url
+                            subtitle_cmd = self._build_command(url, **subtitle_kwargs)
                             subtitle_cmd = self._apply_twitcasting_recovery_state(
                                 subtitle_cmd,
                                 direct_tried=tc_direct_tried,
