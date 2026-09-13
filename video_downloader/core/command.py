@@ -1,4 +1,80 @@
+import sys
+from pathlib import Path
+
 from .constants import DEFAULT_SUBTITLE_LANGS
+
+
+_TWITCASTING_PLUGIN_RELATIVE_PATH = (
+    "yt-dlp-plugins/video_downloader/yt_dlp_plugins/"
+    "postprocessor/twitcasting_parallel.py"
+)
+
+
+def twitcasting_hls_fallback_args(tool_dir):
+    """返回多初始化段回退参数；插件缺失时安全降级为纯 FFmpeg。"""
+    args = [
+        "--downloader", "m3u8:ffmpeg",
+        # 对插件不接管的播放列表显式启用 HLS 连接复用，避免依赖 FFmpeg
+        # 不同版本的 auto 默认值。
+        "--downloader-args", "ffmpeg_i:-http_persistent 1 -http_multiple 1",
+    ]
+    tool_dir = Path(tool_dir)
+    plugin_root = None
+    for candidate in (
+        tool_dir,
+        Path(sys._MEIPASS) if getattr(sys, "_MEIPASS", None) else None,
+    ):
+        if candidate and (candidate / _TWITCASTING_PLUGIN_RELATIVE_PATH).is_file():
+            plugin_root = candidate
+            break
+    if plugin_root is None:
+        return args
+
+    plugin_dir_args = []
+    if plugin_root != tool_dir:
+        # PyInstaller 单文件版的数据文件位于 _MEIPASS；外部 yt-dlp 需要显式
+        # 获得该临时目录，才能发现打包进去的插件。
+        plugin_dir_args = ["--plugin-dirs", str(plugin_root)]
+    return [
+        *plugin_dir_args,
+        "--enable-file-urls",
+        "--use-postprocessor", "TwitCastingParallelHls:when=before_dl",
+        "--use-postprocessor", "TwitCastingParallelHls:when=post_process;cleanup=true",
+        *args,
+    ]
+
+
+def _browser_cookie_spec(cfg):
+    """构建 yt-dlp 的浏览器 Cookie 参数，允许 Firefox 自动探测 Profile。"""
+    browser = str(cfg.get("BROWSER_NAME") or "").strip().lower()
+    profile = str(cfg.get("BROWSER_PROFILE") or "").strip()
+    # "Default" 是 Chromium 的常见目录名，也是本项目的历史默认值；Firefox
+    # 通常使用随机前缀目录。切换浏览器后继续传 firefox:Default 会导致 yt-dlp
+    # 在一个不存在的目录中查找数据库，因此让 yt-dlp 自动选择最近使用的 Profile。
+    if browser == "firefox" and profile.lower() == "default":
+        profile = ""
+    return f"{browser}:{profile}" if profile else browser
+
+
+def _append_proxy_option(cmd, cfg):
+    """显式表达代理开关，避免关闭代理时仍继承系统代理环境变量。"""
+    if cfg["PROXY_ENABLED"]:
+        proxy = f"{cfg['PROXY_TYPE']}://{cfg['PROXY_ADDR']}:{cfg['PROXY_PORT']}"
+    else:
+        proxy = ""
+    cmd += ["--proxy", proxy]
+
+
+def _append_cookie_options(cmd, cfg, cookie_file):
+    if not cfg["USE_COOKIES"]:
+        return
+    if cfg["COOKIE_MODE"] == 1:
+        if cookie_file is not None:
+            cmd += ["--cookies", str(cookie_file)]
+    else:
+        browser_spec = _browser_cookie_spec(cfg)
+        if browser_spec:
+            cmd += ["--cookies-from-browser", browser_spec]
 
 
 def _append_subtitle_options(cmd, cfg, tool_dir, platform_name, also_set_default_output=False):
@@ -71,13 +147,8 @@ def build_ytdlp_cmd(url, config, tool_dir, exe_suffix="", *, is_live=False, plat
             return cmd + [url]
         if cfg["SPEED_LIMIT"] > 0:
             cmd += ["-r", f"{cfg['SPEED_LIMIT']}M"]
-        if cfg["PROXY_ENABLED"]:
-            cmd += ["--proxy", f"{cfg['PROXY_TYPE']}://{cfg['PROXY_ADDR']}:{cfg['PROXY_PORT']}"]
-        if cfg["USE_COOKIES"]:
-            if cfg["COOKIE_MODE"] == 1 and cookie_file is not None:
-                cmd += ["--cookies", str(cookie_file)]
-            elif cfg["COOKIE_MODE"] != 1:
-                cmd += ["--cookies-from-browser", f"{cfg['BROWSER_NAME']}:{cfg['BROWSER_PROFILE']}"]
+        _append_proxy_option(cmd, cfg)
+        _append_cookie_options(cmd, cfg, cookie_file)
         if cfg["WIN_FILENAMES"]:
             cmd += ["--windows-filenames"]
         if cfg["STRICT_FILENAME"]:
@@ -170,14 +241,8 @@ def build_ytdlp_cmd(url, config, tool_dir, exe_suffix="", *, is_live=False, plat
     cmd += ["-N", str(cfg["THREADS"])]
     if cfg["SPEED_LIMIT"] > 0:
         cmd += ["-r", f"{cfg['SPEED_LIMIT']}M"]
-    if cfg["PROXY_ENABLED"]:
-        cmd += ["--proxy", f"{cfg['PROXY_TYPE']}://{cfg['PROXY_ADDR']}:{cfg['PROXY_PORT']}"]
-    if cfg["USE_COOKIES"]:
-        if cfg["COOKIE_MODE"] == 1:
-            if cookie_file is not None:
-                cmd += ["--cookies", str(cookie_file)]
-        else:
-            cmd += ["--cookies-from-browser", f"{cfg['BROWSER_NAME']}:{cfg['BROWSER_PROFILE']}"]
+    _append_proxy_option(cmd, cfg)
+    _append_cookie_options(cmd, cfg, cookie_file)
     if cfg["EMBED_META"]:
         cmd += ["--embed-metadata"]
     if cfg["DOWNLOAD_THUMB"]:
@@ -198,7 +263,10 @@ def build_ytdlp_cmd(url, config, tool_dir, exe_suffix="", *, is_live=False, plat
     # 下载器（可并发 -N 个分片，速度更快）；仅在检测到该错误后由执行器重试
     # 时置 use_ffmpeg_for_hls，让 FFmpeg 接管 m3u8 下载以兼容这类播放列表。
     if platform_name == "TwitCasting" and use_ffmpeg_for_hls:
-        cmd += ["--downloader", "m3u8:ffmpeg"]
+        # before_dl 插件并发预取带多个 EXT-X-MAP 的远程分片，再把本地播放列表
+        # 交给 FFmpeg 封装；yt-dlp 因而仍能继续执行元数据、封面和归档流程。
+        # 插件若遇到不支持的清单会保持原 URL，自动退回原有 FFmpeg 串行路径。
+        cmd += twitcasting_hls_fallback_args(tool_dir)
     # TwitCasting 密码保护/会员限定直播与录播需要通过 --video-password 解锁。
     if platform_name == "TwitCasting" and cfg.get("TC_PASSWORD"):
         cmd += ["--video-password", cfg["TC_PASSWORD"]]
@@ -214,5 +282,11 @@ def build_ytdlp_cmd(url, config, tool_dir, exe_suffix="", *, is_live=False, plat
     # Bilibili 多P选择：通过 -I 指定下载哪些分P
     if bili_parts and bili_parts != "all":
         cmd += ["-I", bili_parts]
+    # YouTube 已结束直播的留档（live_status=post_live）在默认播放器客户端下会返回
+    # "This live event has ended."，只有 web_embedded 客户端能取到已转码的 VOD。
+    # 在默认客户端集之后追加 web_embedded 兜底：正常视频仍优先走默认客户端，
+    # 仅当默认客户端无法提取时自动回退，不影响已有下载行为。
+    if platform_name == "YouTube":
+        cmd += ["--extractor-args", "youtube:player_client=default,web_embedded"]
     cmd.append(url)
     return cmd

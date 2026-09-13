@@ -38,7 +38,9 @@
 3. 解压依赖包，将里面的**全部内容**（所有exe文件、docs文件夹、changelog.html等）解压到主程序同一目录
 4. 双击 `视频下载工具v2.4.0-GUI.exe` 运行，自动打开浏览器界面
 
-> 💡 **提示**：依赖包包含 yt-dlp.exe、ffmpeg.exe、ffprobe.exe、deno.exe、fantiadl.exe 和 withny-dl-windows-amd64.exe。NicoChannel 还需要单独准备 `nicochannel.zip` 并放在主程序同一目录。首次运行会自动生成配置文件和下载目录。
+> 💡 **提示**：依赖包包含 yt-dlp.exe、ffmpeg.exe、ffprobe.exe、deno.exe、fantiadl.exe、withny-dl-windows-amd64.exe 和 `yt-dlp-plugins` 目录。NicoChannel 还需要单独准备 `nicochannel.zip` 并放在主程序同一目录。首次运行会自动生成配置文件和下载目录。
+
+TwitCasting 多初始化段归档会自动加载随项目提供的 `yt-dlp-plugins/video_downloader` 插件，按设置中的下载线程数并发预取 HLS 分片，再由 FFmpeg 完成本地封装；无需另装下载器。源码运行或制作依赖包时，请让整个 `yt-dlp-plugins` 目录与 `yt-dlp.exe` 保持在同一目录；若缺失，程序会安全退回 FFmpeg 串行下载。
 
 ### 源码运行版
 

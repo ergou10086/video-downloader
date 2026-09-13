@@ -137,6 +137,7 @@ function init() {
   fillSelect('s_audiofmt', [['m4a','m4a(原生)'],['mp3','MP3'],['wav','WAV']]);
   fillSelect('s_hwaccel', [['cpu','CPU软编码'],['h264_nvenc','N卡 NVENC'],['h264_qsv','Intel QSV'],['h264_amf','AMD AMF']]);
   fillSelect('s_browser', [['chrome','Chrome'],['edge','Edge'],['firefox','Firefox'],['brave','Brave'],['opera','Opera']]);
+  $('s_browser').addEventListener('change', onBrowserChanged);
   fillSelect('s_subtitle_lang_preset', SUBTITLE_LANG_PRESETS);
   fillSelect('tool_subtitle_lang_preset', SUBTITLE_LANG_PRESETS);
 
@@ -193,6 +194,7 @@ function selectPlatform(name) {
   // 平台专项提示
   $('bilibiliHint').style.display    = name === 'Bilibili' ? '' : 'none';
   $('twitterHint').style.display     = name === 'Twitter' ? '' : 'none';
+  $('twitcastingHint').style.display = name === 'TwitCasting' ? '' : 'none';
   $('nicochannelHint').style.display = name === 'NicoChannel' ? '' : 'none';
   $('withnyHint').style.display      = name === 'Withny' ? '' : 'none';
 
@@ -287,6 +289,7 @@ function applyConfig(s) {
   $('s_cookiemode').value = s.COOKIE_MODE;
   $('s_browser').value = s.BROWSER_NAME;
   $('s_profile').value = s.BROWSER_PROFILE;
+  onBrowserChanged();
   $('s_hwaccel').value = s.HWACCEL;
   if(s.LIVE_STREAM_METHOD !== undefined) $('s_live_stream_method').value = s.LIVE_STREAM_METHOD;
   setSwitch('sw_meta', s.EMBED_META);
@@ -359,6 +362,18 @@ function toggleCookieMode() {
   const browserMode = $('s_cookiemode').value === '2';
   $('row_browser').style.display = browserMode ? 'flex' : 'none';
   $('row_profile').style.display = browserMode ? 'flex' : 'none';
+}
+
+/** Firefox Profile 通常带随机前缀；留空交给 yt-dlp 自动选择最近使用项。 */
+function onBrowserChanged() {
+  const profile = $('s_profile');
+  if($('s_browser').value === 'firefox') {
+    if(profile.value.trim().toLowerCase() === 'default') profile.value = '';
+    profile.placeholder = '留空自动探测最近使用的 Firefox Profile';
+  } else {
+    if(!profile.value.trim()) profile.value = 'Default';
+    profile.placeholder = '例如 Default 或 Profile 1';
+  }
 }
 
 

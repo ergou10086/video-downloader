@@ -138,6 +138,9 @@
           <div class="notice" id="twitterHint" style="display:none">
             <b>Twitter/X 提示：</b>部分内容需要登录才能下载，建议使用「浏览器 Cookie 模式」自动提取登录状态。
           </div>
+          <div class="notice" id="twitcastingHint" style="display:none">
+            <b>TwitCasting 提示：</b>受限归档建议使用已登录的 Firefox；密码视频会自动弹窗。若 m3u8 返回 400，工具会依次尝试直连与 Firefox 登录状态；多初始化片段会按“下载线程数”并发预取，再由 FFmpeg 本地封装。
+          </div>
           <div class="notice" id="nicochannelHint" style="display:none">
             <b>NicoChannel 提示：</b>首次下载需从 Firefox 自动提取 JWT 登录令牌，请确保已在 Firefox 中登录 <b>nicochannel.jp</b>。
           </div>
@@ -251,7 +254,7 @@
               <div class="row"><span class="lb">启用 Cookie</span><span class="sw on" id="sw_cookies" onclick="toggleSwitch(this)"><i></i></span></div>
               <div class="row"><span class="lb">Cookie 模式</span><span class="sel"><select class="ctl" id="s_cookiemode" onchange="toggleCookieMode()"><option value="1">cookies.txt 文件</option><option value="2">浏览器提取</option></select><svg class="ico s14 cv"><use href="#i-chevron"></use></svg></span></div>
               <div class="row" id="row_browser"><span class="lb">浏览器</span><span class="sel"><select class="ctl" id="s_browser"></select><svg class="ico s14 cv"><use href="#i-chevron"></use></svg></span></div>
-              <div class="row" id="row_profile"><span class="lb">配置文件名</span><input type="text" class="ctl mono" id="s_profile" value="Default" style="flex:1"></div>
+              <div class="row" id="row_profile"><span class="lb">配置文件名</span><input type="text" class="ctl mono" id="s_profile" value="Default" placeholder="Firefox 留空自动探测" style="flex:1"></div>
             </div>
 
           </div>

@@ -7,10 +7,16 @@ import threading
 import time
 from pathlib import Path
 
+from video_downloader.core.command import twitcasting_hls_fallback_args
 from video_downloader.core.constants import LEGACY_ALL_SUBTITLE_LANGS, RECOMMENDED_SUBTITLE_LANGS
 from video_downloader.core.platform import clean_url, detect_platform, is_live_url, safe_decode
 from video_downloader.core.subtitles import classify_subtitle_result
 from video_downloader.services.withny_archive import WithnyArchiveError, build_ffmpeg_command, load_and_select, redact_line
+
+
+_PROXY_ENV_NAMES = {
+    "all_proxy", "http_proxy", "https_proxy", "ftp_proxy", "no_proxy",
+}
 
 
 def _win_startup_info():
@@ -99,20 +105,168 @@ class DownloadExecutor:
         }
 
     @staticmethod
-    def _with_ffmpeg_downloader(cmd):
-        """为已构建好的 yt-dlp 命令追加 --downloader m3u8:ffmpeg（幂等）。
+    def _option_value(cmd, option):
+        """返回命令中某个二元选项最后一次出现时的值。"""
+        value = None
+        found = False
+        for index, item in enumerate(cmd):
+            if item == option:
+                found = True
+                value = cmd[index + 1] if index + 1 < len(cmd) else None
+        return found, value
+
+    @classmethod
+    def _has_effective_proxy(cls, cmd):
+        found, value = cls._option_value(cmd, "--proxy")
+        if found:
+            return bool(value)
+        return any(
+            key.lower() in _PROXY_ENV_NAMES and bool(value)
+            for key, value in os.environ.items()
+        )
+
+    @classmethod
+    def _uses_firefox_cookies(cls, cmd):
+        found, value = cls._option_value(cmd, "--cookies-from-browser")
+        if not found or not value:
+            return False
+        return str(value).split(":", 1)[0].split("+", 1)[0].lower() == "firefox"
+
+    @staticmethod
+    def _has_cookie_auth(cmd):
+        return "--cookies" in cmd or "--cookies-from-browser" in cmd
+
+    @staticmethod
+    def _replace_pair_options(cmd, options, replacement):
+        result = []
+        index = 0
+        while index < len(cmd):
+            if cmd[index] in options:
+                index += 2
+                continue
+            result.append(cmd[index])
+            index += 1
+        result.extend(replacement)
+        return result
+
+    @classmethod
+    def _with_direct_connection(cls, cmd):
+        return cls._replace_pair_options(cmd, {"--proxy"}, ["--proxy", ""])
+
+    @classmethod
+    def _with_firefox_cookies(cls, cmd):
+        return cls._replace_pair_options(
+            cmd,
+            {"--cookies", "--cookies-from-browser"},
+            ["--cookies-from-browser", "firefox"],
+        )
+
+    @classmethod
+    def _apply_twitcasting_recovery_state(cls, cmd, *, direct_tried, firefox_tried):
+        """让配套命令继承主视频已经选定的 TwitCasting 恢复策略。"""
+        if not cmd:
+            return cmd
+        recovered_cmd = list(cmd)
+        if direct_tried:
+            recovered_cmd = cls._with_direct_connection(recovered_cmd)
+        if firefox_tried:
+            recovered_cmd = cls._with_firefox_cookies(recovered_cmd)
+        return recovered_cmd
+
+    @staticmethod
+    def _is_twitcasting_m3u8_400(line):
+        lowered = line.lower()
+        return (
+            "failed to download m3u8 information" in lowered
+            and ("http error 400" in lowered or "400: bad request" in lowered)
+        )
+
+    @staticmethod
+    def _is_twitcasting_access_error(line):
+        lowered = line.lower()
+        return "failed to get m3u8 playlist" in lowered or "login required" in lowered
+
+    @staticmethod
+    def _is_browser_cookie_error(line):
+        lowered = line.lower()
+        return any(signature in lowered for signature in (
+            "could not find firefox cookies database",
+            "could not copy chrome cookie database",
+            "failed to decrypt cookie",
+            "invalid cookies from browser arguments",
+        ))
+
+    def _twitcasting_recovery(self, cmd, *, m3u8_400, access_error,
+                              direct_tried, firefox_tried):
+        """返回 TwitCasting 下一条受控恢复命令；每种兜底最多执行一次。"""
+        if m3u8_400 and not direct_tried and self._has_effective_proxy(cmd):
+            return self._with_direct_connection(cmd), True, firefox_tried, "direct"
+        if (
+            (m3u8_400 or access_error)
+            and not firefox_tried
+            and self._has_cookie_auth(cmd)
+            and not self._uses_firefox_cookies(cmd)
+        ):
+            return self._with_firefox_cookies(cmd), direct_tried, True, "firefox"
+        return None
+
+    def _log_twitcasting_failure_guidance(self, *, m3u8_400, access_error, cookie_error):
+        if cookie_error:
+            self._log(
+                "[TwitCasting] 无法读取浏览器 Cookie。请确认 Firefox 已登录 TwitCasting，"
+                "并将配置文件名留空以自动探测；也可重新导出 cookies.txt",
+                "warn",
+            )
+        elif m3u8_400:
+            self._log(
+                "[TwitCasting] m3u8 请求仍被拒绝。请检查登录 Cookie、视频密码与代理；"
+                "若启用了代理，请换节点或关闭代理后重试",
+                "warn",
+            )
+        elif access_error:
+            self._log(
+                "[TwitCasting] 未取得播放列表，内容可能需要登录或当前账号没有观看权限。"
+                "请使用已登录 TwitCasting 的 Firefox，或重新导出 cookies.txt",
+                "warn",
+            )
+
+    def _with_ffmpeg_downloader(self, cmd):
+        """为单条下载补齐 TwitCasting 并发预取与 FFmpeg 兜底参数（幂等）。
 
         TwitCasting 的 fMP4 录像可能在同一 m3u8 播放列表中包含多个初始化片段，
         原生 hlsnative 下载器会因此报 "Initialization fragment found after media
-        fragments"。此时改用 FFmpeg 下载 m3u8 即可兼容。若命令已带该选项则原样返回。
+        fragments"。重试时先由内置 yt-dlp 插件并发预取，再交给 FFmpeg 本地封装；
+        插件无法接管时仍会用 FFmpeg 直接下载远端 m3u8。
         """
         if not cmd:
             return list(cmd)
-        if "--downloader" in cmd and "m3u8:ffmpeg" in cmd:
-            return list(cmd)
+        result = self._replace_pair_options(
+            cmd, {"--downloader"}, ["--downloader", "m3u8:ffmpeg"])
+        fallback_args = twitcasting_hls_fallback_args(self._tool_dir)
+        if "--enable-file-urls" in fallback_args and "--enable-file-urls" not in result:
+            result.append("--enable-file-urls")
+        postprocessors = {
+            result[index + 1]
+            for index, value in enumerate(result[:-1])
+            if value == "--use-postprocessor"
+        }
+        for spec in (
+            "TwitCastingParallelHls:when=before_dl",
+            "TwitCastingParallelHls:when=post_process;cleanup=true",
+        ):
+            if spec in fallback_args and spec not in postprocessors:
+                result += ["--use-postprocessor", spec]
+        downloader_args = {
+            result[index + 1]
+            for index, value in enumerate(result[:-1])
+            if value == "--downloader-args"
+        }
+        ffmpeg_args = "ffmpeg_i:-http_persistent 1 -http_multiple 1"
+        if ffmpeg_args not in downloader_args:
+            result += ["--downloader-args", ffmpeg_args]
         # yt-dlp 允许选项出现在 URL 之后（如本工程末尾追加的 --verbose），
         # 直接追加到末尾即可生效。
-        return list(cmd) + ["--downloader", "m3u8:ffmpeg"]
+        return result
 
     def start_download(self, url, bili_parts=None, tc_password=None):
         url = clean_url(url)
@@ -726,7 +880,9 @@ class DownloadExecutor:
         output = "\n".join(lines)
         return "HTTP Error 429" in output or "Too Many Requests" in output
 
-    def _run_single(self, handle, cmd, url, effective_platform, is_live_download, audio_mode="0", audio_fmt="mp3", verbose=False, subtitle_cmd=None):
+    def _run_single(self, handle, cmd, url, effective_platform, is_live_download,
+                    audio_mode="0", audio_fmt="mp3", verbose=False, subtitle_cmd=None,
+                    tc_direct_tried=False, tc_firefox_tried=False):
         # 线程局部代际会随进度回调传递，旧工作线程无法覆盖新任务界面状态。
         self._app_state.download_thread_context.task_id = handle.generation
         stats = self._app_state.batch_stats
@@ -764,6 +920,9 @@ class DownloadExecutor:
             password_required = False
             password_retry = False
             init_fragment_error = False
+            tc_m3u8_400 = False
+            tc_access_error = False
+            tc_cookie_error = False
 
             def fmt_live_status():
                 elapsed = int(time.time() - live_start_time)
@@ -808,8 +967,12 @@ class DownloadExecutor:
                 # 标记后改用 FFmpeg 下载 m3u8 重试。
                 if is_error and "Initialization fragment found after media fragments" in line and effective_platform == "TwitCasting":
                     init_fragment_error = True
+                if is_error and effective_platform == "TwitCasting":
+                    tc_m3u8_400 = tc_m3u8_400 or self._is_twitcasting_m3u8_400(line)
+                    tc_access_error = tc_access_error or self._is_twitcasting_access_error(line)
+                    tc_cookie_error = tc_cookie_error or self._is_browser_cookie_error(line)
                 has_pct = bool(re.search(r"\d+(?:\.\d+)?%", line))
-                has_ffmpeg_progress = is_live_download and (
+                has_ffmpeg_progress = bool(
                     re.search(r"(?:size|Lsize)=\s*\S+", line)
                     or re.search(r"frame=\s*\d+", line) and re.search(r"fps=", line)
                 ) and any(value in line for value in ["time=", "bitrate=", "speed=", "fps="])
@@ -820,7 +983,7 @@ class DownloadExecutor:
                     "Destination:", "Merging formats", "Deleting original", "Extracting URL",
                     "Downloading webpage", "Connecting to WebSocket", "has already been recorded",
                     "video only", "audio only", "Resuming",
-                    "Trying video password", "Downloading m3u8",
+                    "Trying video password", "Downloading m3u8", "TwitCastingParallel",
                 ])
 
                 if is_error:
@@ -883,7 +1046,12 @@ class DownloadExecutor:
                         fragment_match = re.search(r"fragment\s+(\d+)", line, re.IGNORECASE)
                         if fragment_match:
                             live_frag = f"分片 {fragment_match.group(1)}"
-                    status_text, speed = fmt_live_status()
+                    if is_live_download:
+                        status_text, speed = fmt_live_status()
+                    else:
+                        detail = " | ".join(part for part in [live_size, live_speed] if part)
+                        status_text = "FFmpeg 下载中" + (f" - {detail}" if detail else "...")
+                        speed = live_speed
                     self._update_progress(-1, status_text, speed=speed, eta="", stage=current_stage)
 
             self._close_process(proc)
@@ -913,6 +1081,38 @@ class DownloadExecutor:
                 self._add_history(url, video_title, effective_platform, "success", output_path)
                 update_stats()
             else:
+                recovery = self._twitcasting_recovery(
+                    cmd,
+                    m3u8_400=tc_m3u8_400,
+                    access_error=tc_access_error,
+                    direct_tried=tc_direct_tried,
+                    firefox_tried=tc_firefox_tried,
+                ) if effective_platform == "TwitCasting" else None
+                if recovery:
+                    retry_cmd, direct_tried, firefox_tried, mode = recovery
+                    retry_subtitle_cmd = self._apply_twitcasting_recovery_state(
+                        subtitle_cmd,
+                        direct_tried=direct_tried,
+                        firefox_tried=firefox_tried,
+                    )
+                    if mode == "direct":
+                        self._log("[TwitCasting] m3u8 返回 400，改用直连重试一次", "warn")
+                    else:
+                        self._log("[TwitCasting] 播放列表访问失败，改用 Firefox 登录状态重试一次", "warn")
+                    self._run_single(
+                        handle,
+                        retry_cmd,
+                        url,
+                        effective_platform,
+                        is_live_download,
+                        audio_mode,
+                        audio_fmt,
+                        verbose,
+                        retry_subtitle_cmd,
+                        direct_tried,
+                        firefox_tried,
+                    )
+                    return
                 # TwitCasting 多初始化片段：原生下载器失败，改用 FFmpeg 重试一次。
                 if init_fragment_error and effective_platform == "TwitCasting" and "--downloader" not in cmd:
                     self._log(f"[{effective_platform}] 检测到多初始化片段，改用 FFmpeg 下载器重试", "warn")
@@ -926,8 +1126,16 @@ class DownloadExecutor:
                         audio_fmt,
                         verbose,
                         subtitle_cmd,
+                        tc_direct_tried,
+                        tc_firefox_tried,
                     )
                     return
+                if effective_platform == "TwitCasting":
+                    self._log_twitcasting_failure_guidance(
+                        m3u8_400=tc_m3u8_400,
+                        access_error=tc_access_error,
+                        cookie_error=tc_cookie_error,
+                    )
                 stats["fail"] = 1
                 self._log(f"[错误] 下载结束，退出码: {rc}", "error")
                 self._update_progress(0, f"失败 (退出码 {rc})", "", "")
@@ -1031,6 +1239,8 @@ class DownloadExecutor:
                 url_done = False
                 # TwitCasting fMP4 多初始化片段时切换到 FFmpeg 下载 m3u8 的标记。
                 use_ffmpeg_for_hls = False
+                tc_direct_tried = False
+                tc_firefox_tried = False
 
                 while pw_attempt < max_password_attempts and not url_done:
                     if handle.cancel_event.is_set():
@@ -1041,6 +1251,9 @@ class DownloadExecutor:
                     password_required = False
                     password_retry = False
                     init_fragment_error = False
+                    tc_m3u8_400 = False
+                    tc_access_error = False
+                    tc_cookie_error = False
                     try:
                         cmd_config = dict(config_snapshot)
                         # 避免基础配置中的旧密码绕过本次任务的失效处理。
@@ -1056,6 +1269,10 @@ class DownloadExecutor:
                             use_ffmpeg_for_hls=use_ffmpeg_for_hls,
                             include_subtitles=False,
                         )
+                        if tc_direct_tried:
+                            cmd = self._with_direct_connection(cmd)
+                        if tc_firefox_tried:
+                            cmd = self._with_firefox_cookies(cmd)
                         subtitle_cmd = None
                         if cmd_config.get("DOWNLOAD_SUBTITLES", 0):
                             subtitle_cmd = self._build_command(
@@ -1065,6 +1282,11 @@ class DownloadExecutor:
                                 config_override=cmd_config,
                                 bili_parts=bili_parts_for_url,
                                 subtitle_only=True,
+                            )
+                            subtitle_cmd = self._apply_twitcasting_recovery_state(
+                                subtitle_cmd,
+                                direct_tried=tc_direct_tried,
+                                firefox_tried=tc_firefox_tried,
                             )
                         self._remember_ytdlp_command(cmd)
                         proc = self._spawn(cmd)
@@ -1121,6 +1343,10 @@ class DownloadExecutor:
                                     password_retry = True
                                 if "Initialization fragment found after media fragments" in line and effective_platform == "TwitCasting":
                                     init_fragment_error = True
+                                if effective_platform == "TwitCasting":
+                                    tc_m3u8_400 = tc_m3u8_400 or self._is_twitcasting_m3u8_400(line)
+                                    tc_access_error = tc_access_error or self._is_twitcasting_access_error(line)
+                                    tc_cookie_error = tc_cookie_error or self._is_browser_cookie_error(line)
                             elif "WARNING" in line:
                                 self._log(f"  {line}", "warn")
                             else:
@@ -1161,6 +1387,11 @@ class DownloadExecutor:
                                 output_path = path_match.group(1).replace('"', "").replace("'", "").strip()
                                 self._log(f"  → {os.path.basename(output_path)}", "info")
                             progress_match = re.search(r"(\d+(?:\.\d+)?)%", line)
+                            ffmpeg_progress = (
+                                use_ffmpeg_for_hls
+                                and any(value in line for value in ["time=", "bitrate=", "speed=", "fps="])
+                                and bool(re.search(r"(?:size|Lsize)=\s*\S+|frame=\s*\d+", line))
+                            )
                             if progress_match:
                                 # 批量统计由下方计数器单独展示；主进度条只反映
                                 # 当前这一条视频/音频流，切到下一条时从 0 重新开始。
@@ -1171,6 +1402,16 @@ class DownloadExecutor:
                                     speed=speed,
                                     eta=eta,
                                     stage=current_stage)
+                            elif ffmpeg_progress:
+                                speed_match = re.search(r"speed=\s*(\d+\.?\d*x)", line)
+                                speed = speed_match.group(1) if speed_match else ""
+                                self._update_progress(
+                                    -1,
+                                    f"批量下载 {index}/{len(urls)} · FFmpeg 下载中",
+                                    speed=speed,
+                                    eta="",
+                                    stage=current_stage,
+                                )
                             elif nico_live_dl and (batch_live_frag or batch_live_size):
                                 # Niconico 直播无百分比输出：用数据量/分片数显示活动状态
                                 frag_info = f" | {batch_live_frag}" if batch_live_frag else ""
@@ -1217,6 +1458,20 @@ class DownloadExecutor:
                             self._add_history(url, "", effective_platform, "success", output_path)
                             url_done = True
                         else:
+                            recovery = self._twitcasting_recovery(
+                                cmd,
+                                m3u8_400=tc_m3u8_400,
+                                access_error=tc_access_error,
+                                direct_tried=tc_direct_tried,
+                                firefox_tried=tc_firefox_tried,
+                            ) if effective_platform == "TwitCasting" else None
+                            if recovery:
+                                _, tc_direct_tried, tc_firefox_tried, mode = recovery
+                                if mode == "direct":
+                                    self._log("[TwitCasting] m3u8 返回 400，改用直连重试一次", "warn")
+                                else:
+                                    self._log("[TwitCasting] 播放列表访问失败，改用 Firefox 登录状态重试一次", "warn")
+                                continue
                             # TwitCasting fMP4 播放列表含多个初始化片段：原生下载器
                             # 失败，切换 FFmpeg 下载 m3u8 后重试一次（不消耗密码重试次数）。
                             if init_fragment_error and effective_platform == "TwitCasting" and not use_ffmpeg_for_hls:
@@ -1259,6 +1514,12 @@ class DownloadExecutor:
                                 self._add_history(url, "", effective_platform, "fail")
                                 url_done = True
                             else:
+                                if effective_platform == "TwitCasting":
+                                    self._log_twitcasting_failure_guidance(
+                                        m3u8_400=tc_m3u8_400,
+                                        access_error=tc_access_error,
+                                        cookie_error=tc_cookie_error,
+                                    )
                                 stats["fail"] += 1
                                 self._log(f"[{index}/{len(urls)}] ✗ 失败 (退出码 {rc})", "error")
                                 self._add_history(url, "", effective_platform, "fail")
@@ -1369,6 +1630,14 @@ class DownloadExecutor:
 
     def _spawn(self, cmd, cwd=None):
         env = os.environ.copy()
+        # yt-dlp 的 --proxy "" 只约束自身网络层。外部 FFmpeg 仍会继承
+        # HTTP_PROXY/HTTPS_PROXY 等环境变量，因此在显式直连时一并清除，保证
+        # 页面、m3u8 与媒体分片使用同一网络路径。
+        proxy_found, proxy_value = self._option_value(cmd, "--proxy")
+        if proxy_found and not proxy_value:
+            for key in list(env):
+                if key.lower() in _PROXY_ENV_NAMES:
+                    env.pop(key, None)
         env.update({"PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8", "PYTHONUNBUFFERED": "1", "NO_COLOR": "1"})
         startupinfo, creationflags = _win_startup_info()
         return subprocess.Popen(
