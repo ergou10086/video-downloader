@@ -75,6 +75,41 @@ class YtdlpCommandTests(unittest.TestCase):
         self.assertNotIn("--write-subs", cmd)
         self.assertNotIn("--write-auto-subs", cmd)
 
+    def test_clean_layout_routes_dependencies_downloads_and_archives(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            dependency = root / "dependency"
+            dependency.mkdir()
+            (dependency / "yt-dlp.exe").touch()
+            (dependency / "ffmpeg.exe").touch()
+            cmd = build_ytdlp_cmd(
+                "https://youtube.com/watch?v=abc",
+                DEFAULT_CONFIG,
+                root,
+                ".exe",
+            )
+        self.assertEqual(cmd[0], str(dependency / "yt-dlp.exe"))
+        self.assertEqual(cmd[cmd.index("--ffmpeg-location") + 1], str(dependency))
+        self.assertTrue(cmd[cmd.index("-o") + 1].startswith(str(root / "download" / "YouTube")))
+        self.assertEqual(
+            cmd[cmd.index("--download-archive") + 1],
+            str(root / "download" / "archive" / "youtube_archive.txt"),
+        )
+
+    def test_legacy_root_dependencies_remain_compatible(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "yt-dlp.exe").touch()
+            (root / "ffmpeg.exe").touch()
+            cmd = build_ytdlp_cmd(
+                "https://youtube.com/watch?v=abc",
+                DEFAULT_CONFIG,
+                root,
+                ".exe",
+            )
+        self.assertEqual(cmd[0], str(root / "yt-dlp.exe"))
+        self.assertEqual(cmd[cmd.index("--ffmpeg-location") + 1], str(root))
+
     def test_enabled_subtitles_use_chinese_languages_and_separate_directory(self):
         config = dict(DEFAULT_CONFIG, DOWNLOAD_SUBTITLES=1)
         with tempfile.TemporaryDirectory() as directory:

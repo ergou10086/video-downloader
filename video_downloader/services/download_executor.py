@@ -10,6 +10,7 @@ from pathlib import Path
 from video_downloader.core.command import parse_custom_ytdlp_args, twitcasting_hls_fallback_args
 from video_downloader.core.constants import LEGACY_ALL_SUBTITLE_LANGS, RECOMMENDED_SUBTITLE_LANGS
 from video_downloader.core.platform import clean_url, detect_platform, is_live_url, safe_decode
+from video_downloader.core.paths import AppPaths
 from video_downloader.core.subtitles import classify_subtitle_result
 from video_downloader.services.withny_archive import WithnyArchiveError, build_ffmpeg_command, load_and_select, redact_line
 
@@ -57,6 +58,7 @@ class DownloadExecutor:
         ensure_po_token_provider=None,
     ):
         self._tool_dir = tool_dir
+        self._paths = AppPaths(tool_dir)
         self._exe_suffix = exe_suffix
         self._app_state = app_state
         self._download_manager = download_manager
@@ -392,7 +394,7 @@ class DownloadExecutor:
         if selection.get("cancelled"):
             return {"ok": True, "cancelled": True}
 
-        ffmpeg = self._tool_dir / f"ffmpeg{self._exe_suffix}"
+        ffmpeg = self._paths.executable("ffmpeg", self._exe_suffix)
         if not ffmpeg.is_file():
             return {"error": f"缺少依赖: {ffmpeg.name}"}
         try:
@@ -506,7 +508,7 @@ class DownloadExecutor:
         if selection.get("cancelled"):
             return {"ok": True, "cancelled": True}
 
-        executable = self._tool_dir / f"withny-dl-windows-amd64{self._exe_suffix}"
+        executable = self._paths.executable("withny-dl-windows-amd64", self._exe_suffix)
         if not executable.is_file():
             return {"error": f"缺少依赖: {executable.name}"}
         try:
@@ -689,7 +691,7 @@ class DownloadExecutor:
             while os.path.isfile(f"{base}_{counter}.{audio_ext}"):
                 counter += 1
             audio_path = f"{base}_{counter}.{audio_ext}"
-        ffmpeg = str(self._tool_dir / f"ffmpeg{self._exe_suffix}")
+        ffmpeg = str(self._paths.executable("ffmpeg", self._exe_suffix))
         codec_map = {
             "mp3": "libmp3lame",
             "m4a": "aac",
@@ -779,7 +781,7 @@ class DownloadExecutor:
             return {"error": "无效链接"}
         config_snapshot = self._app_state.config_snapshot()
         # 构建轻量命令：仅提取播放列表元数据，不实际下载
-        ytdlp = str(self._tool_dir / f"yt-dlp{self._exe_suffix}")
+        ytdlp = str(self._paths.executable("yt-dlp", self._exe_suffix))
         cmd = [ytdlp, "--flat-playlist", "--dump-json", "--encoding", "utf-8"]
         if config_snapshot["USE_COOKIES"]:
             if config_snapshot["COOKIE_MODE"] == 1:
@@ -1679,12 +1681,12 @@ class DownloadExecutor:
         """
         for dependency in ["yt-dlp", "ffmpeg", "ffprobe"]:
             filename = f"{dependency}{self._exe_suffix}"
-            if not (self._tool_dir / filename).exists():
+            if not self._paths.executable(dependency, self._exe_suffix).exists():
                 return filename
         return None
 
     def _spawn(self, cmd, cwd=None):
-        env = os.environ.copy()
+        env = self._paths.subprocess_env()
         # yt-dlp 的 --proxy "" 只约束自身网络层。外部 FFmpeg 仍会继承
         # HTTP_PROXY/HTTPS_PROXY 等环境变量，因此在显式直连时一并清除，保证
         # 页面、m3u8 与媒体分片使用同一网络路径。

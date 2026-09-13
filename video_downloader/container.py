@@ -17,6 +17,7 @@ from typing import Any, Callable
 from .core.validation import validate_config
 from .core.constants import DEFAULT_CONFIG, IDLE_TIMEOUT, VERSION
 from .core.command import build_ytdlp_cmd as _build_ytdlp_cmd
+from .core.paths import AppPaths
 from .core.platform import detect_platform
 from .state.app_state import AppState
 from .services.download_executor import DownloadExecutor
@@ -51,8 +52,9 @@ class AppContainer:
     def __init__(self, tool_dir: Path, exe_suffix: str = ".exe"):
         self._tool_dir = tool_dir
         self._exe_suffix = exe_suffix
-        self._log_dir = tool_dir / "logs"
-        self._log_dir.mkdir(exist_ok=True)
+        self._paths = AppPaths(tool_dir)
+        self._paths.ensure_runtime_dirs()
+        self._log_dir = self._paths.log_dir
 
     def wire(self) -> WiredApp:
         """构造完整的对象图并返回 WiredApp 句柄。"""

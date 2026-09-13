@@ -10,6 +10,8 @@ import time
 from collections import deque
 from urllib.request import ProxyHandler, build_opener
 
+from video_downloader.core.paths import AppPaths
+
 
 class PoTokenProviderService:
     """Start the bundled BgUtils HTTP provider on demand and stop owned processes."""
@@ -20,6 +22,7 @@ class PoTokenProviderService:
 
     def __init__(self, tool_dir, log):
         self._tool_dir = tool_dir
+        self._paths = AppPaths(tool_dir)
         self._log = log
         self._lock = threading.RLock()
         self._process = None
@@ -82,17 +85,17 @@ class PoTokenProviderService:
                 pass
 
     def _dependency_error(self):
-        deno = self._tool_dir / ("deno.exe" if os.name == "nt" else "deno")
-        server_dir = self._tool_dir / "bgutil-ytdlp-pot-provider" / "server"
+        deno = self._paths.executable("deno", ".exe" if os.name == "nt" else "")
+        server_dir = self._paths.dependency("bgutil-ytdlp-pot-provider/server")
         node_modules = server_dir / "node_modules"
         main_script = server_dir / "src" / "main.ts"
-        plugin = self._tool_dir / "yt-dlp-plugins" / "bgutil-ytdlp-pot-provider.zip"
+        plugin = self._paths.dependency("yt-dlp-plugins/bgutil-ytdlp-pot-provider.zip")
         missing = []
         for path, label in (
-            (deno, deno.name),
-            (main_script, "bgutil-ytdlp-pot-provider/server/src/main.ts"),
-            (node_modules, "bgutil-ytdlp-pot-provider/server/node_modules"),
-            (plugin, "yt-dlp-plugins/bgutil-ytdlp-pot-provider.zip"),
+            (deno, "dependency/deno.exe" if os.name == "nt" else "dependency/deno"),
+            (main_script, "dependency/bgutil-ytdlp-pot-provider/server/src/main.ts"),
+            (node_modules, "dependency/bgutil-ytdlp-pot-provider/server/node_modules"),
+            (plugin, "dependency/yt-dlp-plugins/bgutil-ytdlp-pot-provider.zip"),
         ):
             if not path.exists():
                 missing.append(label)
@@ -126,9 +129,9 @@ class PoTokenProviderService:
                 self._stop_owned_process(self._process)
                 self._process = None
 
-            deno = self._tool_dir / ("deno.exe" if os.name == "nt" else "deno")
-            node_modules = (
-                self._tool_dir / "bgutil-ytdlp-pot-provider" / "server" / "node_modules"
+            deno = self._paths.executable("deno", ".exe" if os.name == "nt" else "")
+            node_modules = self._paths.dependency(
+                "bgutil-ytdlp-pot-provider/server/node_modules"
             )
             command = [
                 str(deno),
@@ -144,9 +147,11 @@ class PoTokenProviderService:
             startupinfo, creationflags = self._windows_process_options()
             self._output_tail.clear()
             try:
+                env = self._paths.subprocess_env()
                 process = subprocess.Popen(
                     command,
                     cwd=node_modules,
+                    env=env,
                     stdout=subprocess.PIPE,
                     stderr=subprocess.STDOUT,
                     text=True,

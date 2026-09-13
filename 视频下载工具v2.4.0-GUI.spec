@@ -4,7 +4,7 @@ from pathlib import Path
 project_root = Path(SPECPATH)
 entry_script = project_root / "视频下载工具v2.4.0-GUI.py"
 resource_root = project_root / "resource"
-plugin_root = project_root / "yt-dlp-plugins"
+plugin_root = project_root / "dependency" / "yt-dlp-plugins"
 packaging_deps = project_root / "build" / "packaging-deps"
 
 datas = [

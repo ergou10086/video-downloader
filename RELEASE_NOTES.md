@@ -33,7 +33,7 @@
 | `视频下载工具v2.4.0-依赖包.zip` | 通用依赖包（下载工具 + 帮助文档） | ✅ |
 | `视频下载工具v2.4.0-源码版.zip` | Python 源码、测试、资源与文档 | 可选 |
 
-> 💡 **依赖包已包含**：yt-dlp.exe、ffmpeg.exe、ffprobe.exe、deno.exe、fantiadl.exe、withny-dl-windows-amd64.exe、docs 帮助文档、changelog.html 和 CREDITS.txt。NicoChannel 还需要单独准备 `nicochannel.zip` 并放在主程序同一目录。
+> 💡 **依赖包已包含**：`dependency/` 中的 yt-dlp.exe、ffmpeg.exe、ffprobe.exe、deno.exe、fantiadl.exe、withny-dl-windows-amd64.exe 和插件。NicoChannel 还需要单独准备 `nicochannel.zip` 并放入 `dependency/`。
 
 ### SHA-256
 
@@ -48,15 +48,15 @@
 ### 新用户安装
 1. 下载 `视频下载工具v2.4.0-GUI.exe` 和 `视频下载工具v2.4.0-依赖包.zip`
 2. 新建一个文件夹（如「视频下载工具」），将 `视频下载工具v2.4.0-GUI.exe` 放入其中
-3. 解压依赖包，将里面的**全部内容**解压到 exe 同一目录
+3. 解压依赖包，将其中的 `dependency` 文件夹完整放到 exe 同一目录
 4. 双击 `视频下载工具v2.4.0-GUI.exe` 运行，自动打开浏览器界面
 5. （可选）配置 Cookie 以支持会员/高画质内容
 
 ### 老用户升级
 1. 关闭正在运行的旧版本程序（点击右上角「✕ 退出」按钮）
 2. 只需下载新版 `视频下载工具v2.4.0-GUI.exe`，替换旧版 exe 即可
-3. 原有 `settings.ini`、`presets.json`、`cookies.txt`、`download_history.json` 全部兼容
-4. 原有依赖文件（yt-dlp.exe、ffmpeg.exe 等）无需重新下载，继续使用即可
+3. 原有 `settings.ini`、`presets.json`、`cookies.txt` 全部兼容，`download_history.json` 会迁入 `download/`
+4. 原有依赖文件无需重新下载，移动到 `dependency/` 后继续使用；程序仍兼容旧版根目录依赖
 5. 双击运行新版 exe 即可
 
 ## 📖 文档

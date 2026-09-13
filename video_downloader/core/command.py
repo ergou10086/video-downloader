@@ -5,6 +5,7 @@ import sys
 from pathlib import Path
 
 from .constants import DEFAULT_SUBTITLE_LANGS
+from .paths import AppPaths
 
 
 _TWITCASTING_PLUGIN_RELATIVE_PATH = (
@@ -22,8 +23,11 @@ def twitcasting_hls_fallback_args(tool_dir):
         "--downloader-args", "ffmpeg_i:-http_persistent 1 -http_multiple 1",
     ]
     tool_dir = Path(tool_dir)
+    paths = AppPaths(tool_dir)
+    configured_plugin_dir = paths.plugin_dir()
     plugin_root = None
     for candidate in (
+        paths.dependency_dir,
         tool_dir,
         Path(sys._MEIPASS) if getattr(sys, "_MEIPASS", None) else None,
     ):
@@ -34,7 +38,7 @@ def twitcasting_hls_fallback_args(tool_dir):
         return args
 
     plugin_dir_args = []
-    if plugin_root != tool_dir:
+    if plugin_root != configured_plugin_dir:
         # PyInstaller 单文件版的数据文件位于 _MEIPASS；外部 yt-dlp 需要显式
         # 获得该临时目录，才能发现打包进去的插件。
         plugin_dir_args = ["--plugin-dirs", str(plugin_root)]
@@ -80,12 +84,12 @@ def _append_cookie_options(cmd, cfg, cookie_file):
             cmd += ["--cookies-from-browser", browser_spec]
 
 
-def _append_subtitle_options(cmd, cfg, tool_dir, platform_name, also_set_default_output=False):
+def _append_subtitle_options(cmd, cfg, download_dir, platform_name, also_set_default_output=False):
     if not cfg.get("DOWNLOAD_SUBTITLES", 0):
         return False
     subtitle_type = cfg.get("SUBTITLE_TYPE", "all")
     subtitle_langs = cfg.get("SUBTITLE_LANGS") or DEFAULT_SUBTITLE_LANGS
-    subtitle_tmpl = tool_dir / platform_name / "subtitles" / "%(title)s [%(id)s].%(ext)s"
+    subtitle_tmpl = download_dir / platform_name / "subtitles" / "%(title)s [%(id)s].%(ext)s"
     if also_set_default_output:
         cmd += ["-o", str(subtitle_tmpl)]
     cmd += ["-o", f"subtitle:{subtitle_tmpl}"]
@@ -148,7 +152,7 @@ def build_ytdlp_cmd(url, config, tool_dir, exe_suffix="", *, is_live=False, plat
     Args:
         url: 目标视频/直播链接。
         config: 配置字典，包含分辨率、编码、音频质量等全部设置项。
-        tool_dir: 工具目录路径（yt-dlp.exe/ffmpeg.exe 所在目录）。
+        tool_dir: 应用程序根目录。第三方工具优先从 dependency 子目录加载。
         exe_suffix: 可执行文件后缀，Windows 下为 ".exe"，其他平台为空。
         is_live: 是否为直播下载，直播使用 --live-from-start 并归入直播目录。
         platform_override: 平台覆盖名，如果不为 None 则替代 config 中的 PLATFORM。
@@ -162,7 +166,11 @@ def build_ytdlp_cmd(url, config, tool_dir, exe_suffix="", *, is_live=False, plat
         list[str]: 完整的 yt-dlp 命令行参数列表。
     """
     cfg = config
-    ytdlp = str(tool_dir / f"yt-dlp{exe_suffix}")
+    tool_dir = Path(tool_dir)
+    paths = AppPaths(tool_dir)
+    ytdlp = str(paths.executable("yt-dlp", exe_suffix))
+    plugin_dir = paths.plugin_dir()
+    download_dir = paths.download_dir
     cmd = [
         ytdlp,
         "--newline",
@@ -172,7 +180,7 @@ def build_ytdlp_cmd(url, config, tool_dir, exe_suffix="", *, is_live=False, plat
         "--socket-timeout",
         "30",
         "--plugin-dirs",
-        str(tool_dir),
+        str(plugin_dir),
         # 给每条下载进度附加当前格式的音视频编码信息。执行器据此识别
         # 分离流中的视频/音频阶段，前端即可切换进度条颜色。
         "--progress-template",
@@ -188,7 +196,7 @@ def build_ytdlp_cmd(url, config, tool_dir, exe_suffix="", *, is_live=False, plat
 
     if subtitle_only:
         cmd += ["--skip-download"]
-        if not _append_subtitle_options(cmd, cfg, tool_dir, platform_name, also_set_default_output=True):
+        if not _append_subtitle_options(cmd, cfg, download_dir, platform_name, also_set_default_output=True):
             return cmd + [url]
         if cfg["SPEED_LIMIT"] > 0:
             cmd += ["-r", f"{cfg['SPEED_LIMIT']}M"]
@@ -228,22 +236,22 @@ def build_ytdlp_cmd(url, config, tool_dir, exe_suffix="", *, is_live=False, plat
     #   EMBED_META=0 → "title - 20260730 id.ext"（日期在标题后，保持原有格式）
     if is_live and not is_nico_live:
         out_tmpl = str(
-            tool_dir / platform_name / "%(uploader)s" / "直播" / f"{vod_date_prefix}%(title)s - %(id)s.%(ext)s") if vod_date_prefix else str(
-            tool_dir / platform_name / "%(uploader)s" / "直播" / "%(title)s - %(upload_date)s %(id)s.%(ext)s")
+            download_dir / platform_name / "%(uploader)s" / "直播" / f"{vod_date_prefix}%(title)s - %(id)s.%(ext)s") if vod_date_prefix else str(
+            download_dir / platform_name / "%(uploader)s" / "直播" / "%(title)s - %(upload_date)s %(id)s.%(ext)s")
         cmd += ["--live-from-start"]
     elif is_nico_live:
         out_tmpl = str(
-            tool_dir / "Niconico" / "直播" / f"{vod_date_prefix}%(title)s - %(id)s.%(ext)s") if vod_date_prefix else str(
-            tool_dir / "Niconico" / "直播" / "%(title)s - %(upload_date)s %(id)s.%(ext)s")
+            download_dir / "Niconico" / "直播" / f"{vod_date_prefix}%(title)s - %(id)s.%(ext)s") if vod_date_prefix else str(
+            download_dir / "Niconico" / "直播" / "%(title)s - %(upload_date)s %(id)s.%(ext)s")
     else:
-        out_tmpl = str(tool_dir / platform_name / "%(uploader)s" / f"{vod_date_prefix}%(title)s [%(id)s].%(ext)s")
+        out_tmpl = str(download_dir / platform_name / "%(uploader)s" / f"{vod_date_prefix}%(title)s [%(id)s].%(ext)s")
 
     cmd += ["-o", out_tmpl]
-    archive = tool_dir / f"{platform_name.lower()}_archive.txt"
+    archive = paths.archive_dir / f"{platform_name.lower()}_archive.txt"
     cmd += ["--download-archive", str(archive)]
 
     if include_subtitles:
-        _append_subtitle_options(cmd, cfg, tool_dir, platform_name)
+        _append_subtitle_options(cmd, cfg, download_dir, platform_name)
 
     res = cfg["RESOLUTION"]
     codec = cfg["CODEC"]
@@ -307,7 +315,7 @@ def build_ytdlp_cmd(url, config, tool_dir, exe_suffix="", *, is_live=False, plat
         cmd += ["--restrict-filenames"]
     if cfg["HWACCEL"] != "cpu":
         cmd += ["--postprocessor-args", f"Merger+ffmpeg_o:-c:v {cfg['HWACCEL']}"]
-    cmd += ["--ffmpeg-location", str(tool_dir)]
+    cmd += ["--ffmpeg-location", str(paths.executable("ffmpeg", exe_suffix).parent)]
     # TwitCasting 的部分 fMP4 HLS 录像会在播放列表中途切换初始化片段，
     # yt-dlp 原生 hlsnative 下载器会因此报
     # "Initialization fragment found after media fragments"。默认仍用原生

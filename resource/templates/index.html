@@ -472,7 +472,7 @@
           <div class="dsec">
             <h3><svg class="ico s14"><use href="#i-file-text"></use></svg>Withny 存档与录制</h3>
             <p><b>历史存档：</b>选 Withny 平台，点「开始下载」，选浏览器导出的「包含内容」HAR。</p>
-            <p><b>直播录制：</b>把 withny-dl 可执行文件放在程序目录，点「选择配置并录制」，选它的 YAML 配置，工具会持续监控频道。</p>
+            <p><b>直播录制：</b>把 withny-dl 可执行文件放在 dependency 目录，点「选择配置并录制」，选它的 YAML 配置，工具会持续监控频道。</p>
             <p><b>限制与隐私：</b>仅处理未加密的普通 HLS 存档；检测到 DRM、加密或缺失签名会拒绝。HAR 含登录凭据，用完请删除，不要分享。</p>
           </div>
 
@@ -495,15 +495,16 @@
           <div class="dsec">
             <h3><svg class="ico s14"><use href="#i-folder"></use></svg>目录结构</h3>
             <div class="tree">工具目录/
-├── YouTube/          按作者分文件夹
-├── Bilibili/
-│   └── UP主名/直播/  直播录制
-├── Twitch/ Nico/ Fantia/
-├── Withny/ TwitCasting/ Twitter/
+├── dependency/       yt-dlp、FFmpeg、Deno及插件
+├── download/
+│   ├── archive/      各平台去重归档
+│   ├── logs/         运行日志
+│   ├── YouTube/      按作者分文件夹
+│   ├── Bilibili/ Twitch/ Niconico/
+│   └── 其他平台目录及download_history.json
 ├── urls.txt          批量链接
 ├── cookies.txt       Cookie
-├── presets.json      配置预设
-└── download_history.json</div>
+└── settings.ini      配置</div>
           </div>
 
           <div class="dsec">
