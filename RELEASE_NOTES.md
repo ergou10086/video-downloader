@@ -56,7 +56,7 @@
 1. 关闭正在运行的旧版本程序（点击右上角「✕ 退出」按钮）
 2. 只需下载新版 `视频下载工具v2.4.0-GUI.exe`，替换旧版 exe 即可
 3. 原有 `settings.ini`、`presets.json`、`cookies.txt` 全部兼容，`download_history.json` 会迁入 `download/`
-4. 原有依赖文件无需重新下载，移动到 `dependency/` 后继续使用；程序仍兼容旧版根目录依赖
+4. 原有依赖、平台下载目录和归档文件无需手动整理，首次启动会安全迁移到 `dependency/` 与 `download/`；程序仍兼容无法迁移的旧版根目录依赖
 5. 双击运行新版 exe 即可
 
 ## 📖 文档

@@ -76,7 +76,7 @@ python ".\视频下载工具v2.4.0-GUI.py"
 YouTube 使用明确的 `/live` 直播链接，Niconico 使用 `live.nicovideo.jp` 或 `live2.nicovideo.jp` 链接。程序会自动进入直播模式，并实时显示录制时长、大小、速度和分片状态。
 
 ### TwitCasting 直播录制 / 录播下载
-粘贴主播页 URL（如 `https://twitcasting.tv/主播名`）即可从直播开头录制，文件保存到 `TwitCasting/主播名/直播/` 目录。单条录播使用 `/movie/数字ID` 链接，历史直播列表使用 `/show` 或 `/archive` 链接。密码保护或会员限定内容可在「设置」页填写「TwitCasting 密码」后下载。
+粘贴主播页 URL（如 `https://twitcasting.tv/主播名`）即可从直播开头录制，文件保存到 `download/TwitCasting/主播名/直播/` 目录。单条录播使用 `/movie/数字ID` 链接，历史直播列表使用 `/show` 或 `/archive` 链接。密码保护或会员限定内容可在「设置」页填写「TwitCasting 密码」后下载。
 
 ### Bilibili 下载
 粘贴 Bilibili 视频或直播链接后程序会自动识别。多 P 视频可按设置下载全部分集或弹出分集选择器；1080P 及以上画质通常需要在程序目录配置 `cookies.txt`。
@@ -163,6 +163,8 @@ YouTube 使用明确的 `/live` 直播链接，Niconico 使用 `live.nicovideo.j
     ├── Withny/              # Withny历史存档目录
     └── TwitCasting/         # TwitCasting下载目录
 ```
+
+旧版本散落在根目录的依赖、平台下载目录和 `*_archive.txt` 会在首次启动时自动迁移到上述结构。迁移不会覆盖同名文件；发生冲突时，旧文件会以 `.legacy-N` 后缀保留。
 
 ## 🔧 工具箱功能
 

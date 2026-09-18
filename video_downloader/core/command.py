@@ -24,7 +24,7 @@ def twitcasting_hls_fallback_args(tool_dir):
     ]
     tool_dir = Path(tool_dir)
     paths = AppPaths(tool_dir)
-    configured_plugin_dir = paths.plugin_dir()
+    configured_plugin_dirs = paths.plugin_dirs()
     plugin_root = None
     for candidate in (
         paths.dependency_dir,
@@ -38,7 +38,7 @@ def twitcasting_hls_fallback_args(tool_dir):
         return args
 
     plugin_dir_args = []
-    if plugin_root != configured_plugin_dir:
+    if plugin_root not in configured_plugin_dirs:
         # PyInstaller 单文件版的数据文件位于 _MEIPASS；外部 yt-dlp 需要显式
         # 获得该临时目录，才能发现打包进去的插件。
         plugin_dir_args = ["--plugin-dirs", str(plugin_root)]
@@ -169,7 +169,7 @@ def build_ytdlp_cmd(url, config, tool_dir, exe_suffix="", *, is_live=False, plat
     tool_dir = Path(tool_dir)
     paths = AppPaths(tool_dir)
     ytdlp = str(paths.executable("yt-dlp", exe_suffix))
-    plugin_dir = paths.plugin_dir()
+    plugin_dirs = paths.plugin_dirs()
     download_dir = paths.download_dir
     cmd = [
         ytdlp,
@@ -179,8 +179,6 @@ def build_ytdlp_cmd(url, config, tool_dir, exe_suffix="", *, is_live=False, plat
         "utf-8",
         "--socket-timeout",
         "30",
-        "--plugin-dirs",
-        str(plugin_dir),
         # 给每条下载进度附加当前格式的音视频编码信息。执行器据此识别
         # 分离流中的视频/音频阶段，前端即可切换进度条颜色。
         "--progress-template",
@@ -191,6 +189,8 @@ def build_ytdlp_cmd(url, config, tool_dir, exe_suffix="", *, is_live=False, plat
             "__VD_STAGE__%(info.vcodec)s|%(info.acodec)s"
         ),
     ]
+    for plugin_dir in plugin_dirs:
+        cmd += ["--plugin-dirs", str(plugin_dir)]
     platform_name = platform_override if platform_override else cfg["PLATFORM"]
     is_nico_live = "live.nicovideo.jp" in url.lower() or "live2.nicovideo.jp" in url.lower()
 
@@ -247,7 +247,7 @@ def build_ytdlp_cmd(url, config, tool_dir, exe_suffix="", *, is_live=False, plat
         out_tmpl = str(download_dir / platform_name / "%(uploader)s" / f"{vod_date_prefix}%(title)s [%(id)s].%(ext)s")
 
     cmd += ["-o", out_tmpl]
-    archive = paths.archive_dir / f"{platform_name.lower()}_archive.txt"
+    archive = paths.archive(f"{platform_name.lower()}_archive.txt")
     cmd += ["--download-archive", str(archive)]
 
     if include_subtitles:

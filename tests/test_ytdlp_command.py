@@ -96,6 +96,40 @@ class YtdlpCommandTests(unittest.TestCase):
             str(root / "download" / "archive" / "youtube_archive.txt"),
         )
 
+    def test_every_ytdlp_platform_uses_its_download_and_archive_folders(self):
+        platforms = (
+            "YouTube",
+            "Bilibili",
+            "Twitch",
+            "Niconico",
+            "NicoChannel",
+            "Fantia",
+            "TwitCasting",
+            "Twitter",
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for platform in platforms:
+                with self.subTest(platform=platform):
+                    config = dict(DEFAULT_CONFIG, PLATFORM=platform)
+                    cmd = build_ytdlp_cmd(
+                        "https://example.com/video", config, root
+                    )
+                    self.assertTrue(
+                        cmd[cmd.index("-o") + 1].startswith(
+                            str(root / "download" / platform)
+                        )
+                    )
+                    self.assertEqual(
+                        cmd[cmd.index("--download-archive") + 1],
+                        str(
+                            root
+                            / "download"
+                            / "archive"
+                            / f"{platform.lower()}_archive.txt"
+                        ),
+                    )
+
     def test_legacy_root_dependencies_remain_compatible(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -109,6 +143,25 @@ class YtdlpCommandTests(unittest.TestCase):
             )
         self.assertEqual(cmd[0], str(root / "yt-dlp.exe"))
         self.assertEqual(cmd[cmd.index("--ffmpeg-location") + 1], str(root))
+
+    def test_partially_migrated_plugins_load_from_both_roots(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            dependency = root / "dependency"
+            dependency.mkdir()
+            (dependency / "nicochannel.zip").touch()
+            (root / "yt-dlp-plugins").mkdir()
+
+            cmd = build_ytdlp_cmd(
+                "https://youtube.com/watch?v=abc", DEFAULT_CONFIG, root
+            )
+
+        plugin_dirs = [
+            cmd[index + 1]
+            for index, value in enumerate(cmd[:-1])
+            if value == "--plugin-dirs"
+        ]
+        self.assertEqual(plugin_dirs, [str(dependency), str(root)])
 
     def test_enabled_subtitles_use_chinese_languages_and_separate_directory(self):
         config = dict(DEFAULT_CONFIG, DOWNLOAD_SUBTITLES=1)
