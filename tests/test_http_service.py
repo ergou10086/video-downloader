@@ -64,6 +64,7 @@ def make_dependencies(exit_event):
             "urls": urls, **({"custom_args": custom_args} if custom_args else {}),
         },
         download_subtitles=lambda *args: {"args": list(args)},
+        download_covers=lambda *args: {"args": list(args)},
         stop_download=value,
         get_current_command=lambda: {"ok": True, "command": "yt-dlp https://example.com"},
         submit_password=lambda url, password: {"ok": True},
@@ -209,6 +210,20 @@ class HttpServiceTests(unittest.TestCase):
     def test_download_subtitles_route_rejects_non_string_urls(self):
         with self.assertRaises(HTTPError) as raised:
             self.request("/api/download-subtitles", method="POST", payload={"urls": [123]})
+        self.assertEqual(raised.exception.code, 400)
+
+    def test_download_covers_route_uses_injected_dependency(self):
+        status, body, _ = self.request("/api/download-covers", method="POST", payload={
+            "urls": ["https://youtube.com/watch?v=abc"],
+        })
+        self.assertEqual(status, 200)
+        self.assertEqual(json.loads(body), {
+            "args": [["https://youtube.com/watch?v=abc"]]
+        })
+
+    def test_download_covers_route_rejects_non_string_urls(self):
+        with self.assertRaises(HTTPError) as raised:
+            self.request("/api/download-covers", method="POST", payload={"urls": [123]})
         self.assertEqual(raised.exception.code, 400)
 
     def test_withny_archive_route_uses_injected_dependency(self):

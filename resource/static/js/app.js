@@ -896,6 +896,42 @@ async function startSubtitleDownload() {
   }
 }
 
+function showCoverDownloader() {
+  $('coverDownloadDialog').classList.add('show');
+  const source = $('urlInput').value.trim();
+  if(source && !$('coverUrlInput').value.trim()) $('coverUrlInput').value = source;
+  syncToolTiles();
+}
+
+function hideCoverDownloader() {
+  $('coverDownloadDialog').classList.remove('show');
+  syncToolTiles();
+}
+
+async function startCoverDownload() {
+  const button = $('btnCoverDownload');
+  if(button.disabled) return;
+  const urls = $('coverUrlInput').value.split(/\r?\n/).map(value => value.trim()).filter(Boolean);
+  if(!urls.length) {
+    showToolStatus('请输入至少一个视频链接', 'error');
+    return;
+  }
+  let submitted = false;
+  button.disabled = true;
+  showToolStatus('正在启动封面下载...', 'working');
+  try {
+    await saveSettingsNoAlert();
+    const result = await api('/api/download-covers', {method:'POST', body:JSON.stringify({urls: urls})});
+    submitted = true;
+    showToolStatus(`已提交封面下载（${result.total || urls.length} 个链接）`, 'success');
+  } catch(e) {
+    showToolStatus('封面下载启动失败: ' + e.message, 'error');
+    showToast(e.message, 'error');
+  } finally {
+    if(!submitted) button.disabled = false;
+  }
+}
+
 // ========== SSE ==========
 let sseRetryDelay = 1000;
 const SSE_MAX_RETRY = 16000;
@@ -920,6 +956,7 @@ function connectSSE() {
       $('btnWithnyLive').disabled = download_running || d.phase === 'suspended';
       $('btnStop').disabled = !download_running || d.phase === 'stopping';
       if($('btnSubtitleDownload')) $('btnSubtitleDownload').disabled = download_running || d.phase === 'suspended';
+      if($('btnCoverDownload')) $('btnCoverDownload').disabled = download_running || d.phase === 'suspended';
       if(!download_running) $('topline').style.width = '0';
     } else if(evt.type === 'stats') {
       const d = evt.data;
@@ -943,6 +980,7 @@ function connectSSE() {
       $('btnStart').disabled = download_running || readyData.phase === 'suspended';
       $('btnStop').disabled = !download_running || readyData.phase === 'stopping';
       if($('btnSubtitleDownload')) $('btnSubtitleDownload').disabled = download_running || readyData.phase === 'suspended';
+      if($('btnCoverDownload')) $('btnCoverDownload').disabled = download_running || readyData.phase === 'suspended';
       if(readyData.progress) renderProgress(readyData.progress);
       if(readyData.stats) {
         $('statOk').textContent = readyData.stats.ok || 0;

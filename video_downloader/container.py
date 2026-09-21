@@ -18,7 +18,7 @@ from .core.validation import validate_config
 from .core.constants import DEFAULT_CONFIG, IDLE_TIMEOUT, VERSION
 from .core.command import build_ytdlp_cmd as _build_ytdlp_cmd
 from .core.paths import AppPaths
-from .core.platform import detect_platform
+from .core.platform import detect_platform, is_live_url
 from .state.app_state import AppState
 from .services.download_executor import DownloadExecutor
 from .services.nicochannel_auth import NicochannelAuthService
@@ -162,6 +162,7 @@ class AppContainer:
                           use_ffmpeg_for_hls: bool = False,
                           include_subtitles: bool = True,
                           subtitle_only: bool = False,
+                          thumbnail_only: bool = False,
                           custom_args: str | None = None,
                           po_token_base_url: str | None = None) -> list[str]:
             cfg = config_override if config_override is not None else app_state.config_snapshot()
@@ -185,6 +186,7 @@ class AppContainer:
                 use_ffmpeg_for_hls=use_ffmpeg_for_hls,
                 include_subtitles=include_subtitles,
                 subtitle_only=subtitle_only,
+                thumbnail_only=thumbnail_only,
                 custom_args=custom_args,
                 po_token_base_url=po_token_base_url,
             )
@@ -206,6 +208,20 @@ class AppContainer:
                 subtitle_only=True,
             )
 
+        def build_cover_command(url: str, *, platform_override: str | None = None) -> list[str]:
+            cfg = app_state.config_snapshot()
+            detected = platform_override or detect_platform(url)
+            effective_platform = detected if detected else cfg["PLATFORM"]
+            # 直播留档的封面要和视频一样落到「直播」目录，因此沿用同一个直播判定。
+            return build_command(
+                url,
+                is_live=is_live_url(url, detected),
+                platform_override=effective_platform,
+                config_override=cfg,
+                include_subtitles=False,
+                thumbnail_only=True,
+            )
+
         # ---- 工具服务 ----
         tool_service = ToolService(
             tool_dir=tool_dir,
@@ -214,6 +230,7 @@ class AppContainer:
             save_config=save_config,
             log=add_log,
             build_subtitle_command=build_subtitle_command,
+            build_cover_command=build_cover_command,
             download_manager=download_manager,
             broadcast_download_state=broadcast_download_state,
             cancel_idle_timer=cancel_idle_timer,
@@ -291,6 +308,7 @@ class AppContainer:
         handle_tool_action = tool_service.handle_tool_action
         read_urls_file = tool_service.read_urls_file
         download_subtitles = tool_service.download_subtitles
+        download_covers = tool_service.download_covers
 
         def batch_txt_download(bili_parts_map: dict | None = None,
                                custom_args: str | None = None) -> dict:
@@ -339,6 +357,7 @@ class AppContainer:
                 batch_txt_download=batch_txt_download,
                 start_urls_download=start_urls_download,
                 download_subtitles=download_subtitles,
+                download_covers=download_covers,
                 stop_download=stop_download,
                 get_current_command=get_current_command,
                 submit_password=submit_password,
