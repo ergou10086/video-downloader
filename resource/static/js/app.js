@@ -618,7 +618,8 @@ async function doStartDl(url, biliParts, tcPassword, customArgs) {
   const r = await api('/api/start', {method:'POST', body:JSON.stringify(body)});
   if(r.error) { showToast(r.error, 'error'); return; }
   clearStartedTaskArgs(taskArgs);
-  markStarted('1');
+  // SSE owns task state: preparation may already have failed or been stopped
+  // before this response arrives. Do not overwrite that newer state here.
 }
 
 async function doStartUrls(urls, customArgs) {
@@ -627,7 +628,6 @@ async function doStartUrls(urls, customArgs) {
   const r = await api('/api/start-urls', {method:'POST', body:JSON.stringify(body)});
   if(r.error) { showToast(r.error, 'error'); return; }
   clearStartedTaskArgs(customArgs || '');
-  markStarted(r.total || String(urls.length));
 }
 
 async function startBatch() {
@@ -645,7 +645,6 @@ async function doStartBatch(biliPartsMap, customArgs) {
   const r = await api('/api/batch-txt', {method:'POST', body:JSON.stringify(body)});
   if(r.error) { showToast(r.error, 'error'); return; }
   clearStartedTaskArgs(customArgs || '');
-  markStarted(r.total || '0');
 }
 
 async function stopDl() {

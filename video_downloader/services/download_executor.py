@@ -280,13 +280,37 @@ class DownloadExecutor:
         except ValueError as exc:
             return str(exc)
 
-    def _start_po_token_provider_if_needed(self, config_snapshot, platforms):
+    def _start_po_token_provider_if_needed(self, config_snapshot, platforms, handle):
         if not config_snapshot.get("YOUTUBE_PO_TOKEN_ENABLED", 0):
             return {}
         if "YouTube" not in platforms or self._ensure_po_token_provider is None:
             return {}
-        result = self._ensure_po_token_provider()
+        self._update_progress(0, "正在准备 YouTube PO Token Provider...")
+        result = self._ensure_po_token_provider(cancel_event=handle.cancel_event)
         return result if isinstance(result, dict) else {}
+
+    def _prepare_download(self, handle, config_snapshot, platforms, run, args):
+        """Keep cold starts off HTTP threads and inside the managed task lifetime."""
+        self._app_state.download_thread_context.task_id = handle.generation
+        try:
+            if self._download_manager.is_cancelled(handle):
+                return
+            result = self._start_po_token_provider_if_needed(config_snapshot, platforms, handle)
+            if self._download_manager.is_cancelled(handle) or result.get("cancelled"):
+                return
+            if result.get("error"):
+                raise RuntimeError(result["error"])
+            run(handle, *args, po_token_base_url=result.get("base_url"))
+        except Exception as exc:
+            if not self._download_manager.is_cancelled(handle):
+                self._log(f"[准备失败] {exc}", "error")
+                self._update_progress(0, "下载准备失败", "", "")
+                stats = self._app_state.batch_stats
+                stats["fail"] = stats["total"]
+                self._app_state.publish({"type": "stats", "data": dict(stats)})
+        finally:
+            if self._download_manager.is_current(handle):
+                self._finish(handle, None)
 
     def start_download(self, url, bili_parts=None, tc_password=None, custom_args=None):
         url = clean_url(url)
@@ -313,46 +337,6 @@ class DownloadExecutor:
         custom_args_error = self._validate_custom_args(config_snapshot, custom_args)
         if custom_args_error:
             return {"error": custom_args_error}
-        provider_result = self._start_po_token_provider_if_needed(
-            config_snapshot, {effective_platform}
-        )
-        if provider_result.get("error"):
-            return {"error": provider_result["error"]}
-        po_token_base_url = provider_result.get("base_url")
-        try:
-            build_kwargs = {
-                "is_live": is_live_download,
-                "platform_override": effective_platform,
-                "config_override": config_snapshot,
-                "bili_parts": bili_parts,
-                "include_subtitles": False,
-            }
-            if custom_args:
-                build_kwargs["custom_args"] = custom_args
-            if po_token_base_url:
-                build_kwargs["po_token_base_url"] = po_token_base_url
-            cmd = self._build_command(url, **build_kwargs)
-            subtitle_cmd = None
-            if config_snapshot.get("DOWNLOAD_SUBTITLES", 0):
-                subtitle_kwargs = {
-                    "is_live": is_live_download,
-                    "platform_override": effective_platform,
-                    "config_override": config_snapshot,
-                    "bili_parts": bili_parts,
-                    "subtitle_only": True,
-                }
-                if custom_args:
-                    subtitle_kwargs["custom_args"] = custom_args
-                if po_token_base_url:
-                    subtitle_kwargs["po_token_base_url"] = po_token_base_url
-                subtitle_cmd = self._build_command(url, **subtitle_kwargs)
-        except Exception as exc:
-            return {"error": f"下载配置无效: {exc}"}
-
-        # 弹窗重试时开启 yt-dlp --verbose 以便诊断格式/密码问题。
-        if verbose:
-            cmd += ["--verbose"]
-
         handle = self._download_manager.begin("single")
         if handle is None:
             return {"error": "已有下载任务在运行"}
@@ -364,18 +348,19 @@ class DownloadExecutor:
         stats.update({"ok": 0, "fail": 0, "total": 1, "current": 1})
         self._app_state.publish({"type": "stats", "data": dict(stats)})
         audio_mode = config_snapshot.get("AUDIO_MODE", "0")
-        audio_fmt = config_snapshot.get("AUDIO_FORMAT", "mp3")
         initial_stage = "audio" if audio_mode == "3" else "video"
         self._update_progress(
             0,
-            "正在连接直播..." if is_live_download else "正在下载...",
+            "正在准备下载...",
             stage=initial_stage,
         )
         self._log(f"[下载] {url}", "info")
         try:
             threading.Thread(
-                target=self._run_single,
-                args=(handle, cmd, url, effective_platform, is_live_download, audio_mode, audio_fmt, verbose, subtitle_cmd),
+                target=self._prepare_download,
+                args=(handle, config_snapshot, {effective_platform}, self._build_and_run_single,
+                      (url, effective_platform, is_live_download, config_snapshot,
+                       bili_parts, verbose, custom_args)),
                 daemon=True,
             ).start()
         except Exception as exc:
@@ -384,6 +369,34 @@ class DownloadExecutor:
             self._start_idle_timer()
             return {"error": f"下载线程启动失败: {exc}"}
         return {"ok": True}
+
+    def _build_and_run_single(self, handle, url, effective_platform, is_live_download,
+                              config_snapshot, bili_parts, verbose, custom_args,
+                              po_token_base_url=None):
+        build_kwargs = {
+            "is_live": is_live_download,
+            "platform_override": effective_platform,
+            "config_override": config_snapshot,
+            "bili_parts": bili_parts,
+        }
+        if custom_args:
+            build_kwargs["custom_args"] = custom_args
+        if po_token_base_url:
+            build_kwargs["po_token_base_url"] = po_token_base_url
+        cmd = self._build_command(url, **build_kwargs, include_subtitles=False)
+        subtitle_cmd = None
+        if config_snapshot.get("DOWNLOAD_SUBTITLES", 0):
+            subtitle_cmd = self._build_command(url, **build_kwargs, subtitle_only=True)
+        if verbose:
+            cmd += ["--verbose"]
+        if self._download_manager.is_cancelled(handle):
+            return
+        self._update_progress(0, "正在连接直播..." if is_live_download else "正在下载...")
+        self._run_single(
+            handle, cmd, url, effective_platform, is_live_download,
+            config_snapshot.get("AUDIO_MODE", "0"),
+            config_snapshot.get("AUDIO_FORMAT", "mp3"), verbose, subtitle_cmd,
+        )
 
     def start_withny_archive(self):
         if self._pick_withny_archive is None:
@@ -1216,12 +1229,6 @@ class DownloadExecutor:
         effective_platforms = {
             detect_platform(url) or config_snapshot["PLATFORM"] for url in urls
         }
-        provider_result = self._start_po_token_provider_if_needed(
-            config_snapshot, effective_platforms
-        )
-        if provider_result.get("error"):
-            return {"error": provider_result["error"]}
-        po_token_base_url = provider_result.get("base_url")
         handle = self._download_manager.begin("batch")
         if handle is None:
             return {"error": "已有下载任务在运行"}
@@ -1232,8 +1239,15 @@ class DownloadExecutor:
         audio_mode = config_snapshot.get("AUDIO_MODE", "0")
         audio_fmt = config_snapshot.get("AUDIO_FORMAT", "mp3")
         stats.update({"ok": 0, "fail": 0, "total": len(urls), "current": 0})
+        self._app_state.publish({"type": "stats", "data": dict(stats)})
+        self._update_progress(0, "正在准备批量下载...")
         try:
-            threading.Thread(target=self._run_batch, args=(handle, urls, config_snapshot, stats, bili_parts_map or {}, audio_mode, audio_fmt, custom_args, po_token_base_url), daemon=True).start()
+            threading.Thread(
+                target=self._prepare_download,
+                args=(handle, config_snapshot, effective_platforms, self._run_batch,
+                      (urls, config_snapshot, stats, bili_parts_map or {}, audio_mode, audio_fmt, custom_args)),
+                daemon=True,
+            ).start()
         except Exception as exc:
             self._download_manager.finish(handle)
             self._broadcast_download_state()

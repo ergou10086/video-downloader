@@ -44,6 +44,8 @@
 
 若要启用 YouTube PO Token，请同时保留 `dependency/yt-dlp-plugins/bgutil-ytdlp-pot-provider.zip` 和 `dependency/bgutil-ytdlp-pot-provider/server`（含已安装的 `node_modules`）。在「设置 → 平台专项」打开 YouTube PO Token 后，程序会在 YouTube 任务开始前自动启动 Provider，并在退出工具时关闭它；无需另开 CMD。Provider 可能缓解部分 403，但不能保证绕过所有风控或登录校验。
 
+Provider 首次启动在后台准备，界面会显示准备状态，日志每 5 秒报告等待进度，最多等待 60 秒；此时可点击「停止」。健康检查通过后才运行 yt-dlp，后续任务会复用已就绪的 Provider。启动失败会在日志中保留 Deno 错误并恢复可重试状态。启动过程仅使用已安装的依赖，不会在线安装包或等待控制台确认；若日志提示依赖缺失，请重新准备完整的 Provider 依赖包。
+
 TwitCasting 多初始化段归档会自动加载随项目提供的 `dependency/yt-dlp-plugins/video_downloader` 插件，按设置中的下载线程数并发预取 HLS 分片，再由 FFmpeg 完成本地封装；无需另装下载器。若插件缺失，程序会安全退回 FFmpeg 串行下载。
 
 ### 源码运行版
