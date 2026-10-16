@@ -184,6 +184,8 @@
             <span class="txt-ok">成功 <span id="statOk">0</span></span>
             <span class="dim">·</span>
             <span class="txt-err">失败 <span id="statFail">0</span></span>
+            <span class="dim">·</span>
+            <span class="dim">跳过 <span id="statSkip">0</span></span>
           </div>
         </div>
 
@@ -621,6 +623,25 @@
     <div class="dfoot">
       <button class="btn" onclick="closePartSelector()">取消</button>
       <button class="btn pri" id="btnPartConfirm" onclick="confirmPartSelection()">下载选中分P</button>
+    </div>
+  </div>
+</div>
+
+<!-- ====== 下载归档确认 ====== -->
+<div class="scrim" id="archiveChoiceOverlay">
+  <div class="dlg" style="width:460px" role="dialog" aria-modal="true" aria-labelledby="archiveChoiceTitle">
+    <div class="dhead">
+      <svg class="ico s18"><use href="#i-download"></use></svg><b id="archiveChoiceTitle">视频已有下载记录</b>
+      <button class="btn sm gh" onclick="chooseArchiveRedownload(false)" aria-label="跳过"><svg class="ico s14"><use href="#i-x"></use></svg></button>
+    </div>
+    <div class="dbody">
+      <p class="notice" id="archiveChoiceMsg"></p>
+      <p class="mono dim" id="archiveChoiceUrl" style="overflow-wrap:anywhere"></p>
+      <p class="notice">归档记录不能保证本地文件完整。重新下载会覆盖相同输出路径的旧文件，不创建编号副本；其他视频的归档记录会保留。</p>
+    </div>
+    <div class="dfoot">
+      <button class="btn" id="btnArchiveRedownload" onclick="chooseArchiveRedownload(true)">重新下载</button>
+      <button class="btn pri" id="btnArchiveSkip" onclick="chooseArchiveRedownload(false)">跳过（20 秒）</button>
     </div>
   </div>
 </div>

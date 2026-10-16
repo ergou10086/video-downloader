@@ -68,6 +68,7 @@ def make_dependencies(exit_event):
         stop_download=value,
         get_current_command=lambda: {"ok": True, "command": "yt-dlp https://example.com"},
         submit_password=lambda url, password: {"ok": True},
+        submit_archive_choice=lambda request_id, redownload: {"request_id": request_id, "redownload": redownload},
         fetch_bili_playlist=lambda url: {"parts": [], "total": 0},
         save_preset=named_value,
         load_preset=named_value,
@@ -131,6 +132,25 @@ class HttpServiceTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertEqual(json.loads(body)["command"], "yt-dlp https://example.com")
         self.assertEqual(headers["Cache-Control"], "no-store")
+
+    def test_archive_choice_route_preserves_explicit_skip_and_redownload(self):
+        for redownload in (False, True):
+            status, body, _ = self.request("/api/archive-choice", method="POST", payload={
+                "request_id": "choice-1", "redownload": redownload,
+            })
+            self.assertEqual(status, 200)
+            self.assertEqual(json.loads(body), {"request_id": "choice-1", "redownload": redownload})
+
+    def test_archive_choice_requires_boolean_decision_and_request_id(self):
+        for payload in ({"request_id": "id", "redownload": "false"}, {"request_id": "id", "redownload": 1}, {"redownload": True}):
+            with self.assertRaises(HTTPError) as error:
+                self.request("/api/archive-choice", method="POST", payload=payload)
+            self.assertEqual(error.exception.code, 400)
+
+    def test_archive_choice_rejects_unauthenticated_requests(self):
+        with self.assertRaises(HTTPError) as error:
+            self.request("/api/archive-choice", method="POST", token=False, payload={"request_id": "id", "redownload": True})
+        self.assertEqual(error.exception.code, 403)
 
     def test_expected_browser_disconnect_does_not_print_traceback(self):
         stderr = io.StringIO()
@@ -314,6 +334,8 @@ class HttpServiceTests(unittest.TestCase):
         self.assertEqual(dependencies.app_state.config_snapshot(), {"output_dir": "downloads"})
 
     def test_sse_sends_ready_event(self):
+        prompt = {"request_id": "pending", "url": "url", "count": 1, "expires_at": 123456}
+        self.dependencies.app_state.archive_prompt = prompt
         request = Request(
             self.url + "/api/events?token=test-token",
             headers={"Host": f"127.0.0.1:{self.service.port}"},
@@ -324,6 +346,7 @@ class HttpServiceTests(unittest.TestCase):
         event = json.loads(line.removeprefix(b"data: "))
         self.assertEqual(event["type"], "ready")
         self.assertEqual(event["data"]["generation"], 1)
+        self.assertEqual(event["data"]["archive_prompt"], prompt)
 
     def test_stop_terminates_connected_sse_handler(self):
         request = Request(

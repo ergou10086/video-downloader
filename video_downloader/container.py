@@ -361,6 +361,7 @@ class AppContainer:
                 stop_download=stop_download,
                 get_current_command=get_current_command,
                 submit_password=submit_password,
+                submit_archive_choice=download_executor.submit_archive_choice,
                 fetch_bili_playlist=fetch_bili_playlist,
                 save_preset=save_preset,
                 load_preset=load_preset,
