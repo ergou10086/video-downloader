@@ -8,8 +8,9 @@ from typing import Callable
 
 from video_downloader.core.constants import DEFAULT_SUBTITLE_LANGS, LEGACY_ALL_SUBTITLE_LANGS, RECOMMENDED_SUBTITLE_LANGS, SUBTITLE_TYPE_OPTIONS
 from video_downloader.core.paths import AppPaths
-from video_downloader.core.platform import clean_url
+from video_downloader.core.platform import clean_url, detect_platform
 from video_downloader.core.subtitles import classify_subtitle_result
+from video_downloader.core.thumbnails import classify_thumbnail_result, thumbnail_written_path
 
 AUDIO_EXTENSIONS = {'.mp3', '.wav', '.flac', '.m4a', '.aac', '.ogg', '.opus', '.wma', '.ac3', '.aiff', '.aif', '.wv', '.ape'}
 
@@ -28,6 +29,7 @@ AUDIO_CODEC_CONFIG = {
 class ToolService:
     def __init__(self, tool_dir, exe_suffix, app_state, save_config, log,
                  build_subtitle_command: Callable[..., list[str]] | None = None,
+                 build_cover_command: Callable[..., list[str]] | None = None,
                  download_manager=None, broadcast_download_state=None,
                  cancel_idle_timer=None, start_idle_timer=None):
         self._tool_dir = tool_dir
@@ -39,6 +41,7 @@ class ToolService:
         self._download_dir = self._paths.download_dir
         self._log_dir = self._paths.log_dir
         self._build_subtitle_command = build_subtitle_command
+        self._build_cover_command = build_cover_command
         self._download_manager = download_manager
         self._broadcast_download_state = broadcast_download_state or (lambda: None)
         self._cancel_idle_timer = cancel_idle_timer or (lambda: None)
@@ -259,6 +262,124 @@ class ToolService:
             self._broadcast_download_state()
             self._start_idle_timer()
             return {"error": "字幕下载任务启动失败"}
+        return {"ok": True, "total": len(cleaned_urls)}
+
+    def download_covers(self, urls):
+        """批量下载封面：逐条识别平台，封面文件名与对应视频完全一致。"""
+        ytdlp = self._paths.executable("yt-dlp", self._exe_suffix)
+        if not ytdlp.exists():
+            return {"error": "未找到yt-dlp.exe"}
+        if self._build_cover_command is None:
+            return {"error": "封面下载命令未配置"}
+        cleaned_urls = []
+        for url in urls:
+            if isinstance(url, str):
+                cleaned = clean_url(url)
+                if cleaned:
+                    cleaned_urls.append(cleaned)
+        if not cleaned_urls:
+            return {"error": "请输入至少一个视频链接"}
+        if self._download_manager is None:
+            return {"error": "封面下载任务管理器未配置"}
+        handle = self._download_manager.begin("covers")
+        if handle is None:
+            return {"error": "已有下载任务正在运行"}
+        self._cancel_idle_timer()
+        self._broadcast_download_state()
+
+        def run():
+            success = missing = skipped = fail = 0
+            try:
+                self._log(f"[封面下载] 开始处理 {len(cleaned_urls)} 个链接", "info")
+                env = self._paths.subprocess_env()
+                env["PYTHONUTF8"] = "1"
+                for index, url in enumerate(cleaned_urls, 1):
+                    if handle.cancel_event.is_set():
+                        break
+                    detected = detect_platform(url)
+                    if detected is None:
+                        # 未识别的域名既确定不了落盘目录，也确定不了用哪个平台参数，
+                        # 宁可明确跳过，也不要把封面写进错误的平台目录。
+                        self._log(
+                            f"[{index}/{len(cleaned_urls)}] 未识别的平台，已跳过: {url}", "warn"
+                        )
+                        skipped += 1
+                        continue
+                    # Fantia 由 fantiadl 处理、Withny 走自建 HLS 流程，都不经过 yt-dlp，
+                    # 因此没有可复用的封面命令。
+                    if detected == "Fantia":
+                        self._log(
+                            f"[{index}/{len(cleaned_urls)}] Fantia 暂不支持单独下载封面，已跳过",
+                            "warn",
+                        )
+                        skipped += 1
+                        continue
+                    self._log(f"[{index}/{len(cleaned_urls)}] 封面下载: {url}", "info")
+                    try:
+                        cmd = self._build_cover_command(url, platform_override=detected)
+                        proc = subprocess.Popen(
+                            cmd, cwd=self._tool_dir, env=env,
+                            stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                            text=True, encoding="utf-8", errors="replace",
+                        )
+                        if not self._download_manager.publish_process(handle, proc):
+                            proc.kill()
+                            proc.wait()
+                            break
+                        try:
+                            try:
+                                output, _ = proc.communicate(timeout=600)
+                            except subprocess.TimeoutExpired:
+                                proc.kill()
+                                proc.communicate()
+                                raise
+                            returncode = proc.returncode
+                        finally:
+                            self._download_manager.clear_process(handle, proc)
+
+                        result = classify_thumbnail_result(returncode, output)
+                        if result == "success":
+                            self._log(
+                                f"  -> 已保存: {Path(thumbnail_written_path(output)).name}",
+                                "success",
+                            )
+                            success += 1
+                        elif result == "missing":
+                            self._log("  -> 未找到可用封面", "warn")
+                            missing += 1
+                        else:
+                            detail = (output or "").strip().splitlines()[-1][:300] \
+                                if (output or "").strip() else ""
+                            suffix = f": {detail}" if detail else ""
+                            self._log(f"  -> 封面下载失败{suffix}", "warn")
+                            fail += 1
+                    except subprocess.TimeoutExpired:
+                        self._log("  -> 封面下载超时", "warn")
+                        fail += 1
+                    except Exception as exc:
+                        if not handle.cancel_event.is_set():
+                            self._log(f"  -> 封面下载异常: {exc}", "warn")
+                            fail += 1
+                if handle.cancel_event.is_set():
+                    self._log("[封面下载] 已停止", "warn")
+                else:
+                    level = "success" if fail == 0 and missing == 0 and skipped == 0 else "warn"
+                    self._log(
+                        f"[封面下载] 完成: 成功{success} 未找到{missing} 跳过{skipped} 失败{fail}",
+                        level,
+                    )
+            finally:
+                self._download_manager.finish(handle)
+                self._broadcast_download_state()
+                self._start_idle_timer()
+
+        try:
+            threading.Thread(target=run, daemon=True).start()
+        except Exception:
+            self._download_manager.finish(handle)
+            self._broadcast_download_state()
+            self._start_idle_timer()
+            return {"error": "封面下载任务启动失败"}
         return {"ok": True, "total": len(cleaned_urls)}
 
     def clean_temp(self):

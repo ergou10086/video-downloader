@@ -33,9 +33,11 @@ class HttpHandlerDependencies:
     batch_txt_download: object
     start_urls_download: object
     download_subtitles: object
+    download_covers: object
     stop_download: object
     get_current_command: object
     submit_password: object
+    submit_archive_choice: object
     fetch_bili_playlist: object
     save_preset: object
     load_preset: object
@@ -153,6 +155,7 @@ def create_handler(dependencies):
                     "generation": download_snapshot["generation"],
                     "progress": dict(dependencies.app_state.progress_data),
                     "stats": dict(dependencies.app_state.batch_stats),
+                    "archive_prompt": dependencies.app_state.archive_prompt,
                     "update": dependencies.updater.snapshot(),
                 }}
             # 每个 SSE 连接使用有界队列；慢连接的丢旧保新策略由 AppState 统一执行。
@@ -233,6 +236,15 @@ def create_handler(dependencies):
                 self._json(dependencies.start_withny_archive())
             elif path == "/api/start-withny-live":
                 self._json(dependencies.start_withny_live())
+            elif path == "/api/archive-choice":
+                request_id = self._field(data, "request_id", str, "")
+                if request_id is None:
+                    return
+                redownload = data.get("redownload")
+                if not request_id or not isinstance(redownload, bool):
+                    self._json({"error": "归档确认需要 request_id 和布尔值 redownload"}, status=400)
+                    return
+                self._json(dependencies.submit_archive_choice(request_id, redownload))
             elif path == "/api/submit-password":
                 url = self._field(data, "url", str, "")
                 if url is None:
@@ -269,6 +281,14 @@ def create_handler(dependencies):
                 if subtitle_langs is None:
                     return
                 self._json(dependencies.download_subtitles(urls, subtitle_type, subtitle_langs))
+            elif path == "/api/download-covers":
+                urls = self._field(data, "urls", list, [])
+                if urls is None:
+                    return
+                if not all(isinstance(url, str) for url in urls):
+                    self._json({"error": "字段 urls 必须是字符串数组"}, status=400)
+                    return
+                self._json(dependencies.download_covers(urls))
             elif path == "/api/batch-txt":
                 bili_parts_map = data.get("bili_parts_map") or None
                 custom_args = self._custom_args(data)

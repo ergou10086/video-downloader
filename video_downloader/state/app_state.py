@@ -11,6 +11,7 @@ class AppState:
     sse_clients: list = field(default_factory=list)
     log_history: list = field(default_factory=list)
     download_thread_context: Any = field(default_factory=threading.local)
+    archive_prompt: dict | None = None
     progress_data: dict = field(default_factory=lambda: {
         "percent": 0,
         "status": "就绪",

@@ -15,7 +15,8 @@ class FakeAppState:
         self.updates.append(values)
 
 
-def create_service(tool_dir, build_subtitle_command=None, download_manager=None, log=None):
+def create_service(tool_dir, build_subtitle_command=None, download_manager=None, log=None,
+                   build_cover_command=None):
     return ToolService(
         tool_dir=tool_dir,
         exe_suffix=".exe",
@@ -23,6 +24,7 @@ def create_service(tool_dir, build_subtitle_command=None, download_manager=None,
         save_config=lambda: None,
         log=log or (lambda message, level="info": None),
         build_subtitle_command=build_subtitle_command,
+        build_cover_command=build_cover_command,
         download_manager=download_manager,
     )
 
@@ -184,6 +186,89 @@ class ToolServiceTests(unittest.TestCase):
             self.assertFalse(manager.snapshot()["running"])
             self.assertEqual(calls[0][1]["subtitle_type"], "all")
             self.assertEqual(calls[0][1]["subtitle_langs"], "zh.*")
+
+    def test_download_covers_skips_fantia_without_calling_ytdlp(self):
+        with tempfile.TemporaryDirectory() as directory:
+            tool_dir = Path(directory)
+            (tool_dir / "yt-dlp.exe").touch()
+            manager = DownloadManager()
+            calls = []
+            logs = []
+            service = create_service(
+                tool_dir,
+                build_cover_command=lambda *args, **kwargs: calls.append(args) or ["yt-dlp.exe"],
+                download_manager=manager,
+                log=lambda message, level="info": logs.append(message),
+            )
+            with patch("video_downloader.services.tools.threading.Thread", ImmediateThread), \
+                 patch("video_downloader.services.tools.subprocess.Popen") as popen:
+                result = service.download_covers(["https://fantia.jp/posts/123"])
+            self.assertEqual(result, {"ok": True, "total": 1})
+            popen.assert_not_called()
+            self.assertEqual(calls, [])
+            self.assertTrue(any("Fantia" in message for message in logs))
+            self.assertFalse(manager.snapshot()["running"])
+
+    def test_download_covers_skips_unrecognised_platform(self):
+        with tempfile.TemporaryDirectory() as directory:
+            tool_dir = Path(directory)
+            (tool_dir / "yt-dlp.exe").touch()
+            manager = DownloadManager()
+            logs = []
+            service = create_service(
+                tool_dir,
+                build_cover_command=lambda *args, **kwargs: ["yt-dlp.exe"],
+                download_manager=manager,
+                log=lambda message, level="info": logs.append(message),
+            )
+            with patch("video_downloader.services.tools.threading.Thread", ImmediateThread), \
+                 patch("video_downloader.services.tools.subprocess.Popen") as popen:
+                result = service.download_covers(["https://example.com/video"])
+            self.assertEqual(result, {"ok": True, "total": 1})
+            popen.assert_not_called()
+            self.assertTrue(any("未识别的平台" in message for message in logs))
+
+    def test_download_covers_reports_written_thumbnail_name(self):
+        with tempfile.TemporaryDirectory() as directory:
+            tool_dir = Path(directory)
+            (tool_dir / "yt-dlp.exe").touch()
+            manager = DownloadManager()
+            calls = []
+            logs = []
+            service = create_service(
+                tool_dir,
+                build_cover_command=lambda *args, **kwargs: calls.append(kwargs) or ["yt-dlp.exe"],
+                download_manager=manager,
+                log=lambda message, level="info": logs.append(message),
+            )
+            with patch("video_downloader.services.tools.threading.Thread", ImmediateThread), \
+                 patch("video_downloader.services.tools.subprocess.Popen", return_value=FakePopen(
+                     stdout=(
+                         "[info] Writing video thumbnail 45 to: cover\\video.webp\n"
+                         '[ThumbnailsConvertor] Converting thumbnail "cover\\video.webp" to jpg\n'
+                     )
+                 )):
+                result = service.download_covers(["https://youtube.com/watch?v=abc"])
+            self.assertEqual(result, {"ok": True, "total": 1})
+            self.assertEqual(calls[0]["platform_override"], "YouTube")
+            # 转换后原文件会被删除，因此要报告 jpg 而不是 webp。
+            self.assertTrue(any("video.jpg" in message for message in logs))
+            self.assertFalse(manager.snapshot()["running"])
+
+    def test_download_covers_rejects_concurrent_task(self):
+        with tempfile.TemporaryDirectory() as directory:
+            tool_dir = Path(directory)
+            (tool_dir / "yt-dlp.exe").touch()
+            manager = DownloadManager()
+            handle = manager.begin("video")
+            service = create_service(
+                tool_dir,
+                build_cover_command=lambda *args, **kwargs: [],
+                download_manager=manager,
+            )
+            result = service.download_covers(["https://youtube.com/watch?v=abc"])
+            self.assertEqual(result, {"error": "已有下载任务正在运行"})
+            manager.finish(handle)
 
 
 if __name__ == "__main__":

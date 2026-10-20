@@ -9,6 +9,7 @@ let evtSource = null;
 let currentPlatform = "YouTube";
 let lastUrlPlatform = "YouTube";
 let download_running = false;
+let downloadGeneration = null;
 let activeTaskYtdlpArgs = "";
 const SESSION_TOKEN = window.SESSION_TOKEN || "";
 
@@ -601,6 +602,7 @@ function markStarted(total) {
   $('btnStop').disabled = false;
   $('statOk').textContent = '0';
   $('statFail').textContent = '0';
+  $('statSkip').textContent = '0';
   $('statTotal').textContent = total;
   updateStatsVisibility();
 }
@@ -618,7 +620,8 @@ async function doStartDl(url, biliParts, tcPassword, customArgs) {
   const r = await api('/api/start', {method:'POST', body:JSON.stringify(body)});
   if(r.error) { showToast(r.error, 'error'); return; }
   clearStartedTaskArgs(taskArgs);
-  markStarted('1');
+  // SSE owns task state: preparation may already have failed or been stopped
+  // before this response arrives. Do not overwrite that newer state here.
 }
 
 async function doStartUrls(urls, customArgs) {
@@ -627,7 +630,6 @@ async function doStartUrls(urls, customArgs) {
   const r = await api('/api/start-urls', {method:'POST', body:JSON.stringify(body)});
   if(r.error) { showToast(r.error, 'error'); return; }
   clearStartedTaskArgs(customArgs || '');
-  markStarted(r.total || String(urls.length));
 }
 
 async function startBatch() {
@@ -645,7 +647,6 @@ async function doStartBatch(biliPartsMap, customArgs) {
   const r = await api('/api/batch-txt', {method:'POST', body:JSON.stringify(body)});
   if(r.error) { showToast(r.error, 'error'); return; }
   clearStartedTaskArgs(customArgs || '');
-  markStarted(r.total || '0');
 }
 
 async function stopDl() {
@@ -687,7 +688,7 @@ function blipFor(status) {
   if(!status) return 'idle';
   if(status.includes('失败') || status.includes('异常')) return 'err';
   if(status.includes('完成')) return 'ok';
-  if(status.includes('已停止') || status.includes('已取消') || status.includes('就绪')) return 'idle';
+  if(status.includes('已停止') || status.includes('已取消') || status.includes('已跳过') || status.includes('就绪')) return 'idle';
   return 'live';
 }
 
@@ -744,8 +745,9 @@ function setStatValue(id, value) {
 function updateStatsVisibility() {
   const ok = parseInt($('statOk').textContent) || 0;
   const fail = parseInt($('statFail').textContent) || 0;
+  const skipped = parseInt($('statSkip').textContent) || 0;
   const total = parseInt($('statTotal').textContent) || 0;
-  setStatValue('statDone', ok + fail);
+  setStatValue('statDone', ok + fail + skipped);
   $('taskStatsWrap').style.display = total < 2 ? 'none' : '';
 }
 
@@ -896,6 +898,42 @@ async function startSubtitleDownload() {
   }
 }
 
+function showCoverDownloader() {
+  $('coverDownloadDialog').classList.add('show');
+  const source = $('urlInput').value.trim();
+  if(source && !$('coverUrlInput').value.trim()) $('coverUrlInput').value = source;
+  syncToolTiles();
+}
+
+function hideCoverDownloader() {
+  $('coverDownloadDialog').classList.remove('show');
+  syncToolTiles();
+}
+
+async function startCoverDownload() {
+  const button = $('btnCoverDownload');
+  if(button.disabled) return;
+  const urls = $('coverUrlInput').value.split(/\r?\n/).map(value => value.trim()).filter(Boolean);
+  if(!urls.length) {
+    showToolStatus('请输入至少一个视频链接', 'error');
+    return;
+  }
+  let submitted = false;
+  button.disabled = true;
+  showToolStatus('正在启动封面下载...', 'working');
+  try {
+    await saveSettingsNoAlert();
+    const result = await api('/api/download-covers', {method:'POST', body:JSON.stringify({urls: urls})});
+    submitted = true;
+    showToolStatus(`已提交封面下载（${result.total || urls.length} 个链接）`, 'success');
+  } catch(e) {
+    showToolStatus('封面下载启动失败: ' + e.message, 'error');
+    showToast(e.message, 'error');
+  } finally {
+    if(!submitted) button.disabled = false;
+  }
+}
+
 // ========== SSE ==========
 let sseRetryDelay = 1000;
 const SSE_MAX_RETRY = 16000;
@@ -916,17 +954,25 @@ function connectSSE() {
     } else if(evt.type === 'download_state') {
       const d = evt.data;
       download_running = Boolean(d.running);
+      downloadGeneration = d.generation;
       $('btnStart').disabled = download_running || d.phase === 'suspended';
       $('btnWithnyLive').disabled = download_running || d.phase === 'suspended';
       $('btnStop').disabled = !download_running || d.phase === 'stopping';
       if($('btnSubtitleDownload')) $('btnSubtitleDownload').disabled = download_running || d.phase === 'suspended';
+      if($('btnCoverDownload')) $('btnCoverDownload').disabled = download_running || d.phase === 'suspended';
       if(!download_running) $('topline').style.width = '0';
+      if(!download_running) closeArchiveChoice();
     } else if(evt.type === 'stats') {
       const d = evt.data;
       if(d.ok !== undefined) setStatValue('statOk', d.ok);
       if(d.fail !== undefined) setStatValue('statFail', d.fail);
+      setStatValue('statSkip', d.skipped || 0);
       if(d.total !== undefined) setStatValue('statTotal', d.total);
       updateStatsVisibility();
+    } else if(evt.type === 'archive_choice_required') {
+      showArchiveChoice(evt.data);
+    } else if(evt.type === 'archive_choice_closed') {
+      closeArchiveChoice(evt.data.request_id);
     } else if(evt.type === 'password_required') {
       const d = evt.data;
       // 仅 TwitCasting 平台显示密码弹窗，其他平台忽略
@@ -938,18 +984,23 @@ function connectSSE() {
       renderHistory(evt.data);
     } else if(evt.type === 'ready') {
       const readyData = Array.isArray(evt.data) ? {logs:evt.data, running:false} : evt.data;
+      downloadGeneration = readyData.generation;
       (readyData.logs || []).forEach(e => addLog(e));
       download_running = Boolean(readyData.running);
       $('btnStart').disabled = download_running || readyData.phase === 'suspended';
       $('btnStop').disabled = !download_running || readyData.phase === 'stopping';
       if($('btnSubtitleDownload')) $('btnSubtitleDownload').disabled = download_running || readyData.phase === 'suspended';
+      if($('btnCoverDownload')) $('btnCoverDownload').disabled = download_running || readyData.phase === 'suspended';
       if(readyData.progress) renderProgress(readyData.progress);
       if(readyData.stats) {
         $('statOk').textContent = readyData.stats.ok || 0;
         $('statFail').textContent = readyData.stats.fail || 0;
+        $('statSkip').textContent = readyData.stats.skipped || 0;
         $('statTotal').textContent = readyData.stats.total || 0;
         updateStatsVisibility();
       }
+      if(readyData.archive_prompt) showArchiveChoice(readyData.archive_prompt);
+      else closeArchiveChoice();
       if(readyData.update) {
         if(readyData.update.update_available) handleUpdateAvailable(readyData.update);
         if(readyData.update.downloading || readyData.update.update_done || readyData.update.error) {
@@ -1077,14 +1128,15 @@ function syncHistoryViewButtons() {
 /** 缩略图（含左下角成功/失败标记）。缺封面时露出提示图标。 */
 function thumbHtml(h) {
   const ok = h.status === 'success';
-  const color = ok ? 'var(--ok)' : 'var(--err)';
+  const skipped = h.status === 'skipped';
+  const color = ok ? 'var(--ok)' : skipped ? 'var(--fg3)' : 'var(--err)';
   const cover = h.filepath
     ? `<img loading="lazy" alt="封面"
            src="/api/cover?path=${encodeURIComponent(h.filepath)}&token=${encodeURIComponent(SESSION_TOKEN)}"
            onload="this.classList.add('show')" onerror="this.remove()" onclick="openCover(this.src)">`
     : '';
   return `<div class="thumb">${icon('alert','s20')}${cover}` +
-         `<span class="hstat"><span class="pd" style="background:${color}"></span>${ok?'成功':'失败'}</span></div>`;
+         `<span class="hstat"><span class="pd" style="background:${color}"></span>${ok?'成功':skipped?'跳过':'失败'}</span></div>`;
 }
 
 function platformHtml(name) {
@@ -1297,6 +1349,66 @@ function confirmPartSelection() {
   closePartSelector();
   if(cb) cb(indices);
 }
+
+// ========== 下载归档确认 ==========
+let archiveChoice = null;
+let archiveChoiceTimer = null;
+
+function closeArchiveChoice(requestId) {
+  if(requestId && archiveChoice?.request_id !== requestId) return;
+  clearInterval(archiveChoiceTimer);
+  archiveChoiceTimer = null;
+  archiveChoice = null;
+  $('archiveChoiceOverlay').classList.remove('show');
+}
+
+function showArchiveChoice(data) {
+  if(data.generation !== undefined && downloadGeneration !== null && data.generation !== downloadGeneration) return;
+  if(archiveChoice?.request_id === data.request_id) return;
+  closeArchiveChoice();
+  archiveChoice = data;
+  $('archiveChoiceMsg').textContent = `此链接有 ${data.count} 条视频已被归档跳过。是否重新下载？不操作将自动跳过并继续队列。`;
+  $('archiveChoiceUrl').textContent = data.url;
+  $('btnArchiveSkip').disabled = false;
+  $('btnArchiveRedownload').disabled = false;
+  const updateCountdown = () => {
+    const remaining = Math.max(0, Math.ceil((data.expires_at - Date.now()) / 1000));
+    $('btnArchiveSkip').textContent = `跳过（${remaining} 秒）`;
+    if(!remaining) closeArchiveChoice(data.request_id);
+  };
+  updateCountdown();
+  if(!archiveChoice) return;
+  $('archiveChoiceOverlay').classList.add('show');
+  $('btnArchiveSkip').focus();
+  archiveChoiceTimer = setInterval(updateCountdown, 250);
+}
+
+async function chooseArchiveRedownload(redownload) {
+  const choice = archiveChoice;
+  if(!choice || $('btnArchiveSkip').disabled) return;
+  $('btnArchiveSkip').disabled = true;
+  $('btnArchiveRedownload').disabled = true;
+  try {
+    const result = await api('/api/archive-choice', {method:'POST', body:JSON.stringify({
+      request_id: choice.request_id, redownload
+    })});
+    if(result.error) showToast(result.error, 'error');
+    closeArchiveChoice(choice.request_id);
+  } catch(e) {
+    showToast('归档选择提交失败: ' + e.message, 'error');
+    if(archiveChoice?.request_id === choice.request_id) {
+      $('btnArchiveSkip').disabled = false;
+      $('btnArchiveRedownload').disabled = false;
+    }
+  }
+}
+
+document.addEventListener('keydown', e => {
+  if(e.key === 'Escape' && archiveChoice) {
+    e.preventDefault();
+    chooseArchiveRedownload(false);
+  }
+});
 
 // ========== TwitCasting 密码 ==========
 function showTcPasswordPrompt(isRetry) {

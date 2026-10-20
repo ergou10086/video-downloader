@@ -183,6 +183,88 @@ class YtdlpCommandTests(unittest.TestCase):
         self.assertNotIn("--download-archive", cmd)
         self.assertNotIn("-f", cmd)
 
+    def test_thumbnail_only_command_reuses_video_output_template(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            video_cmd = build_ytdlp_cmd(
+                "https://youtube.com/watch?v=abc", DEFAULT_CONFIG, root,
+                include_subtitles=False,
+            )
+            cover_cmd = build_ytdlp_cmd(
+                "https://youtube.com/watch?v=abc", DEFAULT_CONFIG, root,
+                thumbnail_only=True,
+            )
+        # 封面文件名必须与视频一一对应，因此输出模板逐字相同。
+        self.assertEqual(
+            cover_cmd[cover_cmd.index("-o") + 1],
+            video_cmd[video_cmd.index("-o") + 1],
+        )
+
+    def test_thumbnail_only_command_skips_video_and_archive(self):
+        with tempfile.TemporaryDirectory() as directory:
+            cmd = build_ytdlp_cmd(
+                "https://youtube.com/watch?v=abc", DEFAULT_CONFIG, Path(directory),
+                thumbnail_only=True,
+            )
+        self.assertIn("--skip-download", cmd)
+        self.assertIn("--write-thumbnail", cmd)
+        self.assertEqual(cmd[cmd.index("--convert-thumbnails") + 1], "jpg")
+        self.assertIn("--ignore-no-formats-error", cmd)
+        # 先下封面不能让后续正式下载被归档误判为已完成。
+        self.assertNotIn("--download-archive", cmd)
+        self.assertNotIn("-f", cmd)
+        self.assertNotIn("--merge-output-format", cmd)
+
+    def test_thumbnail_only_command_keeps_auth_and_naming_options(self):
+        config = dict(DEFAULT_CONFIG, WIN_FILENAMES=1, STRICT_FILENAME=1)
+        with tempfile.TemporaryDirectory() as directory:
+            cmd = build_ytdlp_cmd(
+                "https://youtube.com/watch?v=abc", config, Path(directory),
+                cookie_file=Path(directory) / "cookies.txt",
+                thumbnail_only=True,
+            )
+        self.assertEqual(cmd[cmd.index("--cookies") + 1], str(Path(directory) / "cookies.txt"))
+        self.assertIn("--windows-filenames", cmd)
+        self.assertIn("--restrict-filenames", cmd)
+        self.assertEqual(cmd[cmd.index("--proxy") + 1], "")
+
+    def test_thumbnail_only_youtube_live_avoids_live_from_start(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            cmd = build_ytdlp_cmd(
+                "https://youtube.com/live/abc", DEFAULT_CONFIG, root,
+                is_live=True, platform_override="YouTube", thumbnail_only=True,
+            )
+        # 封面只需一次元数据请求，不能因为 --live-from-start 去抓整场直播。
+        self.assertNotIn("--live-from-start", cmd)
+        self.assertIn("直播", cmd[cmd.index("-o") + 1])
+
+    def test_every_platform_gets_cover_support_except_fantia_and_withny(self):
+        platforms = (
+            "YouTube",
+            "Bilibili",
+            "Twitch",
+            "Niconico",
+            "NicoChannel",
+            "TwitCasting",
+            "Twitter",
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for platform in platforms:
+                with self.subTest(platform=platform):
+                    cmd = build_ytdlp_cmd(
+                        "https://example.com/video",
+                        dict(DEFAULT_CONFIG, PLATFORM=platform),
+                        root,
+                        platform_override=platform,
+                        thumbnail_only=True,
+                    )
+                    self.assertIn("--write-thumbnail", cmd)
+                    self.assertTrue(
+                        cmd[cmd.index("-o") + 1].startswith(str(root / "download" / platform))
+                    )
+
     def test_disabled_proxy_is_explicit_direct_connection(self):
         with tempfile.TemporaryDirectory() as directory:
             cmd = build_ytdlp_cmd(

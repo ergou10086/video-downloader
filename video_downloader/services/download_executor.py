@@ -5,6 +5,7 @@ import re
 import subprocess
 import threading
 import time
+import uuid
 from pathlib import Path
 
 from video_downloader.core.command import parse_custom_ytdlp_args, twitcasting_hls_fallback_args
@@ -12,6 +13,7 @@ from video_downloader.core.constants import LEGACY_ALL_SUBTITLE_LANGS, RECOMMEND
 from video_downloader.core.platform import clean_url, detect_platform, is_live_url, safe_decode
 from video_downloader.core.paths import AppPaths
 from video_downloader.core.subtitles import classify_subtitle_result
+from video_downloader.services.download_archive import archived_video_id, forget_archived_videos, redownload_command
 from video_downloader.services.withny_archive import WithnyArchiveError, build_ffmpeg_command, load_and_select, redact_line
 
 
@@ -39,6 +41,8 @@ def _win_startup_info():
 
 
 class DownloadExecutor:
+    ARCHIVE_CHOICE_TIMEOUT = 20.0
+
     def __init__(
         self,
         tool_dir,
@@ -80,6 +84,70 @@ class DownloadExecutor:
         self._waiting_for_password = False
         self._command_lock = threading.Lock()
         self._current_ytdlp_command = None
+        self._archive_choice_lock = threading.Lock()
+        self._archive_choice = None
+
+    def submit_archive_choice(self, request_id, redownload):
+        with self._archive_choice_lock:
+            choice = self._archive_choice
+            if (
+                choice is None or choice["data"]["request_id"] != request_id
+                or time.monotonic() >= choice["deadline"]
+                or self._download_manager.is_cancelled(choice["handle"])
+                or choice["event"].is_set()
+            ):
+                return {"error": "此归档确认已结束，请以当前任务状态为准"}
+            choice["redownload"] = redownload
+            choice["event"].set()
+        return {"ok": True}
+
+    def _wait_for_archive_choice(self, handle, url, platform, video_ids):
+        if self._download_manager.is_cancelled(handle):
+            return False
+        if not self._app_state.has_sse_clients():
+            self._log("[归档] 当前无界面连接，默认跳过", "info")
+            return False
+        timeout = self.ARCHIVE_CHOICE_TIMEOUT
+        data = {
+            "request_id": uuid.uuid4().hex,
+            "generation": handle.generation,
+            "url": url, "platform": platform, "count": len(video_ids),
+            "expires_at": (time.time() + timeout) * 1000,
+        }
+        choice = {
+            "data": data, "handle": handle, "event": threading.Event(),
+            "deadline": time.monotonic() + timeout, "redownload": False,
+        }
+        with self._archive_choice_lock:
+            if self._download_manager.is_cancelled(handle):
+                return False
+            self._archive_choice = choice
+            self._app_state.archive_prompt = data
+        self._log(f"[归档] 检测到 {len(video_ids)} 条已记录的视频，等待选择（{timeout:g} 秒后默认跳过）", "warn")
+        self._update_progress(0, "等待归档确认，默认跳过...")
+        try:
+            self._emit_event("archive_choice_required", data)
+            while not self._download_manager.is_cancelled(handle):
+                remaining = choice["deadline"] - time.monotonic()
+                if remaining <= 0 or choice["event"].wait(min(0.2, remaining)):
+                    break
+            with self._archive_choice_lock:
+                accepted = choice["redownload"] and not self._download_manager.is_cancelled(handle)
+            if not choice["event"].is_set() and not self._download_manager.is_cancelled(handle):
+                self._log(f"[归档] {timeout:g} 秒未选择，自动跳过", "info")
+            return accepted
+        finally:
+            with self._archive_choice_lock:
+                if self._archive_choice is choice:
+                    self._archive_choice = None
+                    self._app_state.archive_prompt = None
+            self._emit_event("archive_choice_closed", {"request_id": data["request_id"]})
+
+    def _record_archive_skip(self, url, title, platform, stats):
+        stats["skipped"] = stats.get("skipped", 0) + 1
+        self._log("[跳过] 已保留归档记录，未重新下载", "info")
+        self._update_progress(1, "已跳过（下载归档）", "", "")
+        self._add_history(url, title, platform, "skipped")
 
     def _remember_ytdlp_command(self, command):
         with self._command_lock:
@@ -280,13 +348,37 @@ class DownloadExecutor:
         except ValueError as exc:
             return str(exc)
 
-    def _start_po_token_provider_if_needed(self, config_snapshot, platforms):
+    def _start_po_token_provider_if_needed(self, config_snapshot, platforms, handle):
         if not config_snapshot.get("YOUTUBE_PO_TOKEN_ENABLED", 0):
             return {}
         if "YouTube" not in platforms or self._ensure_po_token_provider is None:
             return {}
-        result = self._ensure_po_token_provider()
+        self._update_progress(0, "正在准备 YouTube PO Token Provider...")
+        result = self._ensure_po_token_provider(cancel_event=handle.cancel_event)
         return result if isinstance(result, dict) else {}
+
+    def _prepare_download(self, handle, config_snapshot, platforms, run, args):
+        """Keep cold starts off HTTP threads and inside the managed task lifetime."""
+        self._app_state.download_thread_context.task_id = handle.generation
+        try:
+            if self._download_manager.is_cancelled(handle):
+                return
+            result = self._start_po_token_provider_if_needed(config_snapshot, platforms, handle)
+            if self._download_manager.is_cancelled(handle) or result.get("cancelled"):
+                return
+            if result.get("error"):
+                raise RuntimeError(result["error"])
+            run(handle, *args, po_token_base_url=result.get("base_url"))
+        except Exception as exc:
+            if not self._download_manager.is_cancelled(handle):
+                self._log(f"[准备失败] {exc}", "error")
+                self._update_progress(0, "下载准备失败", "", "")
+                stats = self._app_state.batch_stats
+                stats["fail"] = stats["total"]
+                self._app_state.publish({"type": "stats", "data": dict(stats)})
+        finally:
+            if self._download_manager.is_current(handle):
+                self._finish(handle, None)
 
     def start_download(self, url, bili_parts=None, tc_password=None, custom_args=None):
         url = clean_url(url)
@@ -313,46 +405,6 @@ class DownloadExecutor:
         custom_args_error = self._validate_custom_args(config_snapshot, custom_args)
         if custom_args_error:
             return {"error": custom_args_error}
-        provider_result = self._start_po_token_provider_if_needed(
-            config_snapshot, {effective_platform}
-        )
-        if provider_result.get("error"):
-            return {"error": provider_result["error"]}
-        po_token_base_url = provider_result.get("base_url")
-        try:
-            build_kwargs = {
-                "is_live": is_live_download,
-                "platform_override": effective_platform,
-                "config_override": config_snapshot,
-                "bili_parts": bili_parts,
-                "include_subtitles": False,
-            }
-            if custom_args:
-                build_kwargs["custom_args"] = custom_args
-            if po_token_base_url:
-                build_kwargs["po_token_base_url"] = po_token_base_url
-            cmd = self._build_command(url, **build_kwargs)
-            subtitle_cmd = None
-            if config_snapshot.get("DOWNLOAD_SUBTITLES", 0):
-                subtitle_kwargs = {
-                    "is_live": is_live_download,
-                    "platform_override": effective_platform,
-                    "config_override": config_snapshot,
-                    "bili_parts": bili_parts,
-                    "subtitle_only": True,
-                }
-                if custom_args:
-                    subtitle_kwargs["custom_args"] = custom_args
-                if po_token_base_url:
-                    subtitle_kwargs["po_token_base_url"] = po_token_base_url
-                subtitle_cmd = self._build_command(url, **subtitle_kwargs)
-        except Exception as exc:
-            return {"error": f"下载配置无效: {exc}"}
-
-        # 弹窗重试时开启 yt-dlp --verbose 以便诊断格式/密码问题。
-        if verbose:
-            cmd += ["--verbose"]
-
         handle = self._download_manager.begin("single")
         if handle is None:
             return {"error": "已有下载任务在运行"}
@@ -364,18 +416,19 @@ class DownloadExecutor:
         stats.update({"ok": 0, "fail": 0, "total": 1, "current": 1})
         self._app_state.publish({"type": "stats", "data": dict(stats)})
         audio_mode = config_snapshot.get("AUDIO_MODE", "0")
-        audio_fmt = config_snapshot.get("AUDIO_FORMAT", "mp3")
         initial_stage = "audio" if audio_mode == "3" else "video"
         self._update_progress(
             0,
-            "正在连接直播..." if is_live_download else "正在下载...",
+            "正在准备下载...",
             stage=initial_stage,
         )
         self._log(f"[下载] {url}", "info")
         try:
             threading.Thread(
-                target=self._run_single,
-                args=(handle, cmd, url, effective_platform, is_live_download, audio_mode, audio_fmt, verbose, subtitle_cmd),
+                target=self._prepare_download,
+                args=(handle, config_snapshot, {effective_platform}, self._build_and_run_single,
+                      (url, effective_platform, is_live_download, config_snapshot,
+                       bili_parts, verbose, custom_args)),
                 daemon=True,
             ).start()
         except Exception as exc:
@@ -384,6 +437,34 @@ class DownloadExecutor:
             self._start_idle_timer()
             return {"error": f"下载线程启动失败: {exc}"}
         return {"ok": True}
+
+    def _build_and_run_single(self, handle, url, effective_platform, is_live_download,
+                              config_snapshot, bili_parts, verbose, custom_args,
+                              po_token_base_url=None):
+        build_kwargs = {
+            "is_live": is_live_download,
+            "platform_override": effective_platform,
+            "config_override": config_snapshot,
+            "bili_parts": bili_parts,
+        }
+        if custom_args:
+            build_kwargs["custom_args"] = custom_args
+        if po_token_base_url:
+            build_kwargs["po_token_base_url"] = po_token_base_url
+        cmd = self._build_command(url, **build_kwargs, include_subtitles=False)
+        subtitle_cmd = None
+        if config_snapshot.get("DOWNLOAD_SUBTITLES", 0):
+            subtitle_cmd = self._build_command(url, **build_kwargs, subtitle_only=True)
+        if verbose:
+            cmd += ["--verbose"]
+        if self._download_manager.is_cancelled(handle):
+            return
+        self._update_progress(0, "正在连接直播..." if is_live_download else "正在下载...")
+        self._run_single(
+            handle, cmd, url, effective_platform, is_live_download,
+            config_snapshot.get("AUDIO_MODE", "0"),
+            config_snapshot.get("AUDIO_FORMAT", "mp3"), verbose, subtitle_cmd,
+        )
 
     def start_withny_archive(self):
         if self._pick_withny_archive is None:
@@ -673,7 +754,7 @@ class DownloadExecutor:
             eta = ""
         return speed, eta
 
-    def _extract_audio_from_video(self, video_path, audio_fmt, handle=None, status="正在提取音频..."):
+    def _extract_audio_from_video(self, video_path, audio_fmt, handle=None, status="正在提取音频...", overwrite=False):
         """用 ffmpeg 从视频文件中提取指定格式的纯音频。
 
         仅用于音频模式 2（同时输出音频），从合并后的视频文件中提取音频轨。
@@ -685,7 +766,7 @@ class DownloadExecutor:
         base, _ = os.path.splitext(video_path)
         audio_ext = {"mp3": "mp3", "m4a": "m4a", "wav": "wav"}.get(audio_fmt, "mp3")
         audio_path = base + "." + audio_ext
-        if os.path.isfile(audio_path):
+        if not overwrite and os.path.isfile(audio_path):
             # 避免覆盖已有文件
             counter = 1
             while os.path.isfile(f"{base}_{counter}.{audio_ext}"):
@@ -919,7 +1000,7 @@ class DownloadExecutor:
 
     def _run_single(self, handle, cmd, url, effective_platform, is_live_download,
                     audio_mode="0", audio_fmt="mp3", verbose=False, subtitle_cmd=None,
-                    tc_direct_tried=False, tc_firefox_tried=False):
+                    tc_direct_tried=False, tc_firefox_tried=False, archive_retry=False):
         # 线程局部代际会随进度回调传递，旧工作线程无法覆盖新任务界面状态。
         self._app_state.download_thread_context.task_id = handle.generation
         stats = self._app_state.batch_stats
@@ -932,6 +1013,7 @@ class DownloadExecutor:
         video_title = ""
         output_path = ""
         proc = None
+        archived_ids = set()
         current_stage = "audio" if audio_mode == "3" else "video"
         try:
             # 弹窗重试时记录完整命令，方便我debug。
@@ -983,6 +1065,10 @@ class DownloadExecutor:
                 line = line.strip()
                 if not line:
                     continue
+
+                archived_id = archived_video_id(line)
+                if archived_id:
+                    archived_ids.add(archived_id)
 
                 if is_live_download and not live_connected and ("Connecting to WebSocket" in line or "Downloading m3u8" in line):
                     live_connected = True
@@ -1092,14 +1178,32 @@ class DownloadExecutor:
                     self._update_progress(-1, status_text, speed=speed, eta="", stage=current_stage)
 
             self._close_process(proc)
+            self._download_manager.clear_process(handle, proc)
             rc = proc.returncode if proc.returncode is not None else -1
+            if archived_ids and not archive_retry and not self._download_manager.is_cancelled(handle):
+                retry = self._wait_for_archive_choice(handle, url, effective_platform, archived_ids)
+                if self._download_manager.is_cancelled(handle):
+                    return
+                if retry:
+                    forget_archived_videos(cmd, archived_ids, self._tool_dir)
+                    self._log("[归档] 已清除本次命中的记录，重新下载并覆盖同名文件", "info")
+                    self._run_single(
+                        handle, redownload_command(cmd), url, effective_platform, is_live_download,
+                        audio_mode, audio_fmt, verbose, subtitle_cmd,
+                        tc_direct_tried, tc_firefox_tried, archive_retry=True,
+                    )
+                    return
+                if rc == 0 and not output_path:
+                    self._record_archive_skip(url, video_title, effective_platform, stats)
+                    update_stats()
+                    return
             if handle.cancel_event.is_set():
                 self._log("[停止] 下载已取消", "warn")
                 self._update_progress(0, "已停止", "", "")
             elif rc == 0:
                 # 模式 2（同时输出音频）：下载完成后用 ffmpeg 从合并文件提取音频
                 if audio_mode == "2" and output_path and os.path.isfile(output_path):
-                    self._extract_audio_from_video(output_path, audio_fmt, handle=handle)
+                    self._extract_audio_from_video(output_path, audio_fmt, handle=handle, overwrite=archive_retry)
                 if handle.cancel_event.is_set():
                     self._log("[停止] 下载已取消", "warn")
                     self._update_progress(0, "已停止", "", "", stage="audio" if audio_mode == "2" else current_stage)
@@ -1148,6 +1252,7 @@ class DownloadExecutor:
                         retry_subtitle_cmd,
                         direct_tried,
                         firefox_tried,
+                        archive_retry=archive_retry,
                     )
                     return
                 # TwitCasting 多初始化片段：原生下载器失败，改用 FFmpeg 重试一次。
@@ -1165,6 +1270,7 @@ class DownloadExecutor:
                         subtitle_cmd,
                         tc_direct_tried,
                         tc_firefox_tried,
+                        archive_retry=archive_retry,
                     )
                     return
                 if effective_platform == "TwitCasting":
@@ -1216,12 +1322,6 @@ class DownloadExecutor:
         effective_platforms = {
             detect_platform(url) or config_snapshot["PLATFORM"] for url in urls
         }
-        provider_result = self._start_po_token_provider_if_needed(
-            config_snapshot, effective_platforms
-        )
-        if provider_result.get("error"):
-            return {"error": provider_result["error"]}
-        po_token_base_url = provider_result.get("base_url")
         handle = self._download_manager.begin("batch")
         if handle is None:
             return {"error": "已有下载任务在运行"}
@@ -1232,8 +1332,15 @@ class DownloadExecutor:
         audio_mode = config_snapshot.get("AUDIO_MODE", "0")
         audio_fmt = config_snapshot.get("AUDIO_FORMAT", "mp3")
         stats.update({"ok": 0, "fail": 0, "total": len(urls), "current": 0})
+        self._app_state.publish({"type": "stats", "data": dict(stats)})
+        self._update_progress(0, "正在准备批量下载...")
         try:
-            threading.Thread(target=self._run_batch, args=(handle, urls, config_snapshot, stats, bili_parts_map or {}, audio_mode, audio_fmt, custom_args, po_token_base_url), daemon=True).start()
+            threading.Thread(
+                target=self._prepare_download,
+                args=(handle, config_snapshot, effective_platforms, self._run_batch,
+                      (urls, config_snapshot, stats, bili_parts_map or {}, audio_mode, audio_fmt, custom_args)),
+                daemon=True,
+            ).start()
         except Exception as exc:
             self._download_manager.finish(handle)
             self._broadcast_download_state()
@@ -1290,6 +1397,7 @@ class DownloadExecutor:
                 use_ffmpeg_for_hls = False
                 tc_direct_tried = False
                 tc_firefox_tried = False
+                archive_retry = False
 
                 while pw_attempt < max_password_attempts and not url_done:
                     if handle.cancel_event.is_set():
@@ -1303,6 +1411,7 @@ class DownloadExecutor:
                     tc_m3u8_400 = False
                     tc_access_error = False
                     tc_cookie_error = False
+                    archived_ids = set()
                     try:
                         cmd_config = dict(config_snapshot)
                         # 避免基础配置中的旧密码绕过本次任务的失效处理。
@@ -1326,6 +1435,8 @@ class DownloadExecutor:
                             cmd = self._with_direct_connection(cmd)
                         if tc_firefox_tried:
                             cmd = self._with_firefox_cookies(cmd)
+                        if archive_retry:
+                            cmd = redownload_command(cmd)
                         subtitle_cmd = None
                         if cmd_config.get("DOWNLOAD_SUBTITLES", 0):
                             subtitle_kwargs = {
@@ -1390,6 +1501,9 @@ class DownloadExecutor:
                                 continue
                             if not line:
                                 continue
+                            archived_id = archived_video_id(line)
+                            if archived_id:
+                                archived_ids.add(archived_id)
                             # === 日志输出（保持用户可见） ===
                             is_error = "ERROR" in line
                             if is_error:
@@ -1491,6 +1605,21 @@ class DownloadExecutor:
                             update_stats()
                             break
                         rc = proc.returncode if proc.returncode is not None else -1
+                        if archived_ids and not archive_retry:
+                            retry = self._wait_for_archive_choice(handle, url, effective_platform, archived_ids)
+                            if self._download_manager.is_cancelled(handle):
+                                stopped = True
+                                break
+                            if retry:
+                                forget_archived_videos(cmd, archived_ids, self._tool_dir)
+                                self._log(f"[{index}/{len(urls)}] [归档] 重新下载命中的视频，覆盖同名文件", "info")
+                                archive_retry = True
+                                continue
+                            if rc == 0 and not output_path:
+                                self._record_archive_skip(url, "", effective_platform, stats)
+                                url_done = True
+                                update_stats()
+                                continue
                         if rc == 0:
                             if audio_mode == "2" and output_path and os.path.isfile(output_path):
                                 self._extract_audio_from_video(
@@ -1498,6 +1627,7 @@ class DownloadExecutor:
                                     audio_fmt,
                                     handle=handle,
                                     status=f"批量下载 {index}/{len(urls)} · 正在提取音频",
+                                    overwrite=archive_retry,
                                 )
                             if handle.cancel_event.is_set():
                                 stopped = True
@@ -1600,8 +1730,9 @@ class DownloadExecutor:
                 self._log("[批量下载] 已停止", "warn")
                 self._update_progress(0, "已停止")
             else:
-                self._log(f"[批量下载] 完成: 成功{stats['ok']} 失败{stats['fail']} 总计{stats['total']}", "success")
-                status = "批量下载完成" if stats["ok"] == stats["total"] else f"批量下载完成 (成功{stats['ok']}/{stats['total']})"
+                skipped = stats.get("skipped", 0)
+                self._log(f"[批量下载] 完成: 成功{stats['ok']} 失败{stats['fail']} 跳过{skipped} 总计{stats['total']}", "success")
+                status = f"批量下载完成 (成功{stats['ok']}，失败{stats['fail']}，跳过{skipped})"
                 self._update_progress(1, status)
             update_stats()
         except Exception as exc:

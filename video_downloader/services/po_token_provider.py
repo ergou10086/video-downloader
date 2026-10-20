@@ -18,15 +18,17 @@ class PoTokenProviderService:
 
     HOST = "127.0.0.1"
     PORT = 4416
-    START_TIMEOUT = 20.0
+    START_TIMEOUT = 60.0
+    PROGRESS_INTERVAL = 5.0
 
     def __init__(self, tool_dir, log):
         self._tool_dir = tool_dir
         self._paths = AppPaths(tool_dir)
         self._log = log
         self._lock = threading.RLock()
+        self._shutdown = threading.Event()
         self._process = None
-        self._output_tail = deque(maxlen=12)
+        self._output_tail = deque(maxlen=30)
         self._active_base_url = None
 
     @property
@@ -37,12 +39,17 @@ class PoTokenProviderService:
     def _candidate_base_urls(self):
         # Upstream currently binds to "::". Some Windows systems expose that socket
         # on IPv4 too, while others only accept ::1, so probe both loopback families.
-        return (
+        candidates = (
             f"http://{self.HOST}:{self.PORT}",
             f"http://[::1]:{self.PORT}",
         )
+        if self._active_base_url in candidates:
+            return (self._active_base_url, *(
+                url for url in candidates if url != self._active_base_url
+            ))
+        return candidates
 
-    def _ping(self, timeout=0.8):
+    def _ping(self, timeout=0.25):
         try:
             # Provider health checks must never inherit a system/user proxy.
             opener = build_opener(ProxyHandler({}))
@@ -51,8 +58,12 @@ class PoTokenProviderService:
                     with opener.open(f"{base_url}/ping", timeout=timeout) as response:
                         if response.status != 200:
                             continue
-                        data = json.loads(response.read().decode("utf-8"))
-                    if isinstance(data, dict) and data.get("version"):
+                        data = json.loads(response.read(4096).decode("utf-8"))
+                    if (
+                        isinstance(data, dict)
+                        and isinstance(data.get("version"), str)
+                        and data["version"]
+                    ):
                         self._active_base_url = base_url
                         return data
                 except Exception:
@@ -70,12 +81,12 @@ class PoTokenProviderService:
         startupinfo.wShowWindow = subprocess.SW_HIDE
         return startupinfo, subprocess.CREATE_NO_WINDOW
 
-    def _drain_output(self, process):
+    def _drain_output(self, process, output_tail):
         try:
             for line in iter(process.stdout.readline, ""):
                 line = line.strip()
                 if line:
-                    self._output_tail.append(line)
+                    output_tail.append(line)
         except Exception:
             pass
         finally:
@@ -103,9 +114,27 @@ class PoTokenProviderService:
             return "PO Token Provider 缺少依赖: " + "、".join(missing)
         return None
 
-    def ensure_running(self):
-        """Ensure the HTTP provider is reachable, starting it if necessary."""
-        with self._lock:
+    def ensure_running(self, cancel_event=None):
+        """Ensure readiness within a deadline, without interactive dependency setup."""
+        started = time.monotonic()
+        deadline = started + self.START_TIMEOUT
+
+        def cancelled():
+            return self._shutdown.is_set() or (
+                cancel_event is not None and cancel_event.is_set()
+            )
+
+        # Another task may still be cleaning up its cancelled cold start.
+        # Waiting for that task must also be cancellable and bounded.
+        while not self._lock.acquire(timeout=0.1):
+            if cancelled():
+                return {"cancelled": True}
+            if time.monotonic() >= deadline:
+                return {"error": "等待 PO Token Provider 启动锁超时，请重试"}
+        try:
+            if cancelled():
+                return {"cancelled": True}
+            self._log("[PO Token] 正在检查本地 Provider...", "info")
             ping = self._ping()
             if ping:
                 if self._process is None:
@@ -136,8 +165,12 @@ class PoTokenProviderService:
             command = [
                 str(deno),
                 "run",
+                "--no-prompt",
+                "--cached-only",
+                "--node-modules-dir=manual",
                 "--allow-env",
                 "--allow-net",
+                "--allow-sys",
                 "--allow-ffi=.",
                 "--allow-read=.",
                 "../src/main.ts",
@@ -145,13 +178,19 @@ class PoTokenProviderService:
                 str(self.PORT),
             ]
             startupinfo, creationflags = self._windows_process_options()
-            self._output_tail.clear()
+            self._output_tail = deque(maxlen=30)
+            self._log(
+                f"[PO Token] 正在启动 Provider，首次加载可能较慢（最多 {self.START_TIMEOUT:g} 秒，可停止）...",
+                "info",
+            )
             try:
                 env = self._paths.subprocess_env()
+                env["DENO_NO_UPDATE_CHECK"] = "1"
                 process = subprocess.Popen(
                     command,
                     cwd=node_modules,
                     env=env,
+                    stdin=subprocess.DEVNULL,
                     stdout=subprocess.PIPE,
                     stderr=subprocess.STDOUT,
                     text=True,
@@ -165,14 +204,26 @@ class PoTokenProviderService:
                 return {"error": f"PO Token Provider 启动失败: {exc}"}
 
             self._process = process
-            threading.Thread(
+            reader = threading.Thread(
                 target=self._drain_output,
-                args=(process,),
+                args=(process, self._output_tail),
                 daemon=True,
-            ).start()
+            )
+            try:
+                reader.start()
+            except Exception as exc:
+                self._stop_owned_process(process)
+                self._process = None
+                process.stdout.close()
+                return {"error": f"PO Token Provider 日志线程启动失败: {exc}"}
 
-            deadline = time.monotonic() + self.START_TIMEOUT
+            next_progress = time.monotonic() + self.PROGRESS_INTERVAL
             while time.monotonic() < deadline:
+                if cancelled():
+                    self._stop_owned_process(process)
+                    self._process = None
+                    reader.join(timeout=0.2)
+                    return {"cancelled": True}
                 ping = self._ping()
                 if ping:
                     self._log(
@@ -186,20 +237,32 @@ class PoTokenProviderService:
                         "base_url": self.base_url,
                     }
                 if process.poll() is not None:
+                    reader.join(timeout=0.2)
                     detail = self._failure_detail()
                     self._process = None
                     return {"error": f"PO Token Provider 启动后异常退出{detail}"}
-                time.sleep(0.2)
+                now = time.monotonic()
+                if now >= next_progress:
+                    self._log(f"[PO Token] 等待 Provider 就绪，已用 {now - started:.0f} 秒...", "info")
+                    next_progress = now + self.PROGRESS_INTERVAL
+                if cancel_event is not None:
+                    cancel_event.wait(0.2)
+                else:
+                    self._shutdown.wait(0.2)
 
             self._stop_owned_process(process)
             self._process = None
+            reader.join(timeout=0.2)
             detail = self._failure_detail()
             return {"error": f"PO Token Provider 启动超时，无法访问 {self.base_url}/ping{detail}"}
+        finally:
+            self._lock.release()
 
     def _failure_detail(self):
         if not self._output_tail:
             return ""
-        return f"（{self._output_tail[-1][:300]}）"
+        output = "\n".join(tuple(self._output_tail))[:2000]
+        return f"（{output}）"
 
     @staticmethod
     def _stop_owned_process(process):
@@ -224,11 +287,14 @@ class PoTokenProviderService:
             except Exception:
                 try:
                     process.kill()
+                    process.wait(timeout=2)
                 except Exception:
                     pass
 
     def stop(self):
         """Stop only a provider process started by this application."""
+        # Wake an in-flight startup before waiting for its lifecycle lock.
+        self._shutdown.set()
         with self._lock:
             process = self._process
             self._process = None

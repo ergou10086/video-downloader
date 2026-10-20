@@ -36,6 +36,7 @@
   <symbol id="i-rotate" viewBox="0 0 24 24"><path d="M4 12a8 8 0 1 0 2.4-5.7L3.6 9"></path><path d="M3.4 4.4V9.4h5"></path></symbol>
   <symbol id="i-file-text" viewBox="0 0 24 24"><path d="M6 3.5h7l5 5v12H6z"></path><path d="M13 3.5v5h5"></path><path d="M9 13h6M9 16.6h4"></path></symbol>
   <symbol id="i-cookie" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"></circle><path d="M9.2 9.2h0M14.8 10h0M11 14.6h0M15.4 14.4h0"></path></symbol>
+  <symbol id="i-image" viewBox="0 0 24 24"><rect x="3.5" y="4.8" width="17" height="14.4" rx="2"></rect><circle cx="8.9" cy="9.8" r="1.6"></circle><path d="M4.4 16.6l4.4-4 3.3 2.9 3-2.5 4.5 3.6"></path></symbol>
   <symbol id="i-music" viewBox="0 0 24 24"><path d="M9.2 17.6V5.8l9.6-1.9v11.8"></path><circle cx="6.9" cy="17.7" r="2.3"></circle><circle cx="16.5" cy="15.7" r="2.3"></circle></symbol>
   <symbol id="i-volume" viewBox="0 0 24 24"><path d="M4 9.6h3.2L11 6v12l-3.8-3.6H4z"></path><path d="M14.6 9.6a3.6 3.6 0 0 1 0 4.8"></path><path d="M17.4 7.2a7.2 7.2 0 0 1 0 9.6"></path></symbol>
   <symbol id="i-list" viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h10"></path></symbol>
@@ -183,6 +184,8 @@
             <span class="txt-ok">成功 <span id="statOk">0</span></span>
             <span class="dim">·</span>
             <span class="txt-err">失败 <span id="statFail">0</span></span>
+            <span class="dim">·</span>
+            <span class="dim">跳过 <span id="statSkip">0</span></span>
           </div>
         </div>
 
@@ -311,6 +314,7 @@
           <button class="tile" onclick="toolAction('gen-template')"><svg class="ico s20"><use href="#i-file-text"></use></svg><span class="nm">生成批量下载模板</span></button>
           <button class="tile" onclick="toolAction('gen-cookie-template')"><svg class="ico s20"><use href="#i-cookie"></use></svg><span class="nm">生成 Cookie 模板</span></button>
           <button class="tile" data-panel="subtitleDownloadDialog" onclick="showSubtitleDownloader()"><svg class="ico s20"><use href="#i-file-text"></use></svg><span class="nm">单独下载字幕</span></button>
+          <button class="tile" data-panel="coverDownloadDialog" onclick="showCoverDownloader()"><svg class="ico s20"><use href="#i-image"></use></svg><span class="nm">下载视频封面</span></button>
           <button class="tile" onclick="toolAction('update-ytdlp')"><svg class="ico s20"><use href="#i-refresh"></use></svg><span class="nm">更新 yt-dlp</span></button>
           <button class="tile" onclick="toolAction('clean-temp')"><svg class="ico s20"><use href="#i-trash"></use></svg><span class="nm">清理临时文件</span></button>
           <button class="tile" data-panel="audioConvertDialog" onclick="showAudioConverter()"><svg class="ico s20"><use href="#i-music"></use></svg><span class="nm">音频格式转换</span></button>
@@ -337,6 +341,21 @@
           <div class="pfoot">
             <span class="hint">字幕保存到对应平台的 subtitles 目录。</span>
             <button class="btn pri" id="btnSubtitleDownload" onclick="startSubtitleDownload()"><svg class="ico s14"><use href="#i-play"></use></svg>开始下载字幕</button>
+          </div>
+        </div>
+
+        <div class="panel" id="coverDownloadDialog">
+          <div class="ptitle">
+            <svg class="ico s18"><use href="#i-image"></use></svg>
+            <b>下载视频封面</b><small>仅保存封面图片，不下载视频</small>
+            <button class="btn sm gh" style="margin-left:auto" onclick="hideCoverDownloader()"><svg class="ico s14"><use href="#i-x"></use></svg>关闭</button>
+          </div>
+          <div class="compose" style="margin-bottom:14px">
+            <textarea class="ta" id="coverUrlInput" rows="3" placeholder="输入一个或多个视频链接，每行一个，自动识别平台"></textarea>
+          </div>
+          <div class="pfoot">
+            <span class="hint">封面保存到对应平台目录，文件名与视频完全一致（jpg 格式）。</span>
+            <button class="btn pri" id="btnCoverDownload" onclick="startCoverDownload()"><svg class="ico s14"><use href="#i-play"></use></svg>开始下载封面</button>
           </div>
         </div>
 
@@ -606,6 +625,25 @@
     <div class="dfoot">
       <button class="btn" onclick="closePartSelector()">取消</button>
       <button class="btn pri" id="btnPartConfirm" onclick="confirmPartSelection()">下载选中分P</button>
+    </div>
+  </div>
+</div>
+
+<!-- ====== 下载归档确认 ====== -->
+<div class="scrim" id="archiveChoiceOverlay">
+  <div class="dlg" style="width:460px" role="dialog" aria-modal="true" aria-labelledby="archiveChoiceTitle">
+    <div class="dhead">
+      <svg class="ico s18"><use href="#i-download"></use></svg><b id="archiveChoiceTitle">视频已有下载记录</b>
+      <button class="btn sm gh" onclick="chooseArchiveRedownload(false)" aria-label="跳过"><svg class="ico s14"><use href="#i-x"></use></svg></button>
+    </div>
+    <div class="dbody">
+      <p class="notice" id="archiveChoiceMsg"></p>
+      <p class="mono dim" id="archiveChoiceUrl" style="overflow-wrap:anywhere"></p>
+      <p class="notice">归档记录不能保证本地文件完整。重新下载会覆盖相同输出路径的旧文件，不创建编号副本；其他视频的归档记录会保留。</p>
+    </div>
+    <div class="dfoot">
+      <button class="btn" id="btnArchiveRedownload" onclick="chooseArchiveRedownload(true)">重新下载</button>
+      <button class="btn pri" id="btnArchiveSkip" onclick="chooseArchiveRedownload(false)">跳过（20 秒）</button>
     </div>
   </div>
 </div>

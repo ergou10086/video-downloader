@@ -84,6 +84,40 @@ def _append_cookie_options(cmd, cfg, cookie_file):
             cmd += ["--cookies-from-browser", browser_spec]
 
 
+def _append_shared_options(cmd, cfg, cookie_file, platform_name, nicochannel_auth_token,
+                           po_token_base_url=None):
+    """追加视频、字幕与封面子命令共用的网络、Cookie、命名和平台鉴权参数。
+
+    三条子命令（正常下载 / 仅字幕 / 仅封面）必须带上同一组鉴权与命名选项，
+    否则封面会因 Cookie 缺失或文件名清洗规则不同而与视频对不上。这些选项都作用
+    于 URL 解析阶段，因此必须在追加 URL 之前调用。
+    """
+    _append_proxy_option(cmd, cfg)
+    _append_cookie_options(cmd, cfg, cookie_file)
+    if cfg["WIN_FILENAMES"]:
+        cmd += ["--windows-filenames"]
+    if cfg["STRICT_FILENAME"]:
+        cmd += ["--restrict-filenames"]
+    # TwitCasting 密码保护/会员限定直播与录播需要通过 --video-password 解锁。
+    if platform_name == "TwitCasting" and cfg.get("TC_PASSWORD"):
+        cmd += ["--video-password", cfg["TC_PASSWORD"]]
+    # NicoChannel: 插件通过 --username jwt_token --password <JWT> 接收鉴权令牌
+    # （而非 --extractor-args），详见插件的 _perform_login() 方法
+    if platform_name == "NicoChannel" and nicochannel_auth_token:
+        cmd += ["--username", "jwt_token", "--password", nicochannel_auth_token]
+    if platform_name == "YouTube":
+        # 已结束直播的留档（live_status=post_live）在默认播放器客户端下会返回
+        # "This live event has ended."，只有 web_embedded 客户端能取到已转码的
+        # VOD。在默认客户端集之后追加兜底：正常视频仍优先走默认客户端，仅当默认
+        # 客户端无法提取时自动回退，不影响已有下载行为。
+        cmd += ["--extractor-args", "youtube:player_client=default,web_embedded"]
+        if po_token_base_url:
+            cmd += [
+                "--extractor-args",
+                f"youtubepot-bgutilhttp:base_url={po_token_base_url}",
+            ]
+
+
 def _append_subtitle_options(cmd, cfg, download_dir, platform_name, also_set_default_output=False):
     if not cfg.get("DOWNLOAD_SUBTITLES", 0):
         return False
@@ -143,7 +177,7 @@ def _append_custom_ytdlp_args(cmd, cfg, custom_args):
     cmd += parse_custom_ytdlp_args(custom_args)
 
 
-def build_ytdlp_cmd(url, config, tool_dir, exe_suffix="", *, is_live=False, platform_override=None, cookie_file=None, bili_parts=None, nicochannel_auth_token=None, use_ffmpeg_for_hls=False, include_subtitles=True, subtitle_only=False, custom_args=None, po_token_base_url=None):
+def build_ytdlp_cmd(url, config, tool_dir, exe_suffix="", *, is_live=False, platform_override=None, cookie_file=None, bili_parts=None, nicochannel_auth_token=None, use_ffmpeg_for_hls=False, include_subtitles=True, subtitle_only=False, thumbnail_only=False, custom_args=None, po_token_base_url=None):
     """构建 yt-dlp 下载命令行参数。
 
     根据配置项组装完整的 yt-dlp 命令行参数列表，包括输出模板、格式选择、
@@ -161,6 +195,9 @@ def build_ytdlp_cmd(url, config, tool_dir, exe_suffix="", *, is_live=False, plat
         nicochannel_auth_token: NicoChannel 的 JWT 鉴权令牌，通过 --extractor-args 注入。
         use_ffmpeg_for_hls: TwitCasting 遇到多初始化片段的 fMP4 播放列表时，由
             执行器重试阶段置 True，强制改用 FFmpeg 下载 m3u8，绕过 hlsnative 限制。
+        subtitle_only: 只下载字幕，跳过视频。
+        thumbnail_only: 只下载封面，跳过视频与字幕。复用视频的输出模板，因此封面
+            文件名与对应视频完全一致；不写下载归档，避免影响后续正式下载。
 
     Returns:
         list[str]: 完整的 yt-dlp 命令行参数列表。
@@ -200,21 +237,9 @@ def build_ytdlp_cmd(url, config, tool_dir, exe_suffix="", *, is_live=False, plat
             return cmd + [url]
         if cfg["SPEED_LIMIT"] > 0:
             cmd += ["-r", f"{cfg['SPEED_LIMIT']}M"]
-        _append_proxy_option(cmd, cfg)
-        _append_cookie_options(cmd, cfg, cookie_file)
-        if cfg["WIN_FILENAMES"]:
-            cmd += ["--windows-filenames"]
-        if cfg["STRICT_FILENAME"]:
-            cmd += ["--restrict-filenames"]
-        if platform_name == "TwitCasting" and cfg.get("TC_PASSWORD"):
-            cmd += ["--video-password", cfg["TC_PASSWORD"]]
-        if platform_name == "NicoChannel" and nicochannel_auth_token:
-            cmd += ["--username", "jwt_token", "--password", nicochannel_auth_token]
-        if platform_name == "YouTube" and po_token_base_url:
-            cmd += [
-                "--extractor-args",
-                f"youtubepot-bgutilhttp:base_url={po_token_base_url}",
-            ]
+        _append_shared_options(
+            cmd, cfg, cookie_file, platform_name, nicochannel_auth_token, po_token_base_url
+        )
         _append_custom_ytdlp_args(cmd, cfg, custom_args)
         cmd.append(url)
         return cmd
@@ -238,13 +263,34 @@ def build_ytdlp_cmd(url, config, tool_dir, exe_suffix="", *, is_live=False, plat
         out_tmpl = str(
             download_dir / platform_name / "%(uploader)s" / "直播" / f"{vod_date_prefix}%(title)s - %(id)s.%(ext)s") if vod_date_prefix else str(
             download_dir / platform_name / "%(uploader)s" / "直播" / "%(title)s - %(upload_date)s %(id)s.%(ext)s")
-        cmd += ["--live-from-start"]
     elif is_nico_live:
         out_tmpl = str(
             download_dir / "Niconico" / "直播" / f"{vod_date_prefix}%(title)s - %(id)s.%(ext)s") if vod_date_prefix else str(
             download_dir / "Niconico" / "直播" / "%(title)s - %(upload_date)s %(id)s.%(ext)s")
     else:
         out_tmpl = str(download_dir / platform_name / "%(uploader)s" / f"{vod_date_prefix}%(title)s [%(id)s].%(ext)s")
+
+    if thumbnail_only:
+        # 只抓封面：复用与视频完全相同的输出模板，封面文件名因而与视频一一对应；
+        # 刻意不写 --download-archive，否则先下封面会让随后的正式下载被误判为已完成。
+        cmd += [
+            "-o", out_tmpl,
+            "--skip-download",
+            "--write-thumbnail",
+            "--convert-thumbnails", "jpg",
+            # 未登录或无可用视频流时封面仍能取到，不应因缺少格式而整体失败。
+            "--ignore-no-formats-error",
+            "--ffmpeg-location", str(paths.executable("ffmpeg", exe_suffix).parent),
+        ]
+        _append_shared_options(
+            cmd, cfg, cookie_file, platform_name, nicochannel_auth_token, po_token_base_url
+        )
+        _append_custom_ytdlp_args(cmd, cfg, custom_args)
+        cmd.append(url)
+        return cmd
+
+    if is_live and not is_nico_live:
+        cmd += ["--live-from-start"]
 
     cmd += ["-o", out_tmpl]
     archive = paths.archive(f"{platform_name.lower()}_archive.txt")
@@ -300,8 +346,6 @@ def build_ytdlp_cmd(url, config, tool_dir, exe_suffix="", *, is_live=False, plat
     cmd += ["-N", str(cfg["THREADS"])]
     if cfg["SPEED_LIMIT"] > 0:
         cmd += ["-r", f"{cfg['SPEED_LIMIT']}M"]
-    _append_proxy_option(cmd, cfg)
-    _append_cookie_options(cmd, cfg, cookie_file)
     if cfg["EMBED_META"]:
         cmd += ["--embed-metadata"]
     if cfg["DOWNLOAD_THUMB"]:
@@ -309,10 +353,6 @@ def build_ytdlp_cmd(url, config, tool_dir, exe_suffix="", *, is_live=False, plat
         # 正常合并模式（且非 WebM）才嵌图
         if audio_mode == "0" and fmt != "webm":
             cmd += ["--embed-thumbnail"]
-    if cfg["WIN_FILENAMES"]:
-        cmd += ["--windows-filenames"]
-    if cfg["STRICT_FILENAME"]:
-        cmd += ["--restrict-filenames"]
     if cfg["HWACCEL"] != "cpu":
         cmd += ["--postprocessor-args", f"Merger+ffmpeg_o:-c:v {cfg['HWACCEL']}"]
     cmd += ["--ffmpeg-location", str(paths.executable("ffmpeg", exe_suffix).parent)]
@@ -326,32 +366,17 @@ def build_ytdlp_cmd(url, config, tool_dir, exe_suffix="", *, is_live=False, plat
         # 交给 FFmpeg 封装；yt-dlp 因而仍能继续执行元数据、封面和归档流程。
         # 插件若遇到不支持的清单会保持原 URL，自动退回原有 FFmpeg 串行路径。
         cmd += twitcasting_hls_fallback_args(tool_dir)
-    # TwitCasting 密码保护/会员限定直播与录播需要通过 --video-password 解锁。
-    if platform_name == "TwitCasting" and cfg.get("TC_PASSWORD"):
-        cmd += ["--video-password", cfg["TC_PASSWORD"]]
     # 评论抓取与重编码仅对 Niconico 注入。
     if platform_name == "Niconico" and cfg["NICO_COMMENTS"]:
         cmd += ["--write-comments"]
     if platform_name == "Niconico" and cfg["NICO_RECODE"]:
         cmd += ["--recode-video", fmt]
-    # NicoChannel: 插件通过 --username jwt_token --password <JWT> 接收鉴权令牌
-    # （而非 --extractor-args），详见插件的 _perform_login() 方法
-    if platform_name == "NicoChannel" and nicochannel_auth_token:
-        cmd += ["--username", "jwt_token", "--password", nicochannel_auth_token]
     # Bilibili 多P选择：通过 -I 指定下载哪些分P
     if bili_parts and bili_parts != "all":
         cmd += ["-I", bili_parts]
-    # YouTube 已结束直播的留档（live_status=post_live）在默认播放器客户端下会返回
-    # "This live event has ended."，只有 web_embedded 客户端能取到已转码的 VOD。
-    # 在默认客户端集之后追加 web_embedded 兜底：正常视频仍优先走默认客户端，
-    # 仅当默认客户端无法提取时自动回退，不影响已有下载行为。
-    if platform_name == "YouTube":
-        cmd += ["--extractor-args", "youtube:player_client=default,web_embedded"]
-        if po_token_base_url:
-            cmd += [
-                "--extractor-args",
-                f"youtubepot-bgutilhttp:base_url={po_token_base_url}",
-            ]
+    _append_shared_options(
+        cmd, cfg, cookie_file, platform_name, nicochannel_auth_token, po_token_base_url
+    )
     _append_custom_ytdlp_args(cmd, cfg, custom_args)
     cmd.append(url)
     return cmd
