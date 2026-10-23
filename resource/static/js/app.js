@@ -14,6 +14,7 @@ let activeTaskYtdlpArgs = "";
 let liveWatchJobs = [];
 let tasksCache = [];
 let expandedTasks = new Set();
+let taskModeEnabled = true;
 let livePlatformModes = {};
 let liveCapabilities = null;
 let liveNoticeResolver = null;
@@ -315,7 +316,11 @@ function applyConfig(s) {
     renderLivePlatformModes();
   }
   if(s.LIVE_DOWNLOAD_TIMEOUT !== undefined) $('s_live_timeout').value = s.LIVE_DOWNLOAD_TIMEOUT || 0;
-  if(s.TASK_MODE !== undefined) setSwitch('sw_task_mode', s.TASK_MODE);
+  if(s.TASK_MODE !== undefined) {
+    taskModeEnabled = String(s.TASK_MODE) === '1';
+    setSwitch('sw_task_mode', s.TASK_MODE);
+    renderTasks(tasksCache);
+  }
   if(s.TASK_MAX_PARALLEL !== undefined) $('s_task_parallel').value = s.TASK_MAX_PARALLEL;
   if(s.TASK_ORDER !== undefined) $('s_task_order').value = s.TASK_ORDER;
   setSwitch('sw_meta', s.EMBED_META);
@@ -1207,8 +1212,11 @@ function renderTasks(tasks) {
   const host = $('taskList');
   if(!panel || !host) return;
   if(!tasksCache.length) {
-    panel.style.display = 'none';
-    host.innerHTML = '';
+    panel.style.display = taskModeEnabled ? '' : 'none';
+    host.innerHTML = taskModeEnabled
+      ? '<div class="task-empty">暂无任务。每次点击「开始下载」会在这里创建一个任务。</div>'
+      : '';
+    $('taskCount').textContent = '';
     return;
   }
   panel.style.display = '';
