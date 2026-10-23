@@ -76,7 +76,7 @@ def make_dependencies(exit_event):
         stop_download=value,
         get_current_command=lambda: {"ok": True, "command": "yt-dlp https://example.com"},
         submit_password=lambda url, password: {"ok": True},
-        submit_task_password=lambda task_id, url, password: {"ok": True, "task_id": task_id},
+        submit_task_password=lambda task_id, url, password, **kwargs: {"ok": True, "task_id": task_id, **kwargs},
         submit_archive_choice=lambda request_id, redownload: {"request_id": request_id, "redownload": redownload},
         submit_task_archive_choice=lambda task_id, request_id, redownload: {"ok": True, "task_id": task_id},
         fetch_bili_playlist=lambda url: {"parts": [], "total": 0},
@@ -100,6 +100,22 @@ def make_dependencies(exit_event):
 
 
 class HttpServiceTests(unittest.TestCase):
+    def test_task_password_route_accepts_explicit_skip_and_scoped_prompt(self):
+        status, body, _ = self.request("/api/submit-password", method="POST", payload={
+            "task_id": "task-1", "item_id": "item-1", "request_id": "prompt-1",
+            "url": "https://twitcasting.tv/user/movie/1", "password": "", "skip": True,
+        })
+        self.assertEqual(status, 200)
+        self.assertEqual(json.loads(body)["request_id"], "prompt-1")
+
+    def test_task_password_route_rejects_invalid_item_id_and_skip_types(self):
+        for change in ({"item_id": []}, {"skip": "true"}):
+            with self.assertRaises(HTTPError) as error:
+                self.request("/api/submit-password", method="POST", payload={
+                    "task_id": "task-1", "url": "url", "password": "password", **change,
+                })
+            self.assertEqual(error.exception.code, 400)
+
     def setUp(self):
         self.exit_event = threading.Event()
         self.dependencies = make_dependencies(self.exit_event)

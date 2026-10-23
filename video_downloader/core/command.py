@@ -15,14 +15,14 @@ _TWITCASTING_PLUGIN_RELATIVE_PATH = (
 )
 
 
-def twitcasting_hls_fallback_args(tool_dir):
-    """返回多初始化段回退参数；插件缺失时安全降级为纯 FFmpeg。"""
+def twitcasting_hls_fallback_args(tool_dir, *, force_ffmpeg=True):
+    """加载 TwitCasting 清单规划器；兼容旧版执行器的强制 FFmpeg 重试。"""
     args = [
         "--downloader", "m3u8:ffmpeg",
         # 对插件不接管的播放列表显式启用 HLS 连接复用，避免依赖 FFmpeg
         # 不同版本的 auto 默认值。
         "--downloader-args", "ffmpeg_i:-http_persistent 1 -http_multiple 1",
-    ]
+    ] if force_ffmpeg else []
     tool_dir = Path(tool_dir)
     paths = AppPaths(tool_dir)
     configured_plugin_dirs = paths.plugin_dirs()
@@ -195,8 +195,8 @@ def build_ytdlp_cmd(url, config, tool_dir, exe_suffix="", *, is_live=False, live
         cookie_file: Cookie 文件路径，用于文件模式 Cookie 鉴权。
         bili_parts: Bilibili 分P 选择参数，如 "1,3,5" 或 "all"，通过 -I 传递给 yt-dlp。
         nicochannel_auth_token: NicoChannel 的 JWT 鉴权令牌，通过 --extractor-args 注入。
-        use_ffmpeg_for_hls: TwitCasting 遇到多初始化片段的 fMP4 播放列表时，由
-            执行器重试阶段置 True，强制改用 FFmpeg 下载 m3u8，绕过 hlsnative 限制。
+        use_ffmpeg_for_hls: 兼容旧版 TwitCasting 重试路径，显式强制 FFmpeg。
+            正常录播在首次下载前自动检查清单并选择原生下载或本地封装。
         subtitle_only: 只下载字幕，跳过视频。
         thumbnail_only: 只下载封面，跳过视频与字幕。复用视频的输出模板，因此封面
             文件名与对应视频完全一致；不写下载归档，避免影响后续正式下载。
@@ -355,16 +355,10 @@ def build_ytdlp_cmd(url, config, tool_dir, exe_suffix="", *, is_live=False, live
     if cfg["HWACCEL"] != "cpu":
         cmd += ["--postprocessor-args", f"Merger+ffmpeg_o:-c:v {cfg['HWACCEL']}"]
     cmd += ["--ffmpeg-location", str(paths.executable("ffmpeg", exe_suffix).parent)]
-    # TwitCasting 的部分 fMP4 HLS 录像会在播放列表中途切换初始化片段，
-    # yt-dlp 原生 hlsnative 下载器会因此报
-    # "Initialization fragment found after media fragments"。默认仍用原生
-    # 下载器（可并发 -N 个分片，速度更快）；仅在检测到该错误后由执行器重试
-    # 时置 use_ffmpeg_for_hls，让 FFmpeg 接管 m3u8 下载以兼容这类播放列表。
-    if platform_name == "TwitCasting" and use_ffmpeg_for_hls:
-        # before_dl 插件并发预取带多个 EXT-X-MAP 的远程分片，再把本地播放列表
-        # 交给 FFmpeg 封装；yt-dlp 因而仍能继续执行元数据、封面和归档流程。
-        # 插件若遇到不支持的清单会保持原 URL，自动退回原有 FFmpeg 串行路径。
-        cmd += twitcasting_hls_fallback_args(tool_dir)
+    # 首次下载即规划 VOD 清单，避免先让 hlsnative 失败再重复整轮鉴权。
+    # 普通单初始化段仍用原生并发下载；多初始化段并发缓存后由 FFmpeg 本地封装。
+    if platform_name == "TwitCasting" and (not is_live or use_ffmpeg_for_hls):
+        cmd += twitcasting_hls_fallback_args(tool_dir, force_ffmpeg=use_ffmpeg_for_hls)
     # 评论抓取与重编码仅对 Niconico 注入。
     if platform_name == "Niconico" and cfg["NICO_COMMENTS"]:
         cmd += ["--write-comments"]

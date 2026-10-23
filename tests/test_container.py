@@ -1,11 +1,20 @@
 """测试 AppContainer 依赖注入容器。"""
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 
 from video_downloader.container import AppContainer, WiredApp
 
 
 class AppContainerTests(unittest.TestCase):
+    def test_maintenance_does_not_start_browser_idle_exit_timer(self):
+        app = self.container.wire()
+        self.addCleanup(app.request_exit)
+        self.assertTrue(app.updater._download_manager.suspend())
+        with patch("video_downloader.container.threading.Timer") as timer:
+            app.start_idle_timer()
+        timer.assert_not_called()
+
     def setUp(self):
         self.container = AppContainer(tool_dir=Path("."), exe_suffix=".exe")
 

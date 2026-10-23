@@ -148,8 +148,8 @@ def create_handler(dependencies):
                     return
                 self.send_response(200)
                 self.send_header("Content-Type", content_type)
-                # 静态资源缓存1小时（版本号变更时URL可加?v=参数强制刷新）
-                self.send_header("Cache-Control", "public, max-age=3600")
+                # Local assets can change between launches without a versioned URL.
+                self.send_header("Cache-Control", "no-cache")
                 self.end_headers()
                 self.wfile.write(content)
             else:
@@ -311,7 +311,11 @@ def create_handler(dependencies):
                 password = self._field(data, "password", str, "")
                 if password is None:
                     return
-                if not password.strip():
+                skip = data.get("skip", False)
+                if not isinstance(skip, bool):
+                    self._json({"error": "字段 skip 类型错误"}, status=400)
+                    return
+                if not password.strip() and not (skip and data.get("task_id")):
                     self._json({"error": "密码不能为空"}, status=400)
                     return
                 task_id = data.get("task_id")
@@ -319,7 +323,16 @@ def create_handler(dependencies):
                     self._json({"error": "字段 task_id 类型错误"}, status=400)
                     return
                 if task_id:
-                    self._json(dependencies.submit_task_password(task_id, url, password))
+                    item_id = data.get("item_id")
+                    request_id = data.get("request_id")
+                    if any(v is not None and not isinstance(v, str) for v in (item_id, request_id)):
+                        self._json({"error": "字段 item_id/request_id 类型错误"}, status=400)
+                        return
+                    if item_id or request_id:
+                        self._json(dependencies.submit_task_password(
+                            task_id, url, "" if skip else password, item_id=item_id, request_id=request_id))
+                    else:
+                        self._json(dependencies.submit_task_password(task_id, url, "" if skip else password))
                 else:
                     self._json(dependencies.submit_password(url, password))
             elif path == "/api/start-urls":

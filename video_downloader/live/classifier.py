@@ -43,6 +43,10 @@ def is_live_url(url: str, platform: str | None = None) -> bool:
         return len(segments) == 1 and segments[0] not in _TWITCH_ONE_SEGMENT_BLOCKLIST
     if platform_name == "Niconico":
         return host in {"live.nicovideo.jp", "live2.nicovideo.jp"}
+    if platform_name == "NicoChannel":
+        segments = [segment for segment in path.split("/") if segment]
+        return (host == "nicochannel.jp" or host.endswith(".nicochannel.jp")) and (
+            len(segments) >= 3 and segments[1] == "live")
     if platform_name == "Bilibili":
         return host == "live.bilibili.com" or host.endswith(".live.bilibili.com")
     if platform_name == "TwitCasting":

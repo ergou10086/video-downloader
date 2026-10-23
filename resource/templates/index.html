@@ -10,7 +10,7 @@
 <link rel="stylesheet" href="/static/css/dark.css">
 <link rel="stylesheet" href="/static/css/responsive.css">
 <link rel="stylesheet" href="/static/css/animations.css">
-<link rel="stylesheet" href="/static/css/settings.css">
+<link rel="stylesheet" href="/static/css/settings.css?v=tasks-2">
 </head>
 <body>
 
@@ -141,7 +141,7 @@
             <b>Twitter/X 提示：</b>部分内容需要登录才能下载，建议使用「浏览器 Cookie 模式」自动提取登录状态。
           </div>
           <div class="notice" id="twitcastingHint" style="display:none">
-            <b>TwitCasting 提示：</b>受限归档建议使用已登录的 Firefox；密码视频会自动弹窗。若 m3u8 返回 400，工具会依次尝试直连与 Firefox 登录状态；多初始化片段会按“下载线程数”并发预取，再由 FFmpeg 本地封装。
+            <b>TwitCasting 提示：</b>密码视频会自动弹窗，会员限定内容需使用有观看权限的登录状态。录播会自动检查播放列表，多初始化段按“下载线程数”并发下载后本地封装；中断重试会校验并复用完整分片。播放地址失效时先自动刷新，特殊清单才使用 FFmpeg 兼容下载。
           </div>
           <div class="notice" id="nicochannelHint" style="display:none">
             <b>NicoChannel 提示：</b>首次下载需从 Firefox 自动提取 JWT 登录令牌，请确保已在 Firefox 中登录 <b>nicochannel.jp</b>。
@@ -173,7 +173,7 @@
           <div id="taskList"></div>
         </div>
 
-        <div class="status">
+        <div class="status" id="legacyDownloadStatus">
           <div class="srow">
             <span class="st"><span class="blip idle" id="statusBlip"></span><span id="statusText">就绪</span></span>
             <span class="dim" id="idleText">等待任务</span>
@@ -275,7 +275,7 @@
               <div class="sh"><b>直播设置</b><span class="rule"></span><span class="note">任务开始前会按平台检查直播状态</span></div>
               <div class="row"><span class="lb">直播下载方式</span><span class="sel"><select class="ctl" id="s_live_stream_method"><option value="yt-dlp">yt-dlp（默认）</option></select><svg class="ico s14 cv"><use href="#i-chevron"></use></svg></span></div>
               <div class="row"><span class="lb">全局直播模式</span><span class="sel"><select class="ctl" id="s_live_mode"><option value="auto">自动（推荐）</option><option value="catch_up">追开播（条件）</option><option value="live_edge">从当前时刻</option><option value="wait">蹲开播（开播后自动录制）</option></select><svg class="ico s14 cv"><use href="#i-chevron"></use></svg></span></div>
-              <div class="row"><span class="lb">直播超时</span><input type="number" class="ctl mono" id="s_live_timeout" min="0" max="1440" value="0" style="width:110px"><span class="hint">分钟；0 表示不限时（当前仅 Niconico 批量路径使用，P2 扩展到单条）</span></div>
+              <div class="row"><span class="lb">直播超时</span><input type="number" class="ctl mono" id="s_live_timeout" min="0" max="1440" value="0" style="width:110px"><span class="hint">分钟；0 表示不限时（Niconico 单条和批量录制均有效）</span></div>
               <div class="sh" style="margin-top:4px"><b>平台默认录制方式</b><span class="rule"></span><span class="note">仅显示同时支持追开播与当前录制的平台</span></div>
               <div id="livePlatformModes" class="live-platform-modes"></div>
               <div class="hint">追开播不可用时会提示原因并降级为从当前时刻；条件平台（Niconico/NicoChannel/TwitCasting/X）在探测能力接入前不显示。</div>
@@ -326,7 +326,9 @@
               <div class="row"><span class="lb">启用任务模式</span><span class="sw on" id="sw_task_mode" onclick="toggleSwitch(this)"><i></i></span><span class="hint">下载/录制进入任务列表；关闭则使用旧单任务模式</span></div>
               <div class="row"><span class="lb">最大并行任务数</span><input type="number" class="ctl mono" id="s_task_parallel" min="1" max="8" value="1" style="width:100px"><span class="hint">1 表示串行（不并行）；建议 2–4</span></div>
               <div class="row"><span class="lb">任务排序</span><span class="sel"><select class="ctl" id="s_task_order"></select><svg class="ico s14 cv"><use href="#i-chevron"></use></svg></span></div>
-              <div class="hint">并行任务共享网络/磁盘；归档确认、密码弹窗等交互可能短暂串行。直播录制任务按所选平台模式执行。</div>
+              <div class="row"><span class="lb">任务内直播并行数</span><input type="number" class="ctl mono" id="s_task_live_parallel" min="1" max="8" value="1" style="width:100px"><span class="hint">默认 1，全部链接串行；开启后直播可并行，普通下载最多一路，同任务总链接并行数不超过此值</span></div>
+              <div class="hint">排序仅影响排队任务，不中断正在运行的任务。下载设置在提交时固定；并行上限与排序对队列实时生效。总录制路数最多为两个并行数的乘积；下载线程和限速分别作用于每条链接。</div>
+              <div class="hint">任务列表在本次运行期间保留，重启后不恢复。归档和密码确认在对应任务详情内处理；蹲开播仍由等待开播面板管理。</div>
             </section>
 
             <section class="settings-section" id="set-advanced">
@@ -730,6 +732,6 @@
 <script src="/static/js/theme.js"></script>
 <script src="/static/js/audio-convert.js"></script>
 <script src="/static/js/audio-volume.js"></script>
-<script src="/static/js/app.js"></script>
+<script src="/static/js/app.js?v=tasks-2"></script>
 </body>
 </html>

@@ -511,6 +511,36 @@ class YtdlpCommandTests(unittest.TestCase):
         self.assertNotIn("--downloader", cmd)
         self.assertNotIn("--use-postprocessor", cmd)
 
+    def test_twitcasting_vod_plans_hls_before_first_download_when_plugin_is_present(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            plugin = root / "dependency/yt-dlp-plugins/video_downloader/yt_dlp_plugins/postprocessor/twitcasting_parallel.py"
+            plugin.parent.mkdir(parents=True)
+            plugin.touch()
+            cmd = build_ytdlp_cmd(
+                "https://twitcasting.tv/user/movie/123", DEFAULT_CONFIG, root,
+                platform_override="TwitCasting",
+            )
+        self.assertIn("TwitCastingParallelHls:when=before_dl", cmd)
+        self.assertIn("TwitCastingParallelHls:when=post_process;cleanup=true", cmd)
+        self.assertIn("--enable-file-urls", cmd)
+        self.assertNotIn("--downloader", cmd)
+
+    def test_vod_planner_is_not_added_to_livestreams_or_other_platforms(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            plugin = root / "dependency/yt-dlp-plugins/video_downloader/yt_dlp_plugins/postprocessor/twitcasting_parallel.py"
+            plugin.parent.mkdir(parents=True)
+            plugin.touch()
+            for platform, live in (("TwitCasting", True), ("Twitch", False), ("YouTube", False)):
+                with self.subTest(platform=platform, live=live):
+                    cmd = build_ytdlp_cmd(
+                        "https://twitcasting.tv/user", DEFAULT_CONFIG, root,
+                        platform_override=platform, is_live=live,
+                    )
+                    self.assertNotIn("--use-postprocessor", cmd)
+                    self.assertNotIn("--enable-file-urls", cmd)
+
     def test_youtube_uses_web_embedded_fallback_for_ended_live_archive(self):
         with tempfile.TemporaryDirectory() as directory:
             cmd = build_ytdlp_cmd(

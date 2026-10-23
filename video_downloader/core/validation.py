@@ -101,6 +101,7 @@ def validate_config(values, base=None):
         "LIVE_DOWNLOAD_TIMEOUT": (0, 1440),
         "TASK_MODE": (0, 1),
         "TASK_MAX_PARALLEL": (1, 8),
+        "TASK_LIVE_PARALLEL": (1, 8),
     }
     booleans = {
         "MERGE_MODE", "PROXY_ENABLED", "USE_COOKIES", "EMBED_META",

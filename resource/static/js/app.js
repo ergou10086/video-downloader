@@ -15,6 +15,9 @@ let liveWatchJobs = [];
 let tasksCache = [];
 let expandedTasks = new Set();
 let taskModeEnabled = true;
+let taskSnapshotVersion = 0;
+let taskLoadRequest = 0;
+const seenTaskPrompts = new Set();
 let livePlatformModes = {};
 let liveCapabilities = null;
 let liveNoticeResolver = null;
@@ -322,6 +325,7 @@ function applyConfig(s) {
     renderTasks(tasksCache);
   }
   if(s.TASK_MAX_PARALLEL !== undefined) $('s_task_parallel').value = s.TASK_MAX_PARALLEL;
+  if(s.TASK_LIVE_PARALLEL !== undefined) $('s_task_live_parallel').value = s.TASK_LIVE_PARALLEL;
   if(s.TASK_ORDER !== undefined) $('s_task_order').value = s.TASK_ORDER;
   setSwitch('sw_meta', s.EMBED_META);
   setSwitch('sw_thumb', s.DOWNLOAD_THUMB);
@@ -532,6 +536,7 @@ function collectCfg() {
     LIVE_DOWNLOAD_TIMEOUT: parseInt($('s_live_timeout').value) || 0,
     TASK_MODE: isOn('sw_task_mode') ? 1 : 0,
     TASK_MAX_PARALLEL: Math.max(1, Math.min(8, parseInt($('s_task_parallel').value) || 1)),
+    TASK_LIVE_PARALLEL: Math.max(1, Math.min(8, parseInt($('s_task_live_parallel').value) || 1)),
     TASK_ORDER: $('s_task_order').value,
     EMBED_META: isOn('sw_meta')?1:0,
     DOWNLOAD_THUMB: isOn('sw_thumb')?1:0,
@@ -614,7 +619,8 @@ async function startDl() {
   // 按行拆分，每行一个链接，清理后过滤空行
   const urls = $('urlInput').value.split(/\r?\n/).map(cleanOneUrl).filter(Boolean);
   if(urls.length === 0) { showToast('请输入链接', 'error'); return; }
-  activeTaskYtdlpArgs = $('task_ytdlp_args').value.trim();
+  const taskArgs = $('task_ytdlp_args').value.trim();
+  activeTaskYtdlpArgs = taskArgs;
 
   // 多链接：走批量下载（每行一个），跳过单条 Bilibili 分P 选择
   if(urls.length > 1) {
@@ -623,7 +629,7 @@ async function startDl() {
       return;
     }
     try { await saveSettingsNoAlert(); } catch(e) { showToast('设置保存失败: ' + e.message, 'error'); return; }
-    doStartUrls(urls, activeTaskYtdlpArgs);
+    doStartUrls(urls, taskArgs);
     return;
   }
 
@@ -646,7 +652,7 @@ async function startDl() {
       if(pl.note) { addLog({time: nowTime(), msg: '[分P检测] ' + pl.note, level: 'info'}); }
       if(pl.parts && pl.parts.length > 1) {
         addLog({time: nowTime(), msg: `[分P检测] 检测到 ${pl.total} 个分P，等待选择…`, level: 'info'});
-        pendingPartCallback = (parts) => doStartDl(url, parts, undefined, activeTaskYtdlpArgs);
+        pendingPartCallback = (parts) => doStartDl(url, parts, undefined, taskArgs);
         showPartSelector(pl.parts);
         return;
       }
@@ -655,7 +661,7 @@ async function startDl() {
       setStatus('就绪', 'idle');
     }
   }
-  doStartDl(url, undefined, undefined, activeTaskYtdlpArgs);
+  doStartDl(url, undefined, undefined, taskArgs);
 }
 
 function nowTime(){ return new Date().toTimeString().slice(0,8); }
@@ -664,6 +670,7 @@ async function startWithnyArchive() {
   $('btnStart').disabled = true;
   $('btnWithnyLive').disabled = true;
   try {
+    await saveSettingsNoAlert();
     const result = await api('/api/start-withny-archive', {method:'POST', body:'{}'});
     if(result.error) {
       showToast(result.error, 'error');
@@ -676,7 +683,11 @@ async function startWithnyArchive() {
       $('btnWithnyLive').disabled = false;
       return;
     }
-    markStarted('1');
+    if(result.task) {
+      $('btnStart').disabled = false;
+      $('btnWithnyLive').disabled = false;
+      loadTasks();
+    } else markStarted('1');
   } catch(e) {
     showToast('Withny 下载启动失败: ' + e.message, 'error');
     $('btnStart').disabled = false;
@@ -688,6 +699,7 @@ async function startWithnyLive() {
   $('btnStart').disabled = true;
   $('btnWithnyLive').disabled = true;
   try {
+    await saveSettingsNoAlert();
     const result = await api('/api/start-withny-live', {method:'POST', body:'{}'});
     if(result.error) {
       showToast(result.error, 'error');
@@ -700,7 +712,11 @@ async function startWithnyLive() {
       $('btnWithnyLive').disabled = false;
       return;
     }
-    markStarted('1');
+    if(result.task) {
+      $('btnStart').disabled = false;
+      $('btnWithnyLive').disabled = false;
+      loadTasks();
+    } else markStarted('1');
   } catch(e) {
     showToast('Withny 直播录制启动失败: ' + e.message, 'error');
     $('btnStart').disabled = false;
@@ -1183,9 +1199,11 @@ function toggleTask(taskId) {
 }
 
 async function loadTasks() {
+  const version = taskSnapshotVersion;
+  const request = ++taskLoadRequest;
   try {
     const r = await api('/api/tasks');
-    renderTasks(r.tasks || []);
+    if(version === taskSnapshotVersion && request === taskLoadRequest) renderTasks(r.tasks || []);
   } catch(e) { /* 保持页面安静 */ }
 }
 
@@ -1207,9 +1225,28 @@ async function clearFinishedTasks() {
 }
 
 function renderTasks(tasks) {
+  const focusKey = document.activeElement?.dataset?.taskFocus;
+  const logScrolls = new Map(Array.from(document.querySelectorAll('[data-task-log]')).map(log => [
+    log.dataset.taskLog, {top:log.scrollTop, atBottom:log.scrollHeight - log.scrollTop - log.clientHeight < 8}
+  ]));
+  const passwordInputs = Array.from(document.querySelectorAll('.task-password')).map(input => ({
+    id: input.id, value: input.value, focused: document.activeElement === input,
+    start: input.selectionStart, end: input.selectionEnd
+  }));
   tasksCache = Array.isArray(tasks) ? tasks : [];
+  const taskIds = new Set(tasksCache.map(task => task.id));
+  for(const id of expandedTasks) if(!taskIds.has(id)) expandedTasks.delete(id);
+  const promptIds = new Set(tasksCache.flatMap(task => (task.prompts || []).map(prompt => prompt.request_id)));
+  for(const id of seenTaskPrompts) if(!promptIds.has(id)) seenTaskPrompts.delete(id);
+  tasksCache.forEach(task => (task.prompts || []).forEach(prompt => {
+    if(!seenTaskPrompts.has(prompt.request_id)) {
+      seenTaskPrompts.add(prompt.request_id);
+      expandedTasks.add(task.id);
+    }
+  }));
   const panel = $('taskModePanel');
   const host = $('taskList');
+  $('legacyDownloadStatus').style.display = taskModeEnabled && !download_running ? 'none' : '';
   if(!panel || !host) return;
   if(!tasksCache.length) {
     panel.style.display = taskModeEnabled ? '' : 'none';
@@ -1217,6 +1254,7 @@ function renderTasks(tasks) {
       ? '<div class="task-empty">暂无任务。每次点击「开始下载」会在这里创建一个任务。</div>'
       : '';
     $('taskCount').textContent = '';
+    if(!download_running) $('btnStop').disabled = true;
     return;
   }
   panel.style.display = '';
@@ -1226,24 +1264,49 @@ function renderTasks(tasks) {
     : `共 ${tasksCache.length} 个`;
   if(active.length) $('btnStop').disabled = false;
   else if(!download_running) $('btnStop').disabled = true;
+  if(!download_running) {
+    const totals = tasksCache.reduce((sum, task) => {
+      for(const key of ['ok','fail','skipped','total']) sum[key] += Number(task.stats?.[key] || 0);
+      return sum;
+    }, {ok:0, fail:0, skipped:0, total:0});
+    setStatValue('statOk', totals.ok);
+    setStatValue('statFail', totals.fail);
+    setStatValue('statSkip', totals.skipped);
+    setStatValue('statTotal', totals.total);
+    updateStatsVisibility();
+  }
 
   host.innerHTML = tasksCache.map(task => {
     const status = task.status || 'queued';
     const pct = Math.max(0, Math.min(100, Number(task.progress) || 0));
     const open = expandedTasks.has(task.id);
-    const rowClass = ['task-row', status, open ? 'open' : ''].join(' ');
+    const rowClass = ['task-row', status, task.indeterminate ? 'indeterminate' : '', open ? 'open' : ''].join(' ');
     const statusText = taskStatusLabel(status);
     const meta = [
       statusText,
       task.speed ? task.speed : '',
       task.eta ? 'ETA ' + task.eta : '',
-      task.kind === 'live' ? '直播' : '下载'
+      task.kind === 'live' ? '直播' : '下载',
+      task.prompts?.length ? '等待确认' : ''
     ].filter(Boolean).join(' · ');
     const percentText = task.indeterminate ? '进行中' : `${Math.round(pct)}%`;
     const canCancel = status === 'queued' || status === 'running';
-    const urls = (task.urls || []).map(url =>
-      `<div class="tdline"><span class="tdlabel">链接</span><span class="tdurl">${escapeTaskText(url)}</span></div>`
+    const urls = (task.items || []).map(item =>
+      `<div class="tdline"><span class="tdlabel">${escapeTaskText(taskStatusLabel(item.status))}</span><span class="tdurl">${escapeTaskText(item.urls[0])}<br>${escapeTaskText(item.message)} · ${item.indeterminate ? '录制中' : Math.round(item.progress) + '%'}${item.speed ? ' · ' + escapeTaskText(item.speed) : ''}</span></div>`
     ).join('');
+    const prompts = (task.prompts || []).map(prompt => {
+      if(prompt.type === 'archive_choice_required') {
+        const remaining = Math.max(0, Math.ceil((prompt.expires_at - Date.now()) / 1000));
+        return `<div class="task-prompt"><p>${escapeTaskText(prompt.url)} 已有归档记录。${remaining} 秒后默认跳过。</p>
+          <button class="btn sm gh" data-task-focus="${prompt.request_id}-skip" onclick="submitTaskArchive('${task.id}','${prompt.request_id}',false)">跳过</button>
+          <button class="btn sm" data-task-focus="${prompt.request_id}-retry" onclick="submitTaskArchive('${task.id}','${prompt.request_id}',true)">重新下载</button></div>`;
+      }
+      return `<div class="task-prompt"><p>${escapeTaskText(prompt.url)}：${prompt.reason === 'retry' ? '密码可能不正确，请重试' : '请输入访问密码'}</p>
+        <input class="ctl task-password" type="password" autocomplete="off" id="task-password-${prompt.request_id}" aria-label="访问密码">
+        <button class="btn sm" data-task-focus="${prompt.request_id}-submit" onclick="submitTaskPassword('${task.id}','${prompt.request_id}',false)">提交</button>
+        <button class="btn sm gh" data-task-focus="${prompt.request_id}-skip" onclick="submitTaskPassword('${task.id}','${prompt.request_id}',true)">跳过</button></div>`;
+    }).join('');
+    const stats = task.stats || {};
     const histories = (task.history || []).slice(-6).map(item =>
       `<div class="tdline"><span class="tdlabel">${escapeTaskText(item.status)}</span><span>${escapeTaskText(item.title || item.url || '')}</span></div>`
     ).join('');
@@ -1254,22 +1317,61 @@ function renderTasks(tasks) {
     const errorLine = task.error
       ? `<div class="tdline"><span class="tdlabel">错误</span><span class="txt-err">${escapeTaskText(task.error)}</span></div>` : '';
     return `<div class="${rowClass}" style="--p:${pct}%">
-      <div class="task-summary" onclick="toggleTask('${task.id}')">
+      <div class="task-summary" data-task-focus="${task.id}" role="button" tabindex="0" aria-expanded="${open}" onclick="toggleTask('${task.id}')" onkeydown="if(event.target===this && (event.key==='Enter' || event.key===' ')){event.preventDefault();toggleTask('${task.id}')}">
         <span class="tname">${escapeTaskText(task.label || task.title || '任务')}</span>
         <span class="tmeta">${escapeTaskText(meta)}</span>
         <span class="tpct">${percentText}</span>
-        ${canCancel ? `<button class="btn sm gh task-cancel" onclick="event.stopPropagation();cancelTask('${task.id}')">取消</button>` : ''}
+        ${canCancel ? `<button class="btn sm gh task-cancel" data-task-focus="${task.id}-cancel" onclick="event.stopPropagation();cancelTask('${task.id}')">取消</button>` : ''}
         <span class="tchev">›</span>
       </div>
       <div class="task-detail">
         <div class="tdline"><span class="tdlabel">状态</span><span>${escapeTaskText(task.message || statusText)}</span></div>
         ${errorLine}
+        <div class="tdline"><span class="tdlabel">链接统计</span><span>成功 ${stats.ok || 0} · 失败 ${stats.fail || 0} · 跳过 ${stats.skipped || 0} · 共 ${stats.total || task.url_count}</span></div>
+        ${prompts}
         ${urls}
         ${histories}
-        ${logs ? `<div class="task-log">${logs}</div>` : ''}
+        ${logs ? `<div class="task-log" data-task-log="${task.id}">${logs}</div>` : ''}
       </div>
     </div>`;
   }).join('');
+  passwordInputs.forEach(saved => {
+    const input = $(saved.id);
+    if(!input) return;
+    input.value = saved.value;
+    if(saved.focused) {
+      input.focus({preventScroll:true});
+      input.setSelectionRange(saved.start, saved.end);
+    }
+  });
+  if(focusKey) host.querySelector(`[data-task-focus="${CSS.escape(focusKey)}"]`)?.focus({preventScroll:true});
+  host.querySelectorAll('[data-task-log]').forEach(log => {
+    const saved = logScrolls.get(log.dataset.taskLog);
+    log.scrollTop = !saved || saved.atBottom ? log.scrollHeight : saved.top;
+  });
+}
+
+async function submitTaskArchive(taskId, requestId, redownload) {
+  try {
+    const result = await api('/api/archive-choice', {method:'POST', body:JSON.stringify({task_id:taskId, request_id:requestId, redownload})});
+    if(result.error) showToast(result.error, 'error');
+    loadTasks();
+  } catch(e) { showToast('归档选择提交失败: ' + e.message, 'error'); }
+}
+
+async function submitTaskPassword(taskId, requestId, skip) {
+  const prompt = tasksCache.find(t => t.id === taskId)?.prompts?.find(p => p.request_id === requestId);
+  if(!prompt) return;
+  const password = $('task-password-' + requestId)?.value || '';
+  if(!skip && !password.trim()) { showToast('请输入密码', 'error'); return; }
+  try {
+    const result = await api('/api/submit-password', {method:'POST', body:JSON.stringify({
+      task_id:taskId, item_id:prompt.item_id, request_id:requestId, url:prompt.url, password, skip
+    })});
+    if(result.error) showToast(result.error, 'error');
+    else if($('task-password-' + requestId)) $('task-password-' + requestId).value = '';
+    loadTasks();
+  } catch(e) { showToast('密码提交失败: ' + e.message, 'error'); }
 }
 
 // ========== 直播任务检查与提醒 ==========
@@ -1494,6 +1596,7 @@ function connectSSE() {
       if($('btnCoverDownload')) $('btnCoverDownload').disabled = download_running || d.phase === 'suspended';
       if(!download_running) $('topline').style.width = '0';
       if(!download_running) closeArchiveChoice();
+      renderTasks(tasksCache);
     } else if(evt.type === 'stats') {
       if(evt.task_id) return;
       const d = evt.data;
@@ -1503,11 +1606,13 @@ function connectSSE() {
       if(d.total !== undefined) setStatValue('statTotal', d.total);
       updateStatsVisibility();
     } else if(evt.type === 'archive_choice_required') {
-      if(evt.task_id && evt.data) evt.data.task_id = evt.task_id;
+      if(evt.task_id) return;
       showArchiveChoice(evt.data);
     } else if(evt.type === 'archive_choice_closed') {
+      if(evt.task_id) return;
       closeArchiveChoice(evt.data.request_id);
     } else if(evt.type === 'password_required') {
+      if(evt.task_id) return;
       const d = evt.data;
       // 仅 TwitCasting 平台显示密码弹窗，其他平台忽略
       if(d.platform !== 'TwitCasting') return;
@@ -1520,8 +1625,10 @@ function connectSSE() {
     } else if(evt.type === 'live_watch') {
       renderLiveWatch(evt.data && evt.data.jobs ? evt.data.jobs : []);
     } else if(evt.type === 'task_snapshot') {
+      taskSnapshotVersion++;
       renderTasks(evt.data && evt.data.tasks ? evt.data.tasks : []);
     } else if(evt.type === 'ready') {
+      taskSnapshotVersion++;
       const readyData = Array.isArray(evt.data) ? {logs:evt.data, running:false} : evt.data;
       downloadGeneration = readyData.generation;
       (readyData.logs || []).forEach(e => addLog(e));
@@ -1532,7 +1639,6 @@ function connectSSE() {
       if($('btnCoverDownload')) $('btnCoverDownload').disabled = download_running || readyData.phase === 'suspended';
       if(readyData.progress) renderProgress(readyData.progress);
       if(Array.isArray(readyData.live_watch)) renderLiveWatch(readyData.live_watch);
-      if(Array.isArray(readyData.tasks)) renderTasks(readyData.tasks);
       if(readyData.stats) {
         $('statOk').textContent = readyData.stats.ok || 0;
         $('statFail').textContent = readyData.stats.fail || 0;
@@ -1540,6 +1646,7 @@ function connectSSE() {
         $('statTotal').textContent = readyData.stats.total || 0;
         updateStatsVisibility();
       }
+      if(Array.isArray(readyData.tasks)) renderTasks(readyData.tasks);
       if(readyData.archive_prompt) showArchiveChoice(readyData.archive_prompt);
       else closeArchiveChoice();
       if(readyData.update) {

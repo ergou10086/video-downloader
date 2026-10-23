@@ -14,6 +14,10 @@ from video_downloader.live import (
 
 
 class LiveModeTests(unittest.TestCase):
+    def test_nicochannel_live_entries_are_classified_for_recording_and_priority(self):
+        from video_downloader.live import is_live_url
+        self.assertTrue(is_live_url("https://nicochannel.jp/channel/live/sm1"))
+        self.assertFalse(is_live_url("https://nicochannel.jp/channel/video/sm1"))
     def test_auto_prefers_catch_up_only_for_youtube_and_twitch(self):
         self.assertEqual(resolve_mode("YouTube", "auto"), LiveMode.CATCH_UP)
         self.assertEqual(resolve_mode("Twitch", "auto"), LiveMode.CATCH_UP)

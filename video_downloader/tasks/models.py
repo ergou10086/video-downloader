@@ -56,6 +56,13 @@ class Task:
     logs: list[dict] = field(default_factory=list)
     cancel_requested: bool = False
     order_index: int = 0
+    config: dict = field(default_factory=dict, repr=False)
+    live_parallel: int = 1
+    items: list[Task] = field(default_factory=list)
+    stats: dict = field(default_factory=lambda: {"ok": 0, "fail": 0, "skipped": 0, "total": 0})
+    prompts: dict = field(default_factory=dict, repr=False)
+    operation: str = "download"
+    selection: dict = field(default_factory=dict, repr=False)
 
     @property
     def is_terminal(self) -> bool:
@@ -93,4 +100,7 @@ class Task:
             "logs": list(self.logs[-60:]) if include_logs else [],
             "created_ago": max(0, int(time.time() - self.created_at)),
             "url_count": len(self.urls),
+            "stats": dict(self.stats),
+            "items": [item.to_dict(include_logs=False) for item in self.items],
+            "prompts": [dict(prompt) for prompt in self.prompts.values()],
         }

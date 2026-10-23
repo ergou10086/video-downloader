@@ -56,6 +56,18 @@ class FakePopen:
 
 
 class ToolServiceTests(unittest.TestCase):
+    def test_cleanup_refuses_queued_tasks_without_deleting_partial_file(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            partial = root / "download" / "video.part"
+            partial.parent.mkdir()
+            partial.touch()
+            manager = DownloadManager()
+            service = create_service(root, download_manager=manager)
+            service._has_active_downloads = lambda: True
+            self.assertIn("error", service.clean_temp())
+            self.assertTrue(partial.exists())
+            self.assertTrue(manager.snapshot()["accepting"])
     def test_check_deps_reports_all_tools(self):
         with tempfile.TemporaryDirectory() as directory:
             tool_dir = Path(directory)

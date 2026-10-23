@@ -36,6 +36,14 @@ def create_updater(manager=None):
 
 
 class UpdaterServiceTests(unittest.TestCase):
+    def test_update_refuses_task_queue_and_releases_suspension(self):
+        updater = create_updater()
+        self.prepare_update(updater)
+        updater._has_active_downloads = lambda: True
+        result = updater.do_update()
+        self.assertIn("任务队列", result["error"])
+        self.assertFalse(updater._download_manager.suspended)
+
     def prepare_update(self, updater, content=b"MZ-update"):
         updater._update_status({
             "update_available": True,

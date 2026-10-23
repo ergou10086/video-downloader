@@ -123,7 +123,11 @@
   color-mix(in srgb,var(--err) 16%,var(--surface)) var(--p,0%),
   var(--surface) var(--p,0%))}
 .task-row.cancelled{opacity:.72}
+.task-row.indeterminate{background:linear-gradient(110deg,var(--surface),color-mix(in srgb,var(--ok) 20%,var(--surface)),var(--surface));background-size:200% 100%;animation:task-live 3s linear infinite}
+@keyframes task-live{to{background-position:200% 0}}
+@media(prefers-reduced-motion:reduce){.task-row.indeterminate{animation:none}}
 .task-row.open{border-color:var(--line2)}
+.task-summary:focus-visible{outline:2px solid var(--ok);outline-offset:-2px}
 .task-summary{display:flex;align-items:center;gap:10px;padding:10px 12px;cursor:pointer;min-height:38px;flex-wrap:wrap}
 .task-summary .tname{font-size:13px;font-weight:500;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1}
 .task-summary .tmeta{font-family:var(--mono);font-size:11px;color:var(--fg3);white-space:nowrap}
@@ -138,6 +142,9 @@
 .task-log{max-height:150px;overflow:auto;background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:7px 9px;margin-top:6px;font-family:var(--mono);font-size:11px;line-height:1.6;white-space:pre-wrap}
 .task-log .le{color:var(--err)} .task-log .lw{color:var(--warn)}
 .task-cancel{margin-left:auto;flex:none}
+.task-prompt{padding:10px;margin:8px 0;border:1px solid var(--warn);border-radius:var(--r);overflow-wrap:anywhere}
+.task-prompt p{margin:0 0 8px}
+.task-password{max-width:220px}
 
 @media (max-width:1100px){
   .settings-layout{grid-template-columns:minmax(0,1fr);gap:14px}

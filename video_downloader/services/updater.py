@@ -23,12 +23,14 @@ from video_downloader.core.platform import asset_digest, is_allowed_update_url, 
 
 
 class UpdaterService:
-    def __init__(self, download_manager, emit_event, log, broadcast_download_state, kill_process_tree):
+    def __init__(self, download_manager, emit_event, log, broadcast_download_state, kill_process_tree,
+                 has_active_downloads=None):
         self._download_manager = download_manager
         self._emit_event = emit_event
         self._log = log
         self._broadcast_download_state = broadcast_download_state
         self._kill_process_tree = kill_process_tree
+        self._has_active_downloads = has_active_downloads or (lambda: False)
         # 流程锁在外、状态锁在内，禁止反向嵌套以免死锁。
         self._check_lock = threading.Lock()
         self._download_lock = threading.Lock()
@@ -215,6 +217,9 @@ class UpdaterService:
                 return {"error": "发布信息缺少有效的 SHA-256，已禁止自动更新"}
             if not self._download_manager.suspend():
                 return {"error": "请先停止当前下载任务再更新"}
+            if self._has_active_downloads():
+                self._download_manager.resume()
+                return {"error": "请先停止或完成任务队列再更新"}
             self._broadcast_download_state()
             self._update_status({
                 "downloading": True,

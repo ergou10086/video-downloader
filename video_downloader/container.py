@@ -26,6 +26,7 @@ from .live.probe import ProbeService
 from .live.wait import LiveWatchService, WatchJobStore
 from .state.app_state import AppState
 from .services.download_executor import DownloadExecutor
+from .services.download_archive import TaskArchiveSession
 from .services.nicochannel_auth import NicochannelAuthService
 from .services.download_manager import DownloadManager
 from .services.po_token_provider import PoTokenProviderService
@@ -102,7 +103,8 @@ class AppContainer:
         def start_idle_timer() -> None:
             nonlocal idle_timer
             cancel_idle_timer()
-            if download_manager.snapshot()["running"] or app_state.has_sse_clients():
+            if (download_manager.snapshot()["running"] or not download_manager.snapshot()["accepting"]
+                    or app_state.has_sse_clients()):
                 return
             if live_watch_service is not None and live_watch_service.has_active_jobs():
                 return
@@ -110,7 +112,10 @@ class AppContainer:
                 return
 
             def do_idle_exit() -> None:
-                if not download_manager.snapshot()["running"] and not app_state.has_sse_clients():
+                if (not download_manager.snapshot()["running"] and not app_state.has_sse_clients()
+                        and download_manager.snapshot()["accepting"]
+                        and not live_watch_service.has_active_jobs()
+                        and not task_manager.has_active()):
                     add_log(f"[系统] 浏览器已关闭，{IDLE_TIMEOUT}秒无活动，自动退出", "warn")
                     request_exit()
 
@@ -249,6 +254,7 @@ class AppContainer:
             broadcast_download_state=broadcast_download_state,
             cancel_idle_timer=cancel_idle_timer,
             start_idle_timer=start_idle_timer,
+            has_active_downloads=lambda: task_manager is not None and task_manager.has_active(),
         )
 
         # ---- 下载执行器 ----
@@ -273,12 +279,26 @@ class AppContainer:
 
         # ---- 多任务队列 ----
         def make_task_executor(task, task_state, manager, callbacks, on_finished):
+            archives = TaskArchiveSession(tool_dir)
+
+            def task_command(*args, **kwargs):
+                return archives.prepare(build_command(*args, **kwargs))
+
+            def finished(handle):
+                try:
+                    archives.finish()
+                except Exception as exc:
+                    callbacks.log(f"[归档] 合并任务归档失败: {exc}", "error")
+                    task_state.publish({"type": "stats", "data": {"fail": 1}})
+                finally:
+                    on_finished(handle)
+
             return DownloadExecutor(
                 tool_dir=tool_dir,
                 exe_suffix=exe_suffix,
                 app_state=task_state,
                 download_manager=manager,
-                build_command=build_command,
+                build_command=task_command,
                 log=callbacks.log,
                 update_progress=callbacks.update_progress,
                 broadcast_download_state=callbacks.broadcast_download_state,
@@ -286,8 +306,10 @@ class AppContainer:
                 cancel_idle_timer=callbacks.cancel_idle_timer,
                 start_idle_timer=callbacks.start_idle_timer,
                 emit_event=callbacks.emit_event,
+                pick_withny_archive=lambda: dict(task.selection),
+                pick_withny_live_config=lambda: dict(task.selection),
                 ensure_po_token_provider=po_token_provider.ensure_running,
-                on_finished=on_finished,
+                on_finished=finished,
             )
 
         task_manager = TaskManager(
@@ -298,6 +320,9 @@ class AppContainer:
             publish=app_state.publish,
             cancel_idle_timer=cancel_idle_timer,
             start_idle_timer=start_idle_timer,
+            add_history=add_history,
+            accepting_getter=lambda: (download_manager.snapshot()["accepting"]
+                                     and not download_manager.snapshot()["running"]),
         )
 
         def task_mode_enabled() -> bool:
@@ -323,7 +348,7 @@ class AppContainer:
             )
             if task_mode_enabled():
                 return task_manager.submit([job.url], kind="live", live_mode=job.record_mode)
-            return download_executor.start_download(job.url, live_mode=job.record_mode)
+            return task_manager.start_exclusive(download_executor.start_download, job.url, live_mode=job.record_mode)
 
         live_watch_service = LiveWatchService(
             store=watch_store,
@@ -364,7 +389,7 @@ class AppContainer:
                 if result.get("ok"):
                     add_log(f"[任务] 已加入队列: {url}", "info")
                 return result
-            return download_executor.start_download(
+            return task_manager.start_exclusive(download_executor.start_download,
                 url,
                 bili_parts=bili_parts,
                 tc_password=tc_password,
@@ -392,18 +417,30 @@ class AppContainer:
             }
 
         def submit_password(url: str, password: str) -> dict:
-            return download_executor.submit_password(url, password)
+            return task_manager.start_exclusive(download_executor.submit_password, url, password)
 
         def start_withny_archive() -> dict:
-            return download_executor.start_withny_archive()
+            if task_mode_enabled():
+                selection = tool_service.pick_withny_archive()
+                if selection.get("error") or selection.get("cancelled"):
+                    return selection
+                return task_manager.submit([selection["output_path"]], operation="withny_archive", selection=selection)
+            return task_manager.start_exclusive(download_executor.start_withny_archive)
 
         def start_withny_live() -> dict:
-            return download_executor.start_withny_live()
+            if task_mode_enabled():
+                selection = tool_service.pick_withny_live_config()
+                if selection.get("error") or selection.get("cancelled"):
+                    return selection
+                return task_manager.submit([selection["config_path"]], kind="live", operation="withny_live", selection=selection)
+            return task_manager.start_exclusive(download_executor.start_withny_live)
 
         def stop_download() -> dict:
-            if task_mode_enabled() and task_manager.has_active():
-                return task_manager.cancel_all()
-            return download_executor.stop_download()
+            tasks_result = task_manager.cancel_all()
+            result = download_executor.stop_download()
+            if tasks_result["cancelled"]:
+                result["cancelled"] = tasks_result["cancelled"]
+            return result
 
         def list_tasks() -> list[dict]:
             return task_manager.list_tasks()
@@ -414,13 +451,15 @@ class AppContainer:
         def clear_tasks() -> dict:
             return task_manager.clear_finished()
 
-        def submit_task_password(task_id: str, url: str, password: str) -> dict:
-            return task_manager.submit_password(task_id, url, password)
+        def submit_task_password(task_id: str, url: str, password: str, item_id=None, request_id=None) -> dict:
+            return task_manager.submit_password(task_id, url, password, item_id=item_id, request_id=request_id)
 
         def submit_task_archive_choice(task_id: str, request_id: str, redownload: bool) -> dict:
             return task_manager.submit_archive_choice(task_id, request_id, redownload)
 
         def get_current_command() -> dict:
+            if task_manager.has_active():
+                return task_manager.get_current_command()
             return download_executor.get_current_ytdlp_command()
 
         def fetch_bili_playlist(url: str) -> dict:
@@ -436,6 +475,7 @@ class AppContainer:
             log=add_log,
             broadcast_download_state=broadcast_download_state,
             kill_process_tree=_kill_proc_tree,
+            has_active_downloads=task_manager.has_active,
         )
 
         check_deps = tool_service.check_deps
@@ -467,7 +507,7 @@ class AppContainer:
                 if result.get("ok"):
                     add_log(f"[任务] 已加入队列: {len(urls)} 个链接", "info")
                 return result
-            return download_executor.batch_download(
+            return task_manager.start_exclusive(download_executor.batch_download,
                 urls,
                 bili_parts_map=bili_parts_map,
                 custom_args=custom_args,
@@ -483,7 +523,7 @@ class AppContainer:
                 if result.get("ok"):
                     add_log(f"[任务] 已加入队列: {len(urls)} 个链接", "info")
                 return result
-            return download_executor.batch_download(urls, custom_args=custom_args)
+            return task_manager.start_exclusive(download_executor.batch_download, urls, custom_args=custom_args)
 
         def list_live_watch_jobs() -> list[dict]:
             return live_watch_service.list_jobs()
@@ -494,9 +534,9 @@ class AppContainer:
         def request_exit() -> None:
             ticket = download_manager.request_stop()
             _kill_proc_tree(ticket.process)
-            po_token_provider.stop()
             live_watch_service.stop()
             task_manager.stop()
+            po_token_provider.stop()
             app_state.publish({"type": "exit"})
             exit_event.set()
 

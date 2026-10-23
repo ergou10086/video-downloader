@@ -5,6 +5,16 @@ from video_downloader.core.validation import validate_config
 
 
 class ConfigValidationTests(unittest.TestCase):
+    def test_task_live_parallel_default_and_bounds(self):
+        self.assertEqual(validate_config({})[0]["TASK_LIVE_PARALLEL"], 1)
+        for value in (1, 8):
+            config, errors = validate_config({"TASK_LIVE_PARALLEL": value})
+            self.assertEqual(errors, [])
+            self.assertEqual(config["TASK_LIVE_PARALLEL"], value)
+        for value in (0, 9, "bad"):
+            config, errors = validate_config({"TASK_LIVE_PARALLEL": value})
+            self.assertTrue(errors)
+            self.assertEqual(config["TASK_LIVE_PARALLEL"], 1)
     def test_disabled_proxy_accepts_empty_port(self):
         validated, errors = validate_config({"PROXY_ENABLED": 0, "PROXY_PORT": ""})
         self.assertEqual(errors, [])

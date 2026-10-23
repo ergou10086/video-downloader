@@ -81,6 +81,11 @@ class DownloadExecutor:
         self._pick_withny_live_config = pick_withny_live_config
         self._ensure_po_token_provider = ensure_po_token_provider
         self._on_finished = on_finished
+        self._finish_lock = threading.Lock()
+        self._finished_generations = set()
+        self._password_attempts = 0
+        self._password_url = None
+        self._password_request_id = None
         # 批量下载密码阻塞等待机制
         self._password_event = threading.Event()
         self._password_value: str | None = None
@@ -381,10 +386,10 @@ class DownloadExecutor:
                 stats["fail"] = stats["total"]
                 self._app_state.publish({"type": "stats", "data": dict(stats)})
         finally:
-            if self._download_manager.is_current(handle):
-                self._finish(handle, None)
+            self._finish(handle, None)
 
-    def start_download(self, url, bili_parts=None, tc_password=None, custom_args=None, live_mode=None):
+    def start_download(self, url, bili_parts=None, tc_password=None, custom_args=None, live_mode=None,
+                       is_live_override=None):
         url = clean_url(url)
         if not url:
             return {"error": "请输入有效的视频链接"}
@@ -401,7 +406,7 @@ class DownloadExecutor:
         else:
             self._log(f"[提示] 未识别平台，使用: {config_snapshot['PLATFORM']}", "warn")
 
-        is_live_download = is_live_url(url, detected)
+        is_live_download = is_live_url(url, detected) if is_live_override is None else bool(is_live_override)
         requested_live_mode = live_mode if live_mode is not None else resolve_platform_mode(
             effective_platform,
             config_snapshot.get("LIVE_MODE", "auto"),
@@ -697,13 +702,17 @@ class DownloadExecutor:
         cleaned = re.sub(r'(?i)(["\']?(?:authorization|token|password|passcode|secret|encryptionkey)["\']?\s*[=:]\s*["\']?)[^\s,;"\']+', r"\1[已隐藏]", cleaned)
         return cleaned
 
-    def submit_password(self, url: str, password: str) -> dict:
+    def submit_password(self, url: str, password: str, request_id=None) -> dict:
         """处理密码提交：批量下载等待中则唤醒线程，否则启动新的单链接下载（密码重试）。"""
         with self._password_lock:
-            if self._waiting_for_password:
+            if (self._waiting_for_password and self._password_url == url
+                    and (request_id is None or request_id == self._password_request_id)
+                    and not self._password_event.is_set()):
                 self._password_value = password
                 self._password_event.set()
                 return {"ok": True, "mode": "batch_retry"}
+            if self._on_finished is not None:
+                return {"error": "此密码确认已结束，请以当前任务状态为准"}
         # 无批量下载在等待 → 当作单链接密码重试，启动新下载任务
         return self.start_download(url, tc_password=password)
 
@@ -713,22 +722,32 @@ class DownloadExecutor:
         platform: str,
         timeout: float = 120.0,
         reason: str = "retry",
+        handle=None,
     ) -> str | None:
         """阻塞等待用户通过前端弹窗提供密码。返回密码或 None（超时/取消）。"""
         with self._password_lock:
+            if handle is not None and self._download_manager.is_cancelled(handle):
+                return None
             self._waiting_for_password = True
+            self._password_url = url
+            self._password_request_id = uuid.uuid4().hex
             self._password_value = None
             self._password_event.clear()
         self._emit_event("password_required", {
             "url": url,
             "platform": platform,
             "reason": reason,
+            "request_id": self._password_request_id,
+            "expires_at": (time.time() + timeout) * 1000,
         })
         received = self._password_event.wait(timeout)
         with self._password_lock:
             self._waiting_for_password = False
+            self._password_url = None
+            self._password_request_id = None
             pw = self._password_value
             self._password_value = None
+        self._emit_event("password_closed", {"url": url, "platform": platform})
         if not received:
             self._log(f"[{platform}] 等待密码超时，跳过此链接", "warn")
         return pw if received else None
@@ -1062,6 +1081,10 @@ class DownloadExecutor:
             tc_m3u8_400 = False
             tc_access_error = False
             tc_cookie_error = False
+            live_timeout = (int(self._app_state.config_snapshot().get("LIVE_DOWNLOAD_TIMEOUT", 0)) * 60
+                            if is_live_download and effective_platform == "Niconico" else 0)
+            deadline = time.monotonic() + live_timeout if live_timeout else None
+            timed_out = False
 
             def fmt_live_status():
                 elapsed = int(time.time() - live_start_time)
@@ -1074,6 +1097,10 @@ class DownloadExecutor:
 
             while not read_done.is_set() or not line_q.empty():
                 if handle.cancel_event.is_set():
+                    break
+                if deadline is not None and time.monotonic() >= deadline:
+                    timed_out = True
+                    self.kill_process_tree(proc)
                     break
                 try:
                     line = line_q.get(timeout=0.5)
@@ -1199,6 +1226,13 @@ class DownloadExecutor:
 
             self._close_process(proc)
             self._download_manager.clear_process(handle, proc)
+            if timed_out:
+                stats["fail"] = 1
+                self._log("[直播] 达到录制时限，已保留下载部分并继续队列", "warn")
+                self._update_progress(0, "录制超时，已保留下载部分")
+                self._add_history(url, video_title, effective_platform, "timeout", output_path)
+                update_stats()
+                return
             rc = proc.returncode if proc.returncode is not None else -1
             if archived_ids and not archive_retry and not self._download_manager.is_cancelled(handle):
                 retry = self._wait_for_archive_choice(handle, url, effective_platform, archived_ids)
@@ -1299,13 +1333,34 @@ class DownloadExecutor:
                         access_error=tc_access_error,
                         cookie_error=tc_cookie_error,
                     )
+                if (password_required or password_retry) and self._on_finished is not None:
+                    if self._password_attempts < 2:
+                        self._password_attempts += 1
+                        pw = self._wait_for_password(
+                            url, effective_platform, reason="retry" if password_retry else "missing",
+                            handle=handle,
+                        )
+                        if self._download_manager.is_cancelled(handle):
+                            return
+                        if pw:
+                            retry_cmd = list(cmd)
+                            if "--video-password" in retry_cmd:
+                                index = retry_cmd.index("--video-password")
+                                del retry_cmd[index:index + 2]
+                            retry_cmd[1:1] = ["--video-password", pw]
+                            self._run_single(
+                                handle, retry_cmd, url, effective_platform, is_live_download,
+                                audio_mode, audio_fmt, True, subtitle_cmd,
+                                tc_direct_tried, tc_firefox_tried, archive_retry,
+                            )
+                            return
                 stats["fail"] = 1
                 self._log(f"[错误] 下载结束，退出码: {rc}", "error")
                 self._update_progress(0, f"失败 (退出码 {rc})", "", "")
                 self._add_history(url, video_title, effective_platform, "fail")
                 update_stats()
                 # 密码保护/会员限定内容：通知前端弹窗索取密码后重试本条下载。
-                if password_required or password_retry:
+                if (password_required or password_retry) and self._on_finished is None:
                     if password_retry:
                         self._log(f"[{effective_platform}] 下载失败，密码可能不正确，请重新输入密码", "warn")
                     else:
@@ -1739,6 +1794,7 @@ class DownloadExecutor:
                                         url,
                                         effective_platform,
                                         reason=reason,
+                                        handle=handle,
                                     )
                                     if pw:
                                         tc_password = pw
@@ -1970,10 +2026,13 @@ class DownloadExecutor:
         finished = self._download_manager.finish(handle)
         if finished:
             self._broadcast_download_state()
-            if self._on_finished is not None:
-                try:
-                    self._on_finished(handle)
-                except Exception:
-                    pass
+        # complete_stop() can release the manager before this worker returns.
+        # Task queue slots still need an exactly-once cleanup notification.
+        if self._on_finished is not None:
+            with self._finish_lock:
+                notify = handle.generation not in self._finished_generations
+                self._finished_generations.add(handle.generation)
+            if notify:
+                self._on_finished(handle)
         if not self._app_state.has_sse_clients():
             self._start_idle_timer()

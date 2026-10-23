@@ -38,7 +38,7 @@ class DownloadManager:
 
     def suspend(self):
         with self._lock:
-            if self._handle is not None:
+            if self._handle is not None or not self._accepting:
                 return False
             self._accepting = False
             self._phase = "suspended"

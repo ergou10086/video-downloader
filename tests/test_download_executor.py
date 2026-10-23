@@ -121,6 +121,74 @@ class PlaylistProcess:
 
 
 class DownloadExecutorTests(unittest.TestCase):
+    def test_cancelled_task_notifies_cleanup_exactly_once(self):
+        with tempfile.TemporaryDirectory() as directory:
+            executor, _ = create_executor(Path(directory))
+            callback = Mock()
+            executor._on_finished = callback
+            handle = executor._download_manager.begin("single")
+            executor.stop_download()
+            executor._finish(handle, None)
+            executor._finish(handle, None)
+            callback.assert_called_once_with(handle)
+
+    def test_cancelled_preparation_notifies_parent_without_starting_download(self):
+        with tempfile.TemporaryDirectory() as directory:
+            executor, _ = create_executor(Path(directory))
+            executor._on_finished = Mock()
+            handle = executor._download_manager.begin("single")
+            executor.stop_download()
+            run = Mock()
+            executor._prepare_download(handle, {}, set(), run, ())
+            run.assert_not_called()
+            executor._on_finished.assert_called_once_with(handle)
+
+    def test_task_single_password_retry_stays_in_same_handle(self):
+        with tempfile.TemporaryDirectory() as directory:
+            executor, callbacks = create_executor(Path(directory))
+            executor._on_finished = Mock()
+            executor._spawn = Mock(side_effect=[CompletedProcess(1), CompletedProcess(0)])
+            done = threading.Event()
+            done.set()
+            first = Queue()
+            first.put("ERROR: This video is protected by a password, use the --video-password option")
+            executor._start_reader = Mock(side_effect=[(first, done), (Queue(), done)])
+            executor._wait_for_password = Mock(return_value="task-password")
+            handle = executor._download_manager.begin("single")
+            url = "https://twitcasting.tv/user/movie/1"
+            executor._run_single(handle, ["yt-dlp", url], url, "TwitCasting", False)
+            self.assertEqual(executor._spawn.call_count, 2)
+            self.assertIn("task-password", executor._spawn.call_args.args[0])
+            self.assertEqual(callbacks["add_history"].call_count, 1)
+            self.assertEqual(callbacks["add_history"].call_args.args[3], "success")
+            executor._on_finished.assert_called_once_with(handle)
+
+    def test_task_password_rejects_stale_request_instead_of_starting_new_download(self):
+        with tempfile.TemporaryDirectory() as directory:
+            executor, _ = create_executor(Path(directory))
+            executor._on_finished = Mock()
+            executor._waiting_for_password = True
+            executor._password_url = "url"
+            executor._password_request_id = "current"
+            self.assertIn("error", executor.submit_password("url", "password", request_id="stale"))
+            self.assertFalse(executor._password_event.is_set())
+            self.assertTrue(executor.submit_password("url", "", request_id="current")["ok"])
+
+    def test_single_niconico_live_timeout_preserves_history_and_finishes(self):
+        with tempfile.TemporaryDirectory() as directory:
+            executor, callbacks = create_executor(Path(directory))
+            executor._app_state.config_snapshot = lambda: {"LIVE_DOWNLOAD_TIMEOUT": 1}
+            executor._on_finished = Mock()
+            executor._spawn = Mock(return_value=CompletedProcess(1))
+            executor._start_reader = Mock(return_value=(Queue(), threading.Event()))
+            executor.kill_process_tree = Mock()
+            handle = executor._download_manager.begin("single")
+            with patch("video_downloader.services.download_executor.time.monotonic", side_effect=[0, 61]):
+                executor._run_single(handle, ["yt-dlp", "url"], "url", "Niconico", True)
+            executor.kill_process_tree.assert_called_once()
+            self.assertEqual(callbacks["add_history"].call_args.args[3], "timeout")
+            executor._on_finished.assert_called_once_with(handle)
+
     def test_start_withny_archive_returns_cancelled_selection(self):
         with tempfile.TemporaryDirectory() as directory:
             executor, callbacks = create_executor(Path(directory))

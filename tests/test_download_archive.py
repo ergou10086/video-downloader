@@ -3,10 +3,39 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from video_downloader.services.download_archive import archived_video_id, forget_archived_videos, redownload_command
+from video_downloader.services.download_archive import TaskArchiveSession, archived_video_id, forget_archived_videos, redownload_command
 
 
 class DownloadArchiveTests(unittest.TestCase):
+    def test_task_sessions_merge_concurrent_additions_and_scoped_removal(self):
+        with tempfile.TemporaryDirectory() as directory:
+            archive = Path(directory) / "archive.txt"
+            archive.write_text("youtube remove\nyoutube retain\n")
+            first, second = TaskArchiveSession(directory), TaskArchiveSession(directory)
+            cmd = ["yt-dlp", "--download-archive", str(archive), "url"]
+            one, two = first.prepare(cmd), second.prepare(cmd)
+            self.assertNotEqual(one[2], two[2])
+            self.assertEqual(first.prepare(cmd)[2], one[2])
+            Path(one[2]).write_text("youtube retain\nyoutube first\n")
+            Path(two[2]).write_text("youtube remove\nyoutube retain\nyoutube second\n")
+            first.finish()
+            second.finish()
+            self.assertEqual(archive.read_text().splitlines(), ["youtube retain", "youtube first", "youtube second"])
+            self.assertEqual(list(Path(directory).glob("*.tmp")), [])
+
+    def test_task_session_merge_failure_preserves_archive_and_cleans_private_files(self):
+        with tempfile.TemporaryDirectory() as directory:
+            archive = Path(directory) / "archive.txt"
+            archive.write_text("youtube original\n")
+            session = TaskArchiveSession(directory)
+            command = session.prepare(["yt-dlp", "--download-archive=archive.txt", "url"])
+            Path(command[1].split("=", 1)[1]).write_text("youtube original\nyoutube added\n")
+            with patch("video_downloader.services.download_archive.os.replace", side_effect=OSError("locked")):
+                with self.assertRaises(OSError):
+                    session.finish()
+            self.assertEqual(archive.read_text(), "youtube original\n")
+            self.assertEqual(list(Path(directory).glob("*.tmp")), [])
+
     def test_only_archive_skip_messages_are_detected(self):
         self.assertEqual(archived_video_id("[download] 077e4JKDEiQ: has already been recorded in the archive"), "077e4JKDEiQ")
         self.assertEqual(archived_video_id("[download] abc: A title: with punctuation has already been recorded in the archive"), "abc")

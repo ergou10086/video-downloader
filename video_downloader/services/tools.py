@@ -31,7 +31,7 @@ class ToolService:
                  build_subtitle_command: Callable[..., list[str]] | None = None,
                  build_cover_command: Callable[..., list[str]] | None = None,
                  download_manager=None, broadcast_download_state=None,
-                 cancel_idle_timer=None, start_idle_timer=None):
+                 cancel_idle_timer=None, start_idle_timer=None, has_active_downloads=None):
         self._tool_dir = tool_dir
         self._paths = AppPaths(tool_dir)
         self._exe_suffix = exe_suffix
@@ -46,6 +46,23 @@ class ToolService:
         self._broadcast_download_state = broadcast_download_state or (lambda: None)
         self._cancel_idle_timer = cancel_idle_timer or (lambda: None)
         self._start_idle_timer = start_idle_timer or (lambda: None)
+        self._has_active_downloads = has_active_downloads or (lambda: False)
+
+    def _begin_maintenance(self):
+        if self._download_manager is not None and not self._download_manager.suspend():
+            return {"error": "请先停止当前下载任务"}
+        if self._has_active_downloads():
+            self._end_maintenance()
+            return {"error": "请先完成或取消任务队列"}
+        self._cancel_idle_timer()
+        self._broadcast_download_state()
+        return None
+
+    def _end_maintenance(self):
+        if self._download_manager is not None:
+            self._download_manager.resume()
+        self._broadcast_download_state()
+        self._start_idle_timer()
 
     @staticmethod
     def _should_retry_recommended_subtitles(langs, output):
@@ -132,6 +149,9 @@ class ToolService:
         ytdlp = self._paths.executable("yt-dlp", self._exe_suffix)
         if not ytdlp.exists():
             return {"error": "未找到yt-dlp.exe"}
+        error = self._begin_maintenance()
+        if error:
+            return error
 
         def run():
             try:
@@ -147,10 +167,18 @@ class ToolService:
                     self._log(f"[yt-dlp] 更新失败: {proc.stderr}", "error")
             except Exception as exc:
                 self._log(f"[yt-dlp] 更新异常: {exc}", "error")
-        threading.Thread(target=run, daemon=True).start()
+            finally:
+                self._end_maintenance()
+        try:
+            threading.Thread(target=run, daemon=True).start()
+        except Exception:
+            self._end_maintenance()
+            raise
         return {"ok": True}
 
     def download_subtitles(self, urls, subtitle_type, subtitle_langs):
+        if self._has_active_downloads():
+            return {"error": "请先完成或取消任务队列，再单独下载字幕"}
         ytdlp = self._paths.executable("yt-dlp", self._exe_suffix)
         if not ytdlp.exists():
             return {"error": "未找到yt-dlp.exe"}
@@ -176,6 +204,9 @@ class ToolService:
         handle = self._download_manager.begin("subtitles")
         if handle is None:
             return {"error": "已有下载任务正在运行"}
+        if self._has_active_downloads():
+            self._download_manager.finish(handle)
+            return {"error": "请先完成或取消任务队列，再单独下载字幕"}
         self._cancel_idle_timer()
         self._broadcast_download_state()
 
@@ -266,6 +297,8 @@ class ToolService:
 
     def download_covers(self, urls):
         """批量下载封面：逐条识别平台，封面文件名与对应视频完全一致。"""
+        if self._has_active_downloads():
+            return {"error": "请先完成或取消任务队列，再单独下载封面"}
         ytdlp = self._paths.executable("yt-dlp", self._exe_suffix)
         if not ytdlp.exists():
             return {"error": "未找到yt-dlp.exe"}
@@ -284,6 +317,9 @@ class ToolService:
         handle = self._download_manager.begin("covers")
         if handle is None:
             return {"error": "已有下载任务正在运行"}
+        if self._has_active_downloads():
+            self._download_manager.finish(handle)
+            return {"error": "请先完成或取消任务队列，再单独下载封面"}
         self._cancel_idle_timer()
         self._broadcast_download_state()
 
@@ -383,6 +419,15 @@ class ToolService:
         return {"ok": True, "total": len(cleaned_urls)}
 
     def clean_temp(self):
+        error = self._begin_maintenance()
+        if error:
+            return error
+        try:
+            return self._clean_temp_files()
+        finally:
+            self._end_maintenance()
+
+    def _clean_temp_files(self):
         count = 0
         temp_ext = [".part", ".ytdl", ".temp", ".tmp"]
         for file in self._download_dir.rglob("*"):
