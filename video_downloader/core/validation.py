@@ -15,6 +15,7 @@ from .constants import (
     PROXY_TYPE_OPTIONS,
     RESOLUTION_OPTIONS,
     SUBTITLE_TYPE_OPTIONS,
+    TASK_ORDER_OPTIONS,
 )
 
 # 校验错误的中文说明（key → 错误详情映射）
@@ -31,6 +32,7 @@ _ERROR_REASONS = {
     "LIVE_STREAM_METHOD": "直播下载方式仅支持 yt-dlp",
     "LIVE_MODE": "直播模式仅支持 auto/catch_up/live_edge/wait",
     "LIVE_PLATFORM_MODES": "平台直播设置为 JSON，长度不能超过 2000 字符",
+    "TASK_ORDER": "任务排序仅支持 none/live_first/download_first",
     "AUDIO_MODE": "音频模式选项无效",
     "AUDIO_FORMAT": "音频格式选项无效",
     "THREADS": "线程数需在 1-32 之间",
@@ -88,6 +90,7 @@ def validate_config(values, base=None):
         "AUDIO_FORMAT": AUDIO_FORMAT_OPTIONS,
         "LIVE_STREAM_METHOD": LIVE_STREAM_METHOD_OPTIONS,
         "LIVE_MODE": LIVE_MODE_OPTIONS,
+        "TASK_ORDER": TASK_ORDER_OPTIONS,
         "SUBTITLE_TYPE": SUBTITLE_TYPE_OPTIONS,
     }
     integer_ranges = {
@@ -96,6 +99,8 @@ def validate_config(values, base=None):
         "COOKIE_MODE": (1, 2),
         "MP3_BITRATE": (min(MP3_BITRATE_OPTIONS), max(MP3_BITRATE_OPTIONS)),
         "LIVE_DOWNLOAD_TIMEOUT": (0, 1440),
+        "TASK_MODE": (0, 1),
+        "TASK_MAX_PARALLEL": (1, 8),
     }
     booleans = {
         "MERGE_MODE", "PROXY_ENABLED", "USE_COOKIES", "EMBED_META",

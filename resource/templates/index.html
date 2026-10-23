@@ -168,6 +168,11 @@
           </div>
         </div>
 
+        <div class="task-panel" id="taskModePanel" style="display:none">
+          <div class="sh"><b>任务列表</b><span class="rule"></span><span class="note" id="taskCount"></span><button class="btn sm gh" onclick="clearFinishedTasks()">清理已结束</button></div>
+          <div id="taskList"></div>
+        </div>
+
         <div class="status">
           <div class="srow">
             <span class="st"><span class="blip idle" id="statusBlip"></span><span id="statusText">就绪</span></span>
@@ -230,7 +235,8 @@
               <button class="settings-toc-item" data-target="set-subtitle"><i>06</i><span>字幕</span></button>
               <button class="settings-toc-item" data-target="set-filename"><i>07</i><span>文件名</span></button>
               <button class="settings-toc-item" data-target="set-platform"><i>08</i><span>平台专项</span></button>
-              <button class="settings-toc-item" data-target="set-advanced"><i>09</i><span>高级与诊断</span></button>
+              <button class="settings-toc-item" data-target="set-tasks"><i>09</i><span>任务与并发</span></button>
+              <button class="settings-toc-item" data-target="set-advanced"><i>10</i><span>高级与诊断</span></button>
             </nav>
           </aside>
 
@@ -313,6 +319,14 @@
               <div class="row"><span class="lb">YouTube PO Token</span><span class="sw" id="sw_youtube_po_token" onclick="toggleSwitch(this)"><i></i></span><span class="hint">下载前自动启动本地 BgUtils Provider，缓解部分 403</span></div>
               <div class="row"><span class="lb">Niconico 弹幕</span><span class="sw" id="sw_nicocmt" onclick="toggleSwitch(this)"><i></i></span><span class="hint">下载并保存 XML 弹幕</span></div>
               <div class="row"><span class="lb">Niconico 重编码</span><span class="sw" id="sw_nicorec" onclick="toggleSwitch(this)"><i></i></span><span class="hint">兼容性优先，速度较慢</span></div>
+            </section>
+
+            <section class="settings-section" id="set-tasks">
+              <div class="sh"><b>任务与并发</b><span class="rule"></span><span class="note">一次点击创建一个任务</span></div>
+              <div class="row"><span class="lb">启用任务模式</span><span class="sw on" id="sw_task_mode" onclick="toggleSwitch(this)"><i></i></span><span class="hint">下载/录制进入任务列表；关闭则使用旧单任务模式</span></div>
+              <div class="row"><span class="lb">最大并行任务数</span><input type="number" class="ctl mono" id="s_task_parallel" min="1" max="8" value="1" style="width:100px"><span class="hint">1 表示串行（不并行）；建议 2–4</span></div>
+              <div class="row"><span class="lb">任务排序</span><span class="sel"><select class="ctl" id="s_task_order"></select><svg class="ico s14 cv"><use href="#i-chevron"></use></svg></span></div>
+              <div class="hint">并行任务共享网络/磁盘；归档确认、密码弹窗等交互可能短暂串行。直播录制任务按所选平台模式执行。</div>
             </section>
 
             <section class="settings-section" id="set-advanced">

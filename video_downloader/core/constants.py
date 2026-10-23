@@ -49,6 +49,9 @@ DEFAULT_CONFIG = {
     "LIVE_MODE": "auto",
     "LIVE_PLATFORM_MODES": "{}",
     "LIVE_DOWNLOAD_TIMEOUT": 0,
+    "TASK_MODE": 1,
+    "TASK_MAX_PARALLEL": 1,
+    "TASK_ORDER": "none",
     "ENABLE_LOG": 1,
     "MP3_BITRATE": 320,
     "DEL_WAV_AFTER_CONVERT": 0,
@@ -77,6 +80,8 @@ LIVE_STREAM_METHOD_OPTIONS = ["yt-dlp"]
 LIVE_STREAM_METHOD_LABELS = ["yt-dlp (默认)"]
 LIVE_MODE_OPTIONS = ["auto", "catch_up", "live_edge", "wait"]
 LIVE_MODE_LABELS = ["自动（推荐）", "追开播（平台支持时）", "从当前时刻", "蹲开播（开播后自动录制）"]
+TASK_ORDER_OPTIONS = ["none", "live_first", "download_first"]
+TASK_ORDER_LABELS = ["不排序（默认）", "直播录制优先", "下载任务优先"]
 SUBTITLE_TYPE_OPTIONS = ["all", "manual", "auto"]
 
 PLATFORM_INFO = [

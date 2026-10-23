@@ -60,6 +60,9 @@ def make_dependencies(exit_event):
         cancel_live_watch=lambda job_id: {"ok": True, "id": job_id},
         inspect_live_url=lambda url, live_mode=None: {"is_live_target": False, "url": url},
         live_capabilities=lambda: {},
+        list_tasks=lambda: [],
+        cancel_task=lambda task_id: {"ok": True, "id": task_id},
+        clear_tasks=lambda: {"ok": True, "removed": 0},
         start_withny_archive=lambda: {"ok": True, "kind": "withny-archive"},
         start_withny_live=lambda: {"ok": True, "kind": "withny-live"},
         batch_txt_download=lambda bili_parts_map=None, custom_args=None: {
@@ -228,6 +231,16 @@ class HttpServiceTests(unittest.TestCase):
         status, body, _ = self.request("/api/live/watch-cancel", method="POST", payload={"id": "job-1"})
         self.assertEqual(status, 200)
         self.assertEqual(json.loads(body)["id"], "job-1")
+
+    def test_task_routes(self):
+        status, body, _ = self.request("/api/tasks")
+        self.assertEqual(status, 200)
+        self.assertEqual(json.loads(body), {"tasks": []})
+        status, body, _ = self.request("/api/tasks/cancel", method="POST", payload={"id": "t1"})
+        self.assertEqual(status, 200)
+        self.assertEqual(json.loads(body)["id"], "t1")
+        status, body, _ = self.request("/api/tasks/clear", method="POST", payload={})
+        self.assertEqual(status, 200)
 
     def test_live_inspect_and_capabilities_routes(self):
         status, body, _ = self.request("/api/live/inspect", method="POST", payload={"url": "https://example.com"})

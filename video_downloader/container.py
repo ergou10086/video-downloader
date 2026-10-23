@@ -32,6 +32,7 @@ from .services.po_token_provider import PoTokenProviderService
 from .services.storage import StorageService
 from .services.tools import ToolService
 from .services.updater import UpdaterService
+from .tasks import TaskManager
 from .web.handler import HttpHandlerDependencies, HttpService, create_handler
 from .web.rendering import render_html_page, serve_static_file
 
@@ -90,6 +91,7 @@ class AppContainer:
         # ---- 空闲计时器 ----
         idle_timer: threading.Timer | None = None
         live_watch_service: LiveWatchService | None = None
+        task_manager: TaskManager | None = None
 
         def cancel_idle_timer() -> None:
             nonlocal idle_timer
@@ -103,6 +105,8 @@ class AppContainer:
             if download_manager.snapshot()["running"] or app_state.has_sse_clients():
                 return
             if live_watch_service is not None and live_watch_service.has_active_jobs():
+                return
+            if task_manager is not None and task_manager.has_active():
                 return
 
             def do_idle_exit() -> None:
@@ -267,6 +271,41 @@ class AppContainer:
             ensure_po_token_provider=po_token_provider.ensure_running,
         )
 
+        # ---- 多任务队列 ----
+        def make_task_executor(task, task_state, manager, callbacks, on_finished):
+            return DownloadExecutor(
+                tool_dir=tool_dir,
+                exe_suffix=exe_suffix,
+                app_state=task_state,
+                download_manager=manager,
+                build_command=build_command,
+                log=callbacks.log,
+                update_progress=callbacks.update_progress,
+                broadcast_download_state=callbacks.broadcast_download_state,
+                add_history=callbacks.add_history,
+                cancel_idle_timer=callbacks.cancel_idle_timer,
+                start_idle_timer=callbacks.start_idle_timer,
+                emit_event=callbacks.emit_event,
+                ensure_po_token_provider=po_token_provider.ensure_running,
+                on_finished=on_finished,
+            )
+
+        task_manager = TaskManager(
+            base_app_state=app_state,
+            executor_factory=make_task_executor,
+            max_parallel_getter=lambda: app_state.config_snapshot().get("TASK_MAX_PARALLEL", 1),
+            order_getter=lambda: app_state.config_snapshot().get("TASK_ORDER", "none"),
+            publish=app_state.publish,
+            cancel_idle_timer=cancel_idle_timer,
+            start_idle_timer=start_idle_timer,
+        )
+
+        def task_mode_enabled() -> bool:
+            try:
+                return int(app_state.config_snapshot().get("TASK_MODE", 1)) == 1
+            except (TypeError, ValueError):
+                return True
+
         # ---- 直播 WAIT 服务 ----
         probe_service = ProbeService(
             str(self._paths.executable("yt-dlp", exe_suffix)),
@@ -282,6 +321,8 @@ class AppContainer:
                 f"[蹲开播] 检测到开播: {probe.platform} {job.url}，开始录制",
                 "success",
             )
+            if task_mode_enabled():
+                return task_manager.submit([job.url], kind="live", live_mode=job.record_mode)
             return download_executor.start_download(job.url, live_mode=job.record_mode)
 
         live_watch_service = LiveWatchService(
@@ -310,6 +351,19 @@ class AppContainer:
                 if record_mode == "wait":
                     record_mode = "auto"
                 return live_watch_service.add(url, record_mode=record_mode)
+            if task_mode_enabled():
+                kind = "live" if is_live_url(url, detect_platform(url)) else "download"
+                result = task_manager.submit(
+                    [url],
+                    kind=kind,
+                    live_mode=requested,
+                    bili_parts=bili_parts,
+                    tc_password=tc_password,
+                    custom_args=custom_args,
+                )
+                if result.get("ok"):
+                    add_log(f"[任务] 已加入队列: {url}", "info")
+                return result
             return download_executor.start_download(
                 url,
                 bili_parts=bili_parts,
@@ -347,7 +401,18 @@ class AppContainer:
             return download_executor.start_withny_live()
 
         def stop_download() -> dict:
+            if task_mode_enabled() and task_manager.has_active():
+                return task_manager.cancel_all()
             return download_executor.stop_download()
+
+        def list_tasks() -> list[dict]:
+            return task_manager.list_tasks()
+
+        def cancel_task(task_id: str) -> dict:
+            return task_manager.cancel(task_id)
+
+        def clear_tasks() -> dict:
+            return task_manager.clear_finished()
 
         def get_current_command() -> dict:
             return download_executor.get_current_ytdlp_command()
@@ -389,6 +454,13 @@ class AppContainer:
             if err:
                 return {"error": err}
             save_config()
+            if task_mode_enabled():
+                result = task_manager.submit(
+                    urls, bili_parts_map=bili_parts_map, custom_args=custom_args,
+                )
+                if result.get("ok"):
+                    add_log(f"[任务] 已加入队列: {len(urls)} 个链接", "info")
+                return result
             return download_executor.batch_download(
                 urls,
                 bili_parts_map=bili_parts_map,
@@ -400,6 +472,11 @@ class AppContainer:
             if str(app_state.config_snapshot().get("LIVE_MODE", "auto")).lower() == "wait":
                 return {"error": "蹲开播仅支持单条链接，请逐条添加"}
             save_config()
+            if task_mode_enabled():
+                result = task_manager.submit(urls, custom_args=custom_args)
+                if result.get("ok"):
+                    add_log(f"[任务] 已加入队列: {len(urls)} 个链接", "info")
+                return result
             return download_executor.batch_download(urls, custom_args=custom_args)
 
         def list_live_watch_jobs() -> list[dict]:
@@ -413,6 +490,7 @@ class AppContainer:
             _kill_proc_tree(ticket.process)
             po_token_provider.stop()
             live_watch_service.stop()
+            task_manager.stop()
             app_state.publish({"type": "exit"})
             exit_event.set()
 
@@ -437,6 +515,9 @@ class AppContainer:
                 cancel_live_watch=cancel_live_watch,
                 inspect_live_url=inspect_live_url,
                 live_capabilities=live_capabilities,
+                list_tasks=list_tasks,
+                cancel_task=cancel_task,
+                clear_tasks=clear_tasks,
                 start_withny_archive=start_withny_archive,
                 start_withny_live=start_withny_live,
                 batch_txt_download=batch_txt_download,
@@ -508,6 +589,7 @@ class AppContainer:
             print("\n正在关闭服务器...", flush=True)
             http_service.stop()
             live_watch_service.stop()
+            task_manager.stop()
             print("已退出。", flush=True)
 
         return WiredApp(

@@ -12,6 +12,8 @@ let download_running = false;
 let downloadGeneration = null;
 let activeTaskYtdlpArgs = "";
 let liveWatchJobs = [];
+let tasksCache = [];
+let expandedTasks = new Set();
 let livePlatformModes = {};
 let liveCapabilities = null;
 let liveNoticeResolver = null;
@@ -145,6 +147,7 @@ function init() {
   fillSelect('s_audiofmt', [['m4a','m4a(原生)'],['mp3','MP3'],['wav','WAV']]);
   fillSelect('s_hwaccel', [['cpu','CPU软编码'],['h264_nvenc','N卡 NVENC'],['h264_qsv','Intel QSV'],['h264_amf','AMD AMF']]);
   fillSelect('s_live_mode', [['auto','自动（推荐）'],['catch_up','追开播（条件）'],['live_edge','从当前时刻'],['wait','蹲开播（开播后自动录制）']]);
+  fillSelect('s_task_order', [['none','不排序（默认）'],['live_first','直播录制优先'],['download_first','下载任务优先']]);
   fillSelect('s_browser', [['chrome','Chrome'],['edge','Edge'],['firefox','Firefox'],['brave','Brave'],['opera','Opera']]);
   $('s_browser').addEventListener('change', onBrowserChanged);
   fillSelect('s_subtitle_lang_preset', SUBTITLE_LANG_PRESETS);
@@ -176,6 +179,7 @@ function init() {
   loadDeps();
   connectSSE();
   loadLiveWatch();
+  loadTasks();
   initSettingsToc();
   loadLiveCapabilities();
 
@@ -311,6 +315,9 @@ function applyConfig(s) {
     renderLivePlatformModes();
   }
   if(s.LIVE_DOWNLOAD_TIMEOUT !== undefined) $('s_live_timeout').value = s.LIVE_DOWNLOAD_TIMEOUT || 0;
+  if(s.TASK_MODE !== undefined) setSwitch('sw_task_mode', s.TASK_MODE);
+  if(s.TASK_MAX_PARALLEL !== undefined) $('s_task_parallel').value = s.TASK_MAX_PARALLEL;
+  if(s.TASK_ORDER !== undefined) $('s_task_order').value = s.TASK_ORDER;
   setSwitch('sw_meta', s.EMBED_META);
   setSwitch('sw_thumb', s.DOWNLOAD_THUMB);
   setSwitch('sw_subtitles', s.DOWNLOAD_SUBTITLES);
@@ -518,6 +525,9 @@ function collectCfg() {
     LIVE_MODE: $('s_live_mode').value,
     LIVE_PLATFORM_MODES: JSON.stringify(collectLivePlatformModes()),
     LIVE_DOWNLOAD_TIMEOUT: parseInt($('s_live_timeout').value) || 0,
+    TASK_MODE: isOn('sw_task_mode') ? 1 : 0,
+    TASK_MAX_PARALLEL: Math.max(1, Math.min(8, parseInt($('s_task_parallel').value) || 1)),
+    TASK_ORDER: $('s_task_order').value,
     EMBED_META: isOn('sw_meta')?1:0,
     DOWNLOAD_THUMB: isOn('sw_thumb')?1:0,
     DOWNLOAD_SUBTITLES: isOn('sw_subtitles')?1:0,
@@ -746,6 +756,12 @@ async function doStartDl(url, biliParts, tcPassword, customArgs) {
     loadLiveWatch();
     return;
   }
+  if(r.task) {
+    showToast('已加入任务队列', 'success');
+    loadTasks();
+    clearStartedTaskArgs(taskArgs);
+    return;
+  }
   clearStartedTaskArgs(taskArgs);
   // SSE owns task state: preparation may already have failed or been stopped
   // before this response arrives. Do not overwrite that newer state here.
@@ -756,6 +772,10 @@ async function doStartUrls(urls, customArgs) {
   if(customArgs) body.custom_args = customArgs;
   const r = await api('/api/start-urls', {method:'POST', body:JSON.stringify(body)});
   if(r.error) { showToast(r.error, 'error'); return; }
+  if(r.task) {
+    showToast('已加入任务队列', 'success');
+    loadTasks();
+  }
   clearStartedTaskArgs(customArgs || '');
 }
 
@@ -773,6 +793,10 @@ async function doStartBatch(biliPartsMap, customArgs) {
   if(customArgs) body.custom_args = customArgs;
   const r = await api('/api/batch-txt', {method:'POST', body:JSON.stringify(body)});
   if(r.error) { showToast(r.error, 'error'); return; }
+  if(r.task) {
+    showToast('批量任务已加入队列', 'success');
+    loadTasks();
+  }
   clearStartedTaskArgs(customArgs || '');
 }
 
@@ -790,6 +814,9 @@ async function stopDl() {
     $('btnStart').disabled = true;
     $('btnStop').disabled = true;
     setStatus('正在停止…', 'live');
+  } else if(r.cancelled !== undefined) {
+    showToast('已取消活跃任务', 'success');
+    loadTasks();
   }
 }
 
@@ -1128,6 +1155,115 @@ async function cancelLiveWatch(jobId) {
   } catch(e) { showToast('取消等待失败: ' + e.message, 'error'); }
 }
 
+// ========== 多任务列表 ==========
+const TASK_STATUS_LABELS = {
+  queued: '排队中', running: '运行中', completed: '已完成',
+  failed: '失败', cancelled: '已取消', waiting: '等待开播'
+};
+
+function escapeTaskText(value) {
+  const div = document.createElement('div');
+  div.textContent = value == null ? '' : String(value);
+  return div.innerHTML;
+}
+
+function taskStatusLabel(status) {
+  return TASK_STATUS_LABELS[status] || status;
+}
+
+function toggleTask(taskId) {
+  if(expandedTasks.has(taskId)) expandedTasks.delete(taskId);
+  else expandedTasks.add(taskId);
+  renderTasks(tasksCache);
+}
+
+async function loadTasks() {
+  try {
+    const r = await api('/api/tasks');
+    renderTasks(r.tasks || []);
+  } catch(e) { /* 保持页面安静 */ }
+}
+
+async function cancelTask(taskId) {
+  try {
+    const r = await api('/api/tasks/cancel', {method:'POST', body:JSON.stringify({id:taskId})});
+    if(r.error) { showToast(r.error, 'error'); return; }
+    showToast('已请求取消任务', 'success');
+    loadTasks();
+  } catch(e) { showToast('取消任务失败: ' + e.message, 'error'); }
+}
+
+async function clearFinishedTasks() {
+  try {
+    const r = await api('/api/tasks/clear', {method:'POST', body:'{}'});
+    if(r.error) { showToast(r.error, 'error'); return; }
+    loadTasks();
+  } catch(e) { showToast('清理任务失败: ' + e.message, 'error'); }
+}
+
+function renderTasks(tasks) {
+  tasksCache = Array.isArray(tasks) ? tasks : [];
+  const panel = $('taskModePanel');
+  const host = $('taskList');
+  if(!panel || !host) return;
+  if(!tasksCache.length) {
+    panel.style.display = 'none';
+    host.innerHTML = '';
+    return;
+  }
+  panel.style.display = '';
+  const active = tasksCache.filter(t => t.status === 'queued' || t.status === 'running');
+  $('taskCount').textContent = active.length
+    ? `运行/排队 ${active.length} 个 · 共 ${tasksCache.length} 个`
+    : `共 ${tasksCache.length} 个`;
+  if(active.length) $('btnStop').disabled = false;
+  else if(!download_running) $('btnStop').disabled = true;
+
+  host.innerHTML = tasksCache.map(task => {
+    const status = task.status || 'queued';
+    const pct = Math.max(0, Math.min(100, Number(task.progress) || 0));
+    const open = expandedTasks.has(task.id);
+    const rowClass = ['task-row', status, open ? 'open' : ''].join(' ');
+    const statusText = taskStatusLabel(status);
+    const meta = [
+      statusText,
+      task.speed ? task.speed : '',
+      task.eta ? 'ETA ' + task.eta : '',
+      task.kind === 'live' ? '直播' : '下载'
+    ].filter(Boolean).join(' · ');
+    const percentText = task.indeterminate ? '进行中' : `${Math.round(pct)}%`;
+    const canCancel = status === 'queued' || status === 'running';
+    const urls = (task.urls || []).map(url =>
+      `<div class="tdline"><span class="tdlabel">链接</span><span class="tdurl">${escapeTaskText(url)}</span></div>`
+    ).join('');
+    const histories = (task.history || []).slice(-6).map(item =>
+      `<div class="tdline"><span class="tdlabel">${escapeTaskText(item.status)}</span><span>${escapeTaskText(item.title || item.url || '')}</span></div>`
+    ).join('');
+    const logs = (task.logs || []).slice(-20).map(line => {
+      const cls = line.level === 'error' ? 'le' : (line.level === 'warn' ? 'lw' : '');
+      return `<div class="${cls}">[${escapeTaskText(line.time)}] ${escapeTaskText(line.msg)}</div>`;
+    }).join('');
+    const errorLine = task.error
+      ? `<div class="tdline"><span class="tdlabel">错误</span><span class="txt-err">${escapeTaskText(task.error)}</span></div>` : '';
+    return `<div class="${rowClass}" style="--p:${pct}%">
+      <div class="task-summary" onclick="toggleTask('${task.id}')">
+        <span class="tname">${escapeTaskText(task.label || task.title || '任务')}</span>
+        <span class="tmeta">${escapeTaskText(meta)}</span>
+        <span class="tpct">${percentText}</span>
+        ${canCancel ? `<button class="btn sm gh task-cancel" onclick="event.stopPropagation();cancelTask('${task.id}')">取消</button>` : ''}
+        <span class="tchev">›</span>
+      </div>
+      <div class="task-detail">
+        <div class="tdline"><span class="tdlabel">状态</span><span>${escapeTaskText(task.message || statusText)}</span></div>
+        ${errorLine}
+        ${urls}
+        ${histories}
+        ${logs ? `<div class="task-log">${logs}</div>` : ''}
+      </div>
+    </div>`;
+  }).join('');
+}
+
 // ========== 直播任务检查与提醒 ==========
 function getMutedLiveNotices() {
   try { return JSON.parse(localStorage.getItem(LIVE_NOTICE_MUTE_KEY) || '{}') || {}; }
@@ -1336,8 +1472,10 @@ function connectSSE() {
     if(evt.type === 'log') {
       addLog(evt.data);
     } else if(evt.type === 'progress') {
+      if(evt.task_id) return;
       renderProgress(evt.data);
     } else if(evt.type === 'download_state') {
+      if(evt.task_id) return;
       const d = evt.data;
       download_running = Boolean(d.running);
       downloadGeneration = d.generation;
@@ -1349,6 +1487,7 @@ function connectSSE() {
       if(!download_running) $('topline').style.width = '0';
       if(!download_running) closeArchiveChoice();
     } else if(evt.type === 'stats') {
+      if(evt.task_id) return;
       const d = evt.data;
       if(d.ok !== undefined) setStatValue('statOk', d.ok);
       if(d.fail !== undefined) setStatValue('statFail', d.fail);
@@ -1370,6 +1509,8 @@ function connectSSE() {
       renderHistory(evt.data);
     } else if(evt.type === 'live_watch') {
       renderLiveWatch(evt.data && evt.data.jobs ? evt.data.jobs : []);
+    } else if(evt.type === 'task_snapshot') {
+      renderTasks(evt.data && evt.data.tasks ? evt.data.tasks : []);
     } else if(evt.type === 'ready') {
       const readyData = Array.isArray(evt.data) ? {logs:evt.data, running:false} : evt.data;
       downloadGeneration = readyData.generation;
@@ -1381,6 +1522,7 @@ function connectSSE() {
       if($('btnCoverDownload')) $('btnCoverDownload').disabled = download_running || readyData.phase === 'suspended';
       if(readyData.progress) renderProgress(readyData.progress);
       if(Array.isArray(readyData.live_watch)) renderLiveWatch(readyData.live_watch);
+      if(Array.isArray(readyData.tasks)) renderTasks(readyData.tasks);
       if(readyData.stats) {
         $('statOk').textContent = readyData.stats.ok || 0;
         $('statFail').textContent = readyData.stats.fail || 0;

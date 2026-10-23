@@ -62,6 +62,7 @@ class DownloadExecutor:
         pick_withny_archive=None,
         pick_withny_live_config=None,
         ensure_po_token_provider=None,
+        on_finished=None,
     ):
         self._tool_dir = tool_dir
         self._paths = AppPaths(tool_dir)
@@ -79,6 +80,7 @@ class DownloadExecutor:
         self._pick_withny_archive = pick_withny_archive
         self._pick_withny_live_config = pick_withny_live_config
         self._ensure_po_token_provider = ensure_po_token_provider
+        self._on_finished = on_finished
         # 批量下载密码阻塞等待机制
         self._password_event = threading.Event()
         self._password_value: str | None = None
@@ -1965,7 +1967,13 @@ class DownloadExecutor:
     def _finish(self, handle, process):
         self._download_manager.clear_process(handle, process)
         # 仅当前代际有权广播结束态，旧线程迟到收尾不会伪造"空闲"。
-        if self._download_manager.finish(handle):
+        finished = self._download_manager.finish(handle)
+        if finished:
             self._broadcast_download_state()
+            if self._on_finished is not None:
+                try:
+                    self._on_finished(handle)
+                except Exception:
+                    pass
         if not self._app_state.has_sse_clients():
             self._start_idle_timer()

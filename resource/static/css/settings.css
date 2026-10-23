@@ -106,6 +106,38 @@
 .live-platform-row .sel{margin-left:auto}
 .live-platform-empty{padding:12px;color:var(--fg3);font-size:12.5px}
 
+/* 任务列表：行背景填充百分比作为进度条 */
+.task-panel{display:flex;flex-direction:column;gap:8px;margin-top:2px}
+.task-row{
+  border:1px solid var(--line);
+  border-radius:8px;
+  background:var(--surface);
+  background:linear-gradient(90deg,
+    color-mix(in srgb,var(--ok) 18%,var(--surface)) var(--p,0%),
+    var(--surface) var(--p,0%));
+  overflow:hidden;
+  transition:border-color .15s ease;
+}
+.task-row.failed{background:var(--surface);background:linear-gradient(90deg,
+  color-mix(in srgb,var(--err) 16%,var(--surface)) var(--p,0%),
+  var(--surface) var(--p,0%))}
+.task-row.cancelled{opacity:.72}
+.task-row.open{border-color:var(--line2)}
+.task-summary{display:flex;align-items:center;gap:10px;padding:10px 12px;cursor:pointer;min-height:38px;flex-wrap:wrap}
+.task-summary .tname{font-size:13px;font-weight:500;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1}
+.task-summary .tmeta{font-family:var(--mono);font-size:11px;color:var(--fg3);white-space:nowrap}
+.task-summary .tpct{font-family:var(--mono);font-size:11px;color:var(--fg2);width:44px;text-align:right;flex:none}
+.task-summary .tchev{color:var(--fg3);transition:transform .15s ease;flex:none}
+.task-row.open .tchev{transform:rotate(90deg)}
+.task-detail{display:none;border-top:1px solid var(--line);padding:10px 12px;background:var(--surface2);font-size:12px}
+.task-row.open .task-detail{display:block}
+.task-detail .tdline{display:flex;gap:8px;margin:3px 0;overflow-wrap:anywhere}
+.task-detail .tdlabel{color:var(--fg3);width:64px;flex:none}
+.task-detail .tdurl{font-family:var(--mono);font-size:11px;color:var(--fg2)}
+.task-log{max-height:150px;overflow:auto;background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:7px 9px;margin-top:6px;font-family:var(--mono);font-size:11px;line-height:1.6;white-space:pre-wrap}
+.task-log .le{color:var(--err)} .task-log .lw{color:var(--warn)}
+.task-cancel{margin-left:auto;flex:none}
+
 @media (max-width:1100px){
   .settings-layout{grid-template-columns:minmax(0,1fr);gap:14px}
   .settings-toc{

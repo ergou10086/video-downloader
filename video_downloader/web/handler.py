@@ -32,6 +32,9 @@ class HttpHandlerDependencies:
     cancel_live_watch: object
     inspect_live_url: object
     live_capabilities: object
+    list_tasks: object
+    cancel_task: object
+    clear_tasks: object
     start_withny_archive: object
     start_withny_live: object
     batch_txt_download: object
@@ -131,6 +134,8 @@ def create_handler(dependencies):
                 self._json({"jobs": dependencies.list_live_watch_jobs()})
             elif path == "/api/live/capabilities":
                 self._json({"platforms": dependencies.live_capabilities()})
+            elif path == "/api/tasks":
+                self._json({"tasks": dependencies.list_tasks()})
             elif path.startswith("/static/"):
                 if not self._is_local_request():
                     self._forbidden()
@@ -166,6 +171,7 @@ def create_handler(dependencies):
                     "archive_prompt": dependencies.app_state.archive_prompt,
                     "update": dependencies.updater.snapshot(),
                     "live_watch": dependencies.list_live_watch_jobs(),
+                    "tasks": dependencies.list_tasks(),
                 }}
             # 每个 SSE 连接使用有界队列；慢连接的丢旧保新策略由 AppState 统一执行。
             client_queue = queue.Queue(maxsize=256)
@@ -258,6 +264,16 @@ def create_handler(dependencies):
                     self._json({"error": "缺少等待任务 id"}, status=400)
                     return
                 self._json(dependencies.cancel_live_watch(job_id))
+            elif path == "/api/tasks/cancel":
+                task_id = self._field(data, "id", str, "")
+                if task_id is None:
+                    return
+                if not task_id:
+                    self._json({"error": "缺少任务 id"}, status=400)
+                    return
+                self._json(dependencies.cancel_task(task_id))
+            elif path == "/api/tasks/clear":
+                self._json(dependencies.clear_tasks())
             elif path == "/api/live/inspect":
                 url = self._field(data, "url", str, "")
                 if url is None:
