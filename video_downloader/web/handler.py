@@ -226,11 +226,16 @@ def create_handler(dependencies):
                 custom_args = self._custom_args(data)
                 if custom_args is None:
                     return
+                live_mode = data.get("live_mode")
+                if live_mode is not None and not isinstance(live_mode, str):
+                    self._json({"error": "字段 live_mode 类型错误"}, status=400)
+                    return
                 self._json(dependencies.start_download(
                     url,
                     bili_parts=bili_parts,
                     tc_password=tc_password,
                     custom_args=custom_args or None,
+                    live_mode=live_mode or None,
                 ))
             elif path == "/api/start-withny-archive":
                 self._json(dependencies.start_withny_archive())

@@ -13,6 +13,7 @@ from video_downloader.core.constants import LEGACY_ALL_SUBTITLE_LANGS, RECOMMEND
 from video_downloader.core.platform import clean_url, detect_platform, is_live_url, safe_decode
 from video_downloader.core.paths import AppPaths
 from video_downloader.core.subtitles import classify_subtitle_result
+from video_downloader.live import LiveModeError, decide_live
 from video_downloader.services.download_archive import archived_video_id, forget_archived_videos, redownload_command
 from video_downloader.services.withny_archive import WithnyArchiveError, build_ffmpeg_command, load_and_select, redact_line
 
@@ -380,7 +381,7 @@ class DownloadExecutor:
             if self._download_manager.is_current(handle):
                 self._finish(handle, None)
 
-    def start_download(self, url, bili_parts=None, tc_password=None, custom_args=None):
+    def start_download(self, url, bili_parts=None, tc_password=None, custom_args=None, live_mode=None):
         url = clean_url(url)
         if not url:
             return {"error": "请输入有效的视频链接"}
@@ -398,6 +399,17 @@ class DownloadExecutor:
             self._log(f"[提示] 未识别平台，使用: {config_snapshot['PLATFORM']}", "warn")
 
         is_live_download = is_live_url(url, detected)
+        requested_live_mode = live_mode if live_mode is not None else config_snapshot.get("LIVE_MODE", "auto")
+        try:
+            live_decision = decide_live(effective_platform, requested_live_mode, is_live_download)
+        except LiveModeError as exc:
+            return {"error": str(exc)}
+        if live_decision.is_live:
+            self._log(
+                f"[直播] 模式: {live_decision.mode.value}（请求: {live_decision.requested_mode.value}）",
+                "info",
+            )
+        effective_live_mode = live_decision.mode.value if live_decision.is_live else None
 
         missing = self._missing_dependency(platform=detected, config=config_snapshot, is_live=is_live_download)
         if missing:
@@ -428,7 +440,7 @@ class DownloadExecutor:
                 target=self._prepare_download,
                 args=(handle, config_snapshot, {effective_platform}, self._build_and_run_single,
                       (url, effective_platform, is_live_download, config_snapshot,
-                       bili_parts, verbose, custom_args)),
+                       bili_parts, verbose, custom_args, effective_live_mode)),
                 daemon=True,
             ).start()
         except Exception as exc:
@@ -439,10 +451,11 @@ class DownloadExecutor:
         return {"ok": True}
 
     def _build_and_run_single(self, handle, url, effective_platform, is_live_download,
-                              config_snapshot, bili_parts, verbose, custom_args,
+                              config_snapshot, bili_parts, verbose, custom_args, live_mode=None,
                               po_token_base_url=None):
         build_kwargs = {
             "is_live": is_live_download,
+            "live_mode": live_mode,
             "platform_override": effective_platform,
             "config_override": config_snapshot,
             "bili_parts": bili_parts,
@@ -1308,7 +1321,7 @@ class DownloadExecutor:
         finally:
             self._finish(handle, proc)
 
-    def batch_download(self, urls, bili_parts_map=None, custom_args=None):
+    def batch_download(self, urls, bili_parts_map=None, custom_args=None, live_mode=None):
         urls = [url for raw_url in urls if (url := clean_url(raw_url))]
         if not urls:
             return {"error": "没有有效的视频链接"}
@@ -1316,6 +1329,7 @@ class DownloadExecutor:
         if missing:
             return {"error": f"缺少依赖: {missing}"}
         config_snapshot = self._app_state.config_snapshot()
+        requested_live_mode = live_mode if live_mode is not None else config_snapshot.get("LIVE_MODE", "auto")
         custom_args_error = self._validate_custom_args(config_snapshot, custom_args)
         if custom_args_error:
             return {"error": custom_args_error}
@@ -1338,7 +1352,8 @@ class DownloadExecutor:
             threading.Thread(
                 target=self._prepare_download,
                 args=(handle, config_snapshot, effective_platforms, self._run_batch,
-                      (urls, config_snapshot, stats, bili_parts_map or {}, audio_mode, audio_fmt, custom_args)),
+                      (urls, config_snapshot, stats, bili_parts_map or {}, audio_mode, audio_fmt, custom_args,
+                       requested_live_mode)),
                 daemon=True,
             ).start()
         except Exception as exc:
@@ -1348,7 +1363,7 @@ class DownloadExecutor:
             return {"error": f"下载线程启动失败: {exc}"}
         return {"ok": True, "total": len(urls)}
 
-    def _run_batch(self, handle, urls, config_snapshot, stats, bili_parts_map=None, audio_mode="0", audio_fmt="mp3", custom_args=None, po_token_base_url=None):
+    def _run_batch(self, handle, urls, config_snapshot, stats, bili_parts_map=None, audio_mode="0", audio_fmt="mp3", custom_args=None, requested_live_mode="auto", po_token_base_url=None):
         # 批量统计与进度共用任务代际，避免停止后迟到事件污染下一任务。
         self._app_state.download_thread_context.task_id = handle.generation
         stopped = False
@@ -1378,6 +1393,24 @@ class DownloadExecutor:
                 else:
                     self._log(f"[{index}/{len(urls)}] 未识别平台，使用: {config_snapshot['PLATFORM']}", "warn")
                 self._log(f"[{index}/{len(urls)}] 下载: {url}", "info")
+                try:
+                    live_decision = decide_live(
+                        effective_platform,
+                        requested_live_mode,
+                        is_live_url(url, detected),
+                    )
+                except LiveModeError as exc:
+                    self._log(f"[{index}/{len(urls)}] 直播模式不可用: {exc}", "error")
+                    stats["fail"] += 1
+                    update_stats()
+                    continue
+                is_live_for_url = live_decision.is_live
+                live_mode_for_url = live_decision.mode.value if live_decision.is_live else None
+                if live_decision.is_live:
+                    self._log(
+                        f"[{index}/{len(urls)}] [直播] 模式: {live_mode_for_url}",
+                        "info",
+                    )
                 current_stage = "audio" if audio_mode == "3" else "video"
                 self._update_progress(
                     0,
@@ -1419,7 +1452,8 @@ class DownloadExecutor:
                         if effective_platform == "TwitCasting" and tc_password:
                             cmd_config["TC_PASSWORD"] = tc_password
                         build_kwargs = {
-                            "is_live": is_live_url(url, detected),
+                            "is_live": is_live_for_url,
+                            "live_mode": live_mode_for_url,
                             "platform_override": effective_platform,
                             "config_override": cmd_config,
                             "bili_parts": bili_parts_for_url,
@@ -1440,7 +1474,8 @@ class DownloadExecutor:
                         subtitle_cmd = None
                         if cmd_config.get("DOWNLOAD_SUBTITLES", 0):
                             subtitle_kwargs = {
-                                "is_live": is_live_url(url, detected),
+                                "is_live": is_live_for_url,
+                                "live_mode": live_mode_for_url,
                                 "platform_override": effective_platform,
                                 "config_override": cmd_config,
                                 "bili_parts": bili_parts_for_url,
@@ -1467,7 +1502,7 @@ class DownloadExecutor:
                         # yt-dlp 会无限等待新分片。通过 LIVE_DOWNLOAD_TIMEOUT 限制单链接
                         # 最长下载时间，超时后自动终止并跳到下一个链接。
                         nico_live_dl = (effective_platform == "Niconico"
-                                        and is_live_url(url, detected))
+                                        and is_live_for_url)
                         live_timeout_min = int(config_snapshot.get("LIVE_DOWNLOAD_TIMEOUT", 0))
                         download_start = time.time()
                         download_timed_out = False

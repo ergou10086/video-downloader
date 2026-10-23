@@ -241,11 +241,39 @@ class DownloadExecutorTests(unittest.TestCase):
             callbacks["build_command"].assert_called_once_with(
                 "https://youtube.com/live/abc",
                 is_live=True,
+                live_mode="catch_up",
                 platform_override="YouTube",
                 config_override=executor._app_state.config_snapshot(),
                 bili_parts=None,
                 include_subtitles=False,
             )
+
+    def test_bilibili_live_defaults_to_live_edge(self):
+        with tempfile.TemporaryDirectory() as directory:
+            tool_dir = Path(directory)
+            for name in ["yt-dlp.exe", "ffmpeg.exe", "ffprobe.exe"]:
+                (tool_dir / name).touch()
+            executor, callbacks = create_executor(tool_dir)
+            executor._run_single = Mock()
+            with patch("video_downloader.services.download_executor.threading.Thread", DirectThread):
+                result = executor.start_download("https://live.bilibili.com/1")
+            self.assertEqual(result, {"ok": True})
+            kwargs = callbacks["build_command"].call_args.kwargs
+            self.assertTrue(kwargs["is_live"])
+            self.assertEqual(kwargs["live_mode"], "live_edge")
+
+    def test_unsupported_catch_up_returns_error_before_start(self):
+        with tempfile.TemporaryDirectory() as directory:
+            tool_dir = Path(directory)
+            for name in ["yt-dlp.exe", "ffmpeg.exe", "ffprobe.exe"]:
+                (tool_dir / name).touch()
+            executor, callbacks = create_executor(tool_dir)
+            result = executor.start_download(
+                "https://live.bilibili.com/1",
+                live_mode="catch_up",
+            )
+            self.assertIn("error", result)
+            callbacks["build_command"].assert_not_called()
 
     def test_non_live_url_text_does_not_enable_live_mode(self):
         with tempfile.TemporaryDirectory() as directory:

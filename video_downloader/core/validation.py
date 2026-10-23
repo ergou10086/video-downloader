@@ -9,6 +9,7 @@ from .constants import (
     FORMAT_OPTIONS,
     HWACCEL_OPTIONS,
     LIVE_STREAM_METHOD_OPTIONS,
+    LIVE_MODE_OPTIONS,
     MP3_BITRATE_OPTIONS,
     PLATFORM_INFO,
     PROXY_TYPE_OPTIONS,
@@ -28,6 +29,7 @@ _ERROR_REASONS = {
     "HWACCEL": "硬件加速选项无效",
     "BILI_MULTIP_POLICY": "B站多P策略选项无效",
     "LIVE_STREAM_METHOD": "直播下载方式仅支持 yt-dlp",
+    "LIVE_MODE": "直播模式仅支持 auto/catch_up/live_edge",
     "AUDIO_MODE": "音频模式选项无效",
     "AUDIO_FORMAT": "音频格式选项无效",
     "THREADS": "线程数需在 1-32 之间",
@@ -84,6 +86,7 @@ def validate_config(values, base=None):
         "AUDIO_MODE": AUDIO_MODE_OPTIONS,
         "AUDIO_FORMAT": AUDIO_FORMAT_OPTIONS,
         "LIVE_STREAM_METHOD": LIVE_STREAM_METHOD_OPTIONS,
+        "LIVE_MODE": LIVE_MODE_OPTIONS,
         "SUBTITLE_TYPE": SUBTITLE_TYPE_OPTIONS,
     }
     integer_ranges = {

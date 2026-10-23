@@ -8,6 +8,7 @@ import re
 from urllib.parse import urlparse
 
 from .constants import PLATFORM_INFO, UPDATE_HOSTS
+from video_downloader.live.classifier import is_live_url as _is_live_url
 
 
 def safe_decode(buf):
@@ -48,39 +49,11 @@ def detect_platform(url):
 
 
 def is_live_url(url, platform=None):
-    """检测是否为直播链接（YouTube /live, Twitch 频道, Niconico 直播子域名, TwitCasting 主播页）。"""
-    try:
-        parsed = urlparse(url)
-        host = (parsed.hostname or "").lower()
-        path = parsed.path.lower().rstrip("/")
-    except Exception:
-        return False
-    platform_name = platform or detect_platform(url)
-    if platform_name == "YouTube":
-        return (host == "youtube.com" or host.endswith(".youtube.com")) and (
-            path == "/live" or path.startswith("/live/") or path.endswith("/live")
-        )
-    if platform_name == "Twitch":
-        if host not in {"twitch.tv", "www.twitch.tv", "m.twitch.tv"}:
-            return False
-        segments = [segment for segment in path.split("/") if segment]
-        return len(segments) == 1 and segments[0] not in {"videos", "clips", "directory"}
-    if platform_name == "Niconico":
-        return host in {"live.nicovideo.jp", "live2.nicovideo.jp"}
-    if platform_name == "Bilibili":
-        return host == "live.bilibili.com" or host.endswith(".live.bilibili.com")
-    if platform_name == "TwitCasting":
-        if host != "twitcasting.tv" and not host.endswith(".twitcasting.tv"):
-            return False
-        segments = [segment for segment in path.split("/") if segment]
-        # 单段路径（/主播名）为当前直播；含 movie/twplayer/show/archive 为录播或历史列表。
-        return len(segments) == 1 and segments[0] not in {"movie", "twplayer", "show", "archive"}
-    if platform_name == "Twitter":
-        # Twitter Space: x.com/i/spaces/xxx 或 twitter.com/i/spaces/xxx
-        return host in {"x.com", "twitter.com", "www.x.com", "www.twitter.com"} and (
-            path.startswith("/i/spaces/")
-        )
-    return False
+    """兼容门面：实现已迁移到 ``video_downloader.live.classifier``。
+
+    保留该函数供旧调用方/测试使用；新代码优先使用 live 包。
+    """
+    return _is_live_url(url, platform)
 
 
 def version_num_to_str(num):

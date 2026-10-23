@@ -156,6 +156,7 @@ class AppContainer:
 
         # ---- 命令构建 ----
         def build_command(url: str, *, is_live: bool = False,
+                          live_mode: str | None = None,
                           platform_override: str | None = None,
                           config_override: dict | None = None,
                           bili_parts: str | None = None,
@@ -179,6 +180,7 @@ class AppContainer:
             return _build_ytdlp_cmd(
                 url, cfg, tool_dir, exe_suffix,
                 is_live=is_live,
+                live_mode=live_mode,
                 platform_override=platform_override,
                 cookie_file=cookie_file if cookie_file.exists() else None,
                 bili_parts=bili_parts,
@@ -259,12 +261,14 @@ class AppContainer:
 
         def start_download(url: str, bili_parts: str | None = None,
                            tc_password: str | None = None,
-                           custom_args: str | None = None) -> dict:
+                           custom_args: str | None = None,
+                           live_mode: str | None = None) -> dict:
             return download_executor.start_download(
                 url,
                 bili_parts=bili_parts,
                 tc_password=tc_password,
                 custom_args=custom_args,
+                live_mode=live_mode,
             )
 
         def submit_password(url: str, password: str) -> dict:

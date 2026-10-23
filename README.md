@@ -13,7 +13,7 @@
 - 🎬 **八平台支持** - YouTube、Bilibili、Twitch、Niconico、NicoChannel、Fantia、TwitCasting、Twitter，自动识别平台
 - 📦 **Withny 支持** - 从 HAR 保存已授权历史存档，也可通过 withny-dl 配置监控和录制直播
 - 📺 **Bilibili 支持** - 支持普通视频、直播和多 P 分集选择
-- 🎮 **直播录制** - 支持 YouTube、Twitch、Niconico、TwitCasting 直播识别、从头录制和实时状态
+- 🎮 **直播录制** - 支持直播模式选择（自动/追开播/从当前时刻）；YouTube/Twitch 在平台允许时追开播，Bilibili/TwitCasting 等默认从当前时刻，实时显示录制状态
 - 💾 **配置预设** - 保存常用设置组合，一键切换
 - 📜 **下载历史** - 自动记录每次下载，最多500条
 - 🔄 **断点续传** - 默认启用，网络中断后自动续传
@@ -73,17 +73,17 @@ python ".\视频下载工具v2.5.0-GUI.py"
 3. 编辑 `urls.txt`，每行一个链接（支持混合平台）
 4. 点击「TXT批量下载」开始批量下载
 
-### Twitch直播录制
-直接粘贴主播频道URL（如 `https://www.twitch.tv/xqc`）即可从直播开头录制，停止则结束录制。文件自动保存到 `download/Twitch/主播名/直播/` 目录。
+### 直播录制（Twitch / YouTube）
+在「设置 → 直播模式」选择自动、追开播或从当前时刻。自动模式：YouTube/Twitch 尝试追开播（受 DVR/增长中 VOD 条件限制），其他平台默认从当前时刻。Twitch 粘贴主播频道URL（如 `https://www.twitch.tv/xqc`），文件保存到 `download/Twitch/主播名/直播/`。Twitch 未开播时不会持续等待。
 
 ### YouTube / Niconico 直播录制
-YouTube 使用明确的 `/live` 直播链接，Niconico 使用 `live.nicovideo.jp` 或 `live2.nicovideo.jp` 链接。程序会自动进入直播模式，并实时显示录制时长、大小、速度和分片状态。
+YouTube 使用 `/live` 直播链接，Niconico 使用 `live.nicovideo.jp` 或 `live2.nicovideo.jp` 链接。YouTube 在 DVR/归档可用时可追开播；Niconico 当前只从当前时刻录制（上游 chasePlay 固定关闭）。程序实时显示录制时长、大小、速度和分片状态。
 
 ### TwitCasting 直播录制 / 录播下载
-粘贴主播页 URL（如 `https://twitcasting.tv/主播名`）即可从直播开头录制，文件保存到 `download/TwitCasting/主播名/直播/` 目录。单条录播使用 `/movie/数字ID` 链接，历史直播列表使用 `/show` 或 `/archive` 链接。密码保护或会员限定内容可在「设置」页填写「TwitCasting 密码」后下载。
+粘贴主播页 URL（如 `https://twitcasting.tv/主播名`）后默认从当前时刻录制（平台不支持 yt-dlp 从头），文件保存到 `download/TwitCasting/主播名/直播/` 目录。单条录播使用 `/movie/数字ID` 链接，历史直播列表使用 `/show` 或 `/archive` 链接。密码保护或会员限定内容可在「设置」页填写「TwitCasting 密码」后下载。
 
 ### Bilibili 下载
-粘贴 Bilibili 视频或直播链接后程序会自动识别。多 P 视频可按设置下载全部分集或弹出分集选择器；1080P 及以上画质通常需要在程序目录配置 `cookies.txt`。
+粘贴 Bilibili 视频或直播链接后程序会自动识别。直播默认从当前时刻录制（普通观看侧无 DVR，不支持追开播）；多 P 视频可按设置下载全部分集或弹出分集选择器；1080P 及以上画质通常需要在程序目录配置 `cookies.txt`。
 
 ### Withny 历史存档
 在下载页面选择 Withny，点击「选择 HAR 并下载」，依次选择浏览器导出的包含内容 HAR 和输出文件。程序只处理已授权的普通未加密 HLS，检测到 DRM、加密 HLS、缺失媒体清单正文或签名 Cookie 时会拒绝下载。HAR 可能包含登录信息，使用后应立即删除。

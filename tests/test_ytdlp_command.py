@@ -386,7 +386,8 @@ class YtdlpCommandTests(unittest.TestCase):
                 is_live=True,
                 platform_override="TwitCasting",
             )
-        self.assertIn("--live-from-start", cmd)
+        self.assertNotIn("--live-from-start", cmd)
+        self.assertIn("--no-live-from-start", cmd)
         output = cmd[cmd.index("-o") + 1]
         self.assertIn("直播", output)
         self.assertIn("TwitCasting", output)

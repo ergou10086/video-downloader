@@ -6,6 +6,7 @@ from pathlib import Path
 
 from .constants import DEFAULT_SUBTITLE_LANGS
 from .paths import AppPaths
+from video_downloader.live import build_live_arguments
 
 
 _TWITCASTING_PLUGIN_RELATIVE_PATH = (
@@ -177,7 +178,7 @@ def _append_custom_ytdlp_args(cmd, cfg, custom_args):
     cmd += parse_custom_ytdlp_args(custom_args)
 
 
-def build_ytdlp_cmd(url, config, tool_dir, exe_suffix="", *, is_live=False, platform_override=None, cookie_file=None, bili_parts=None, nicochannel_auth_token=None, use_ffmpeg_for_hls=False, include_subtitles=True, subtitle_only=False, thumbnail_only=False, custom_args=None, po_token_base_url=None):
+def build_ytdlp_cmd(url, config, tool_dir, exe_suffix="", *, is_live=False, live_mode=None, platform_override=None, cookie_file=None, bili_parts=None, nicochannel_auth_token=None, use_ffmpeg_for_hls=False, include_subtitles=True, subtitle_only=False, thumbnail_only=False, custom_args=None, po_token_base_url=None):
     """构建 yt-dlp 下载命令行参数。
 
     根据配置项组装完整的 yt-dlp 命令行参数列表，包括输出模板、格式选择、
@@ -188,7 +189,8 @@ def build_ytdlp_cmd(url, config, tool_dir, exe_suffix="", *, is_live=False, plat
         config: 配置字典，包含分辨率、编码、音频质量等全部设置项。
         tool_dir: 应用程序根目录。第三方工具优先从 dependency 子目录加载。
         exe_suffix: 可执行文件后缀，Windows 下为 ".exe"，其他平台为空。
-        is_live: 是否为直播下载，直播使用 --live-from-start 并归入直播目录。
+        is_live: 是否为直播下载。
+        live_mode: 直播模式（auto/catch_up/live_edge）；由 live 包解析并校验。
         platform_override: 平台覆盖名，如果不为 None 则替代 config 中的 PLATFORM。
         cookie_file: Cookie 文件路径，用于文件模式 Cookie 鉴权。
         bili_parts: Bilibili 分P 选择参数，如 "1,3,5" 或 "all"，通过 -I 传递给 yt-dlp。
@@ -229,7 +231,7 @@ def build_ytdlp_cmd(url, config, tool_dir, exe_suffix="", *, is_live=False, plat
     for plugin_dir in plugin_dirs:
         cmd += ["--plugin-dirs", str(plugin_dir)]
     platform_name = platform_override if platform_override else cfg["PLATFORM"]
-    is_nico_live = "live.nicovideo.jp" in url.lower() or "live2.nicovideo.jp" in url.lower()
+    is_nico_live = platform_name == "Niconico" and is_live
 
     if subtitle_only:
         cmd += ["--skip-download"]
@@ -247,14 +249,9 @@ def build_ytdlp_cmd(url, config, tool_dir, exe_suffix="", *, is_live=False, plat
     # VOD 模板：开启嵌入元数据时，在文件名前追加 [YYYYMMDD] 发布日期，便于按时间排序
     vod_date_prefix = "[%(upload_date)s] " if cfg["EMBED_META"] else ""
 
-    # 直播统一由调用方传入的 is_live 驱动（Twitch/TwitCasting 等），
-    # 使用 --live-from-start 从头抓取并归入直播目录。
-    # Niconico 直播/录播（timeshift）不加 --live-from-start：
-    #   不加时 → yt-dlp 提取器自行判断直播/录播状态，录播下载全量分片后退出，
-    #            直播从当前时刻开始录制。
-    #   加了  → 对无 timeshift 缓冲的直播直接报错 "no formats that can be
-    #            downloaded from the start"，录播也会失败。
-    # 因此 Niconico 由 yt-dlp 自行决定，仅指定输出目录。
+    # 直播由 is_live + live_mode 驱动，参数由 live 包的能力表/策略生成。
+    # Niconico 当前只允许 live_edge：上游固定 chasePlay=false，追开播会失败；
+    # 仍使用独立的 Niconico/直播 输出目录。
     #
     # 直播文件名规则：
     #   EMBED_META=1 → "[20260730] title - id.ext"（日期前缀，方便按时间排序归档）
@@ -289,8 +286,10 @@ def build_ytdlp_cmd(url, config, tool_dir, exe_suffix="", *, is_live=False, plat
         cmd.append(url)
         return cmd
 
-    if is_live and not is_nico_live:
-        cmd += ["--live-from-start"]
+    if is_live:
+        # 参数由 live 包的策略根据平台能力 + 模式生成：
+        # catch_up -> --live-from-start；live_edge -> --no-live-from-start。
+        cmd += build_live_arguments(platform_name, live_mode, is_live=True)
 
     cmd += ["-o", out_tmpl]
     archive = paths.archive(f"{platform_name.lower()}_archive.txt")

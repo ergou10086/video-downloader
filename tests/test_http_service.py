@@ -52,8 +52,9 @@ def make_dependencies(exit_event):
         load_history=lambda: [{"url": "example"}],
         cancel_idle_timer=lambda: None,
         start_idle_timer=lambda: None,
-        start_download=lambda url, bili_parts=None, tc_password=None, custom_args=None: {
+        start_download=lambda url, bili_parts=None, tc_password=None, custom_args=None, live_mode=None: {
             "url": url, **({"custom_args": custom_args} if custom_args else {}),
+            **({"live_mode": live_mode} if live_mode else {}),
         },
         start_withny_archive=lambda: {"ok": True, "kind": "withny-archive"},
         start_withny_live=lambda: {"ok": True, "kind": "withny-live"},
@@ -207,6 +208,14 @@ class HttpServiceTests(unittest.TestCase):
         })
         self.assertEqual(status, 200)
         self.assertEqual(json.loads(body)["custom_args"], "--sleep-requests 1")
+
+    def test_start_forwards_live_mode(self):
+        status, body, _ = self.request("/api/start", method="POST", payload={
+            "url": "https://live.bilibili.com/1",
+            "live_mode": "live_edge",
+        })
+        self.assertEqual(status, 200)
+        self.assertEqual(json.loads(body)["live_mode"], "live_edge")
 
     def test_start_rejects_oversized_custom_args(self):
         with self.assertRaises(HTTPError) as raised:

@@ -25,6 +25,17 @@ class ConfigValidationTests(unittest.TestCase):
                         f"Expected PROXY_ADDR error in {errors}")
         self.assertEqual(validated["PROXY_ADDR"], "127.0.0.1")
 
+    def test_live_mode_accepts_known_values(self):
+        for value in ("auto", "catch_up", "live_edge"):
+            validated, errors = validate_config({"LIVE_MODE": value})
+            self.assertEqual(errors, [])
+            self.assertEqual(validated["LIVE_MODE"], value)
+
+    def test_live_mode_rejects_unknown_value_and_keeps_default(self):
+        validated, errors = validate_config({"LIVE_MODE": "from_start"})
+        self.assertTrue(any("LIVE_MODE" in error for error in errors))
+        self.assertEqual(validated["LIVE_MODE"], "auto")
+
     def test_subtitle_defaults_are_disabled_and_use_chinese_languages(self):
         validated, errors = validate_config({})
         self.assertEqual(errors, [])
