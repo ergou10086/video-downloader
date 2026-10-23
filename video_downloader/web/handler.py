@@ -30,6 +30,8 @@ class HttpHandlerDependencies:
     start_download: object
     list_live_watch_jobs: object
     cancel_live_watch: object
+    inspect_live_url: object
+    live_capabilities: object
     start_withny_archive: object
     start_withny_live: object
     batch_txt_download: object
@@ -127,6 +129,8 @@ def create_handler(dependencies):
                 self._json(dependencies.get_current_command())
             elif path == "/api/live/watch-jobs":
                 self._json({"jobs": dependencies.list_live_watch_jobs()})
+            elif path == "/api/live/capabilities":
+                self._json({"platforms": dependencies.live_capabilities()})
             elif path.startswith("/static/"):
                 if not self._is_local_request():
                     self._forbidden()
@@ -254,6 +258,18 @@ def create_handler(dependencies):
                     self._json({"error": "缺少等待任务 id"}, status=400)
                     return
                 self._json(dependencies.cancel_live_watch(job_id))
+            elif path == "/api/live/inspect":
+                url = self._field(data, "url", str, "")
+                if url is None:
+                    return
+                if not url:
+                    self._json({"error": "缺少 url"}, status=400)
+                    return
+                live_mode = data.get("live_mode")
+                if live_mode is not None and not isinstance(live_mode, str):
+                    self._json({"error": "字段 live_mode 类型错误"}, status=400)
+                    return
+                self._json(dependencies.inspect_live_url(url, live_mode or None))
             elif path == "/api/archive-choice":
                 request_id = self._field(data, "request_id", str, "")
                 if request_id is None:

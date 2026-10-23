@@ -36,6 +36,13 @@ class ConfigValidationTests(unittest.TestCase):
         self.assertTrue(any("LIVE_MODE" in error for error in errors))
         self.assertEqual(validated["LIVE_MODE"], "auto")
 
+    def test_live_platform_modes_is_json_object(self):
+        validated, errors = validate_config({"LIVE_PLATFORM_MODES": '{"YouTube":"catch_up"}'})
+        self.assertEqual(errors, [])
+        self.assertEqual(validated["LIVE_PLATFORM_MODES"], '{"YouTube":"catch_up"}')
+        _, errors = validate_config({"LIVE_PLATFORM_MODES": "not-json"})
+        self.assertTrue(any("LIVE_PLATFORM_MODES" in error for error in errors))
+
     def test_subtitle_defaults_are_disabled_and_use_chinese_languages(self):
         validated, errors = validate_config({})
         self.assertEqual(errors, [])

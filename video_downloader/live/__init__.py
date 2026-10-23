@@ -10,6 +10,7 @@ from .arguments import (
     build_live_arguments,
 )
 from .classifier import is_live_url
+from .inspect import LiveInspector
 from .modes import (
     CAPABILITIES,
     LiveDecision,
@@ -23,6 +24,7 @@ from .modes import (
     resolve_mode,
 )
 from .probe import LiveProbe, LiveStatus, ProbeService
+from .preferences import parse_platform_modes, resolve_platform_mode
 from .service import LIVE_SERVICE, LiveService
 from .urls import LiveTarget, TargetKind, classify_target, expand_short_url
 from .wait import LiveWatchService, WatchJob, WatchJobStore, WatchStatus
@@ -33,6 +35,7 @@ __all__ = [
     "LIVE_SERVICE",
     "LiveArgumentStrategy",
     "LiveDecision",
+    "LiveInspector",
     "LiveMode",
     "LiveModeError",
     "LiveProbe",
@@ -55,5 +58,7 @@ __all__ = [
     "decide_live",
     "expand_short_url",
     "is_live_url",
+    "parse_platform_modes",
     "resolve_mode",
+    "resolve_platform_mode",
 ]

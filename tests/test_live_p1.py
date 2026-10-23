@@ -4,6 +4,8 @@ import unittest
 from pathlib import Path
 from types import SimpleNamespace
 
+from video_downloader.live.inspect import LiveInspector
+from video_downloader.live.preferences import parse_platform_modes, resolve_platform_mode
 from video_downloader.live.probe import (
     BilibiliProbe,
     LiveProbe,
@@ -133,6 +135,64 @@ class ProbeTests(unittest.TestCase):
         probe = service.probe(target)
         self.assertEqual(probe.status, LiveStatus.ERROR)
         self.assertTrue(probe.retryable)
+
+
+class PreferencesAndInspectTests(unittest.TestCase):
+    def test_platform_mode_preferences(self):
+        modes = parse_platform_modes('{"YouTube":"catch_up","Twitch":"bad","Bilibili":"live_edge"}')
+        self.assertEqual(modes, {"YouTube": "catch_up", "Bilibili": "live_edge"})
+        self.assertEqual(resolve_platform_mode("YouTube", "auto", modes), "catch_up")
+        self.assertEqual(resolve_platform_mode("Twitch", "auto", modes), "auto")
+        self.assertEqual(resolve_platform_mode("YouTube", "live_edge", modes), "live_edge")
+
+    def _inspector(self, probe):
+        class FakeProbe:
+            def probe(self, target, **kwargs):
+                return probe
+
+        return LiveInspector(FakeProbe(), clock=lambda: 1000.0)
+
+    def test_offline_supported_platform_recommends_wait(self):
+        probe = LiveProbe("Bilibili", TargetKind.CHANNEL, "1", LiveStatus.OFFLINE)
+        result = self._inspector(probe).inspect("https://live.bilibili.com/1")
+        self.assertTrue(result["is_live_target"])
+        self.assertTrue(result["can_wait"])
+        self.assertEqual(result["recommended_mode"], "wait")
+        self.assertNotIn("error", result)
+
+    def test_live_started_shows_duration_and_modes(self):
+        probe = LiveProbe(
+            "YouTube", TargetKind.EVENT, "abc", LiveStatus.LIVE,
+            started_at=900.0, title="live", uploader="u",
+        )
+        result = self._inspector(probe).inspect("https://youtube.com/live/abc", "auto")
+        self.assertEqual(result["status"], "live")
+        self.assertEqual(result["live_duration_seconds"], 100)
+        self.assertEqual(result["recommended_mode"], "catch_up")
+        self.assertTrue(any(mode["value"] == "catch_up" and mode["available"] for mode in result["modes"]))
+
+    def test_catch_up_unavailable_downgrades_with_warning(self):
+        probe = LiveProbe("Bilibili", TargetKind.CHANNEL, "1", LiveStatus.LIVE, started_at=900.0)
+        result = self._inspector(probe).inspect("https://live.bilibili.com/1", "catch_up")
+        self.assertEqual(result["effective_mode"], "live_edge")
+        self.assertTrue(result["downgraded"])
+        self.assertIn("不支持追开播", result["warning"])
+
+    def test_offline_unsupported_wait_returns_error(self):
+        probe = LiveProbe("Bilibili", TargetKind.CHANNEL, "1", LiveStatus.OFFLINE)
+        result = self._inspector(probe).inspect("https://withny.com/@user")
+        self.assertFalse(result["can_wait"])
+        self.assertIn("withny-dl", result["error"])
+
+    def test_non_live_target_does_not_probe(self):
+        class ExplodingProbe:
+            def probe(self, target, **kwargs):
+                raise AssertionError("should not probe")
+
+        result = LiveInspector(ExplodingProbe(), clock=lambda: 1000.0).inspect(
+            "https://example.com/video/1"
+        )
+        self.assertFalse(result["is_live_target"])
 
 
 class WaitServiceTests(unittest.TestCase):

@@ -10,6 +10,7 @@
 <link rel="stylesheet" href="/static/css/dark.css">
 <link rel="stylesheet" href="/static/css/responsive.css">
 <link rel="stylesheet" href="/static/css/animations.css">
+<link rel="stylesheet" href="/static/css/settings.css">
 </head>
 <body>
 
@@ -215,99 +216,111 @@
 
       <!-- ====== 下载设置 ====== -->
       <div class="page" id="page-settings">
+        <div class="settings-layout">
+          <aside class="settings-toc" id="settingsToc">
+            <button class="settings-toc-toggle" id="settingsTocToggle" type="button" title="收起/展开目录" aria-label="收起/展开目录">
+              <svg class="ico s14"><use href="#i-view-list"></use></svg>
+            </button>
+            <nav class="settings-toc-nav" aria-label="设置目录">
+              <button class="settings-toc-item on" data-target="set-presets"><i>01</i><span>配置预设</span></button>
+              <button class="settings-toc-item" data-target="set-output"><i>02</i><span>输出与画质</span></button>
+              <button class="settings-toc-item" data-target="set-live"><i>03</i><span>直播设置</span></button>
+              <button class="settings-toc-item" data-target="set-network"><i>04</i><span>网络与代理</span></button>
+              <button class="settings-toc-item" data-target="set-cookie"><i>05</i><span>Cookie 登录</span></button>
+              <button class="settings-toc-item" data-target="set-subtitle"><i>06</i><span>字幕</span></button>
+              <button class="settings-toc-item" data-target="set-filename"><i>07</i><span>文件名</span></button>
+              <button class="settings-toc-item" data-target="set-platform"><i>08</i><span>平台专项</span></button>
+              <button class="settings-toc-item" data-target="set-advanced"><i>09</i><span>高级与诊断</span></button>
+            </nav>
+          </aside>
 
-        <div class="sect">
-          <div class="sh"><b>配置预设</b><span class="rule"></span></div>
-          <div class="row">
-            <span class="sel" style="max-width:300px">
-              <select class="ctl" id="presetSelect" onchange="loadPresetFromSelect()"><option value="">— 选择预设快速应用 —</option></select>
-              <svg class="ico s14 cv"><use href="#i-chevron"></use></svg>
-            </span>
-            <button class="btn sm" onclick="showSavePreset()"><svg class="ico s14"><use href="#i-save"></use></svg>另存为</button>
-            <button class="btn sm dgr" onclick="deletePresetFromSelect()"><svg class="ico s14"><use href="#i-trash"></use></svg>删除</button>
-          </div>
-          <div class="row" id="presetSaveRow" style="display:none">
-            <input type="text" class="ctl" id="presetNameInput" style="max-width:300px" placeholder="预设名称，如：4K 收藏">
-            <button class="btn sm pri" onclick="savePresetFromInput()">确认</button>
-            <button class="btn sm" onclick="hideSavePreset()">取消</button>
-          </div>
-        </div>
+          <div class="settings-stack">
+            <section class="settings-section" id="set-presets">
+              <div class="sh"><b>配置预设</b><span class="rule"></span><span class="note">保存/切换整组设置</span></div>
+              <div class="row">
+                <span class="sel" style="max-width:300px">
+                  <select class="ctl" id="presetSelect" onchange="loadPresetFromSelect()"><option value="">— 选择预设快速应用 —</option></select>
+                  <svg class="ico s14 cv"><use href="#i-chevron"></use></svg>
+                </span>
+                <button class="btn sm" onclick="showSavePreset()"><svg class="ico s14"><use href="#i-save"></use></svg>另存为</button>
+                <button class="btn sm dgr" onclick="deletePresetFromSelect()"><svg class="ico s14"><use href="#i-trash"></use></svg>删除</button>
+              </div>
+              <div class="row" id="presetSaveRow" style="display:none">
+                <input type="text" class="ctl" id="presetNameInput" style="max-width:300px" placeholder="预设名称，如：4K 收藏">
+                <button class="btn sm pri" onclick="savePresetFromInput()">确认</button>
+                <button class="btn sm" onclick="hideSavePreset()">取消</button>
+              </div>
+            </section>
 
-        <div class="cols">
-          <div class="colstack">
-
-            <div class="sect">
-              <div class="sh"><b>画质与输出</b><span class="rule"></span></div>
+            <section class="settings-section" id="set-output">
+              <div class="sh"><b>输出与画质</b><span class="rule"></span><span class="note">视频编码、音频与容器</span></div>
               <div class="row"><span class="lb">分辨率上限</span><span class="sel"><select class="ctl" id="s_resolution"></select><svg class="ico s14 cv"><use href="#i-chevron"></use></svg></span></div>
               <div class="row"><span class="lb">编码模式</span><span class="sel"><select class="ctl" id="s_codec"></select><svg class="ico s14 cv"><use href="#i-chevron"></use></svg></span></div>
               <div class="row"><span class="lb">音频质量</span><span class="sel"><select class="ctl" id="s_audio"></select><svg class="ico s14 cv"><use href="#i-chevron"></use></svg></span></div>
               <div class="row"><span class="lb">视频输出格式</span><span class="sel"><select class="ctl" id="s_format"></select><svg class="ico s14 cv"><use href="#i-chevron"></use></svg></span></div>
               <div class="row"><span class="lb">音频处理方案</span><span class="sel"><select class="ctl" id="s_audiomode" onchange="onAudioModeChange()"></select><svg class="ico s14 cv"><use href="#i-chevron"></use></svg></span></div>
-            </div>
+              <div class="row"><span class="lb">音频输出格式</span><span class="sel"><select class="ctl" id="s_audiofmt"></select><svg class="ico s14 cv"><use href="#i-chevron"></use></svg></span></div>
+              <div class="row"><span class="lb">硬件加速</span><span class="sel"><select class="ctl" id="s_hwaccel"></select><svg class="ico s14 cv"><use href="#i-chevron"></use></svg></span></div>
+              <div class="row"><span class="lb">嵌入元数据</span><span class="sw on" id="sw_meta" onclick="toggleSwitch(this)"><i></i></span></div>
+              <div class="row"><span class="lb">下载封面</span><span class="sw on" id="sw_thumb" onclick="toggleSwitch(this)"><i></i></span></div>
+            </section>
 
-            <div class="sect">
-              <div class="sh"><b>字幕下载</b><span class="rule"></span></div>
-              <div class="row"><span class="lb">下载字幕</span><span class="sw" id="sw_subtitles" onclick="toggleSwitch(this);onSubtitleToggle()"><i></i></span></div>
-              <div class="row" id="row_subtitle_type"><span class="lb">字幕类型</span><span class="sel"><select class="ctl" id="s_subtitle_type"><option value="all">人工字幕 + 自动字幕</option><option value="manual">仅人工字幕</option><option value="auto">仅自动字幕</option></select><svg class="ico s14 cv"><use href="#i-chevron"></use></svg></span></div>
-              <div class="row" id="row_subtitle_lang"><span class="lb">字幕语言</span><span class="sel"><select class="ctl" id="s_subtitle_lang_preset" onchange="onSubtitleLanguagePresetChange('s')"></select><svg class="ico s14 cv"><use href="#i-chevron"></use></svg></span></div>
-              <div class="row" id="row_subtitle_custom" style="display:none"><span class="lb">自定义语言</span><input type="text" class="ctl mono" id="s_subtitle_langs" maxlength="200" style="flex:1" placeholder="例如 ja.*,zh.*,en.*"></div>
-            </div>
+            <section class="settings-section" id="set-live">
+              <div class="sh"><b>直播设置</b><span class="rule"></span><span class="note">任务开始前会按平台检查直播状态</span></div>
+              <div class="row"><span class="lb">直播下载方式</span><span class="sel"><select class="ctl" id="s_live_stream_method"><option value="yt-dlp">yt-dlp（默认）</option></select><svg class="ico s14 cv"><use href="#i-chevron"></use></svg></span></div>
+              <div class="row"><span class="lb">全局直播模式</span><span class="sel"><select class="ctl" id="s_live_mode"><option value="auto">自动（推荐）</option><option value="catch_up">追开播（条件）</option><option value="live_edge">从当前时刻</option><option value="wait">蹲开播（开播后自动录制）</option></select><svg class="ico s14 cv"><use href="#i-chevron"></use></svg></span></div>
+              <div class="row"><span class="lb">直播超时</span><input type="number" class="ctl mono" id="s_live_timeout" min="0" max="1440" value="0" style="width:110px"><span class="hint">分钟；0 表示不限时（当前仅 Niconico 批量路径使用，P2 扩展到单条）</span></div>
+              <div class="sh" style="margin-top:4px"><b>平台默认录制方式</b><span class="rule"></span><span class="note">仅显示同时支持追开播与当前录制的平台</span></div>
+              <div id="livePlatformModes" class="live-platform-modes"></div>
+              <div class="hint">追开播不可用时会提示原因并降级为从当前时刻；条件平台（Niconico/NicoChannel/TwitCasting/X）在探测能力接入前不显示。</div>
+              <div class="row"><span class="lb">直播提醒</span><button class="btn sm gh" onclick="clearLiveNoticeMutes()">清除“不再提醒”</button><span class="hint">提醒弹窗中的“不再提醒”保存在浏览器本地</span></div>
+            </section>
 
-            <div class="sect">
+            <section class="settings-section" id="set-network">
               <div class="sh"><b>网络与代理</b><span class="rule"></span></div>
               <div class="row"><span class="lb">并发线程数</span><input type="range" id="s_threads" min="1" max="8" value="4"><span class="rval" id="thr_val">4</span></div>
               <div class="row"><span class="lb">下载限速</span><input type="range" id="s_speed" min="0" max="50" value="0"><span class="rval" id="spd_val">不限</span></div>
               <div class="row"><span class="lb">启用代理</span><span class="sw" id="sw_proxy" onclick="toggleSwitch(this)"><i></i></span></div>
               <div class="row"><span class="lb">代理类型</span><span class="sel" style="max-width:150px"><select class="ctl" id="s_proxytype"><option value="http">HTTP</option><option value="socks5">SOCKS5</option></select><svg class="ico s14 cv"><use href="#i-chevron"></use></svg></span></div>
               <div class="row"><span class="lb">代理地址</span><input type="text" class="ctl mono" id="s_proxyaddr" value="127.0.0.1" style="flex:1"><span class="dim">:</span><input type="text" class="ctl mono" id="s_proxyport" value="7890" style="width:88px;flex:none"></div>
-            </div>
+            </section>
 
-            <div class="sect">
+            <section class="settings-section" id="set-cookie">
               <div class="sh"><b>Cookie 登录</b><span class="rule"></span></div>
               <div class="row"><span class="lb">启用 Cookie</span><span class="sw on" id="sw_cookies" onclick="toggleSwitch(this)"><i></i></span></div>
               <div class="row"><span class="lb">Cookie 模式</span><span class="sel"><select class="ctl" id="s_cookiemode" onchange="toggleCookieMode()"><option value="1">cookies.txt 文件</option><option value="2">浏览器提取</option></select><svg class="ico s14 cv"><use href="#i-chevron"></use></svg></span></div>
               <div class="row" id="row_browser"><span class="lb">浏览器</span><span class="sel"><select class="ctl" id="s_browser"></select><svg class="ico s14 cv"><use href="#i-chevron"></use></svg></span></div>
               <div class="row" id="row_profile"><span class="lb">配置文件名</span><input type="text" class="ctl mono" id="s_profile" value="Default" placeholder="Firefox 留空自动探测" style="flex:1"></div>
-            </div>
+            </section>
 
-          </div>
-          <div class="colstack">
+            <section class="settings-section" id="set-subtitle">
+              <div class="sh"><b>字幕</b><span class="rule"></span></div>
+              <div class="row"><span class="lb">下载字幕</span><span class="sw" id="sw_subtitles" onclick="toggleSwitch(this);onSubtitleToggle()"><i></i></span></div>
+              <div class="row" id="row_subtitle_type"><span class="lb">字幕类型</span><span class="sel"><select class="ctl" id="s_subtitle_type"><option value="all">人工字幕 + 自动字幕</option><option value="manual">仅人工字幕</option><option value="auto">仅自动字幕</option></select><svg class="ico s14 cv"><use href="#i-chevron"></use></svg></span></div>
+              <div class="row" id="row_subtitle_lang"><span class="lb">字幕语言</span><span class="sel"><select class="ctl" id="s_subtitle_lang_preset" onchange="onSubtitleLanguagePresetChange('s')"></select><svg class="ico s14 cv"><use href="#i-chevron"></use></svg></span></div>
+              <div class="row" id="row_subtitle_custom" style="display:none"><span class="lb">自定义语言</span><input type="text" class="ctl mono" id="s_subtitle_langs" maxlength="200" style="flex:1" placeholder="例如 ja.*,zh.*,en.*"></div>
+            </section>
 
-            <div class="sect">
-              <div class="sh"><b>编码与合并</b><span class="rule"></span></div>
-              <div class="row"><span class="lb">硬件加速</span><span class="sel"><select class="ctl" id="s_hwaccel"></select><svg class="ico s14 cv"><use href="#i-chevron"></use></svg></span></div>
-              <div class="row"><span class="lb">音频输出格式</span><span class="sel"><select class="ctl" id="s_audiofmt"></select><svg class="ico s14 cv"><use href="#i-chevron"></use></svg></span></div>
-              <div class="row"><span class="lb">直播下载方式</span><span class="sel"><select class="ctl" id="s_live_stream_method"><option value="yt-dlp">yt-dlp（默认）</option></select><svg class="ico s14 cv"><use href="#i-chevron"></use></svg></span></div>
-              <div class="row"><span class="lb">直播模式</span><span class="sel"><select class="ctl" id="s_live_mode"><option value="auto">自动（推荐）</option><option value="catch_up">追开播（条件）</option><option value="live_edge">从当前时刻</option><option value="wait">蹲开播（开播后自动录制）</option></select><svg class="ico s14 cv"><use href="#i-chevron"></use></svg></span></div>
-              <div class="row"><span class="lb">嵌入元数据</span><span class="sw on" id="sw_meta" onclick="toggleSwitch(this)"><i></i></span></div>
-              <div class="row"><span class="lb">下载封面</span><span class="sw on" id="sw_thumb" onclick="toggleSwitch(this)"><i></i></span></div>
-            </div>
-
-            <div class="sect">
+            <section class="settings-section" id="set-filename">
               <div class="sh"><b>文件名</b><span class="rule"></span></div>
               <div class="row"><span class="lb">Win 兼容命名</span><span class="sw on" id="sw_winfn" onclick="toggleSwitch(this)"><i></i></span><span class="hint">去掉 Windows 不允许的字符</span></div>
               <div class="row"><span class="lb">严格文件名</span><span class="sw" id="sw_strict" onclick="toggleSwitch(this)"><i></i></span><span class="hint">仅保留 ASCII 与数字</span></div>
-            </div>
+            </section>
 
-            <div class="sect">
+            <section class="settings-section" id="set-platform">
               <div class="sh"><b>平台专项</b><span class="rule"></span></div>
               <div class="row"><span class="lb">B站多 P 策略</span><span class="sel"><select class="ctl" id="s_bili_policy"><option value="all">全部下载</option><option value="select">弹出选择</option></select><svg class="ico s14 cv"><use href="#i-chevron"></use></svg></span></div>
               <div class="row"><span class="lb">YouTube PO Token</span><span class="sw" id="sw_youtube_po_token" onclick="toggleSwitch(this)"><i></i></span><span class="hint">下载前自动启动本地 BgUtils Provider，缓解部分 403</span></div>
               <div class="row"><span class="lb">Niconico 弹幕</span><span class="sw" id="sw_nicocmt" onclick="toggleSwitch(this)"><i></i></span><span class="hint">下载并保存 XML 弹幕</span></div>
               <div class="row"><span class="lb">Niconico 重编码</span><span class="sw" id="sw_nicorec" onclick="toggleSwitch(this)"><i></i></span><span class="hint">兼容性优先，速度较慢</span></div>
-            </div>
+            </section>
 
-            <div class="sect">
-              <div class="sh"><b>高级参数</b><span class="rule"></span></div>
+            <section class="settings-section" id="set-advanced">
+              <div class="sh"><b>高级与诊断</b><span class="rule"></span></div>
               <div class="row args-setting-row"><span class="lb">默认 yt-dlp 参数</span><textarea class="ctl mono" id="s_ytdlp_default_args" maxlength="4000" rows="3" spellcheck="false" placeholder='每次下载都会添加，例如：--sleep-requests 1'></textarea></div>
               <div class="hint">参数使用空格分隔；含空格的值请用英文引号包裹。本次参数会追加在默认参数之后。</div>
-            </div>
-
-            <div class="sect">
-              <div class="sh"><b>诊断</b><span class="rule"></span></div>
               <div class="row"><span class="lb">运行日志</span><span class="sw on" id="sw_log" onclick="toggleSwitch(this)"><i></i></span><span class="hint">写入 logs/ 目录</span></div>
-            </div>
-
+            </section>
           </div>
         </div>
       </div>
@@ -488,7 +501,7 @@
 
           <div class="dsec">
             <h3><svg class="ico s14"><use href="#i-radio"></use></svg>直播录制</h3>
-            <p><b>直播模式：</b>在「设置 → 直播模式」选择自动/追开播/从当前/蹲开播。自动模式：YouTube/Twitch 尝试追开播（受 DVR/VOD 条件限制），其他平台默认从当前时刻。蹲开播会把固定直播间/频道或单场事件加入等待列表，开播后自动开始录制。</p>
+            <p><b>直播模式：</b>在「设置 → 直播设置」选择全局模式，并可分别设置支持追开播的平台默认方式。开始直播任务前会检查状态：未开播可加入蹲开播；已开播会显示开播时间和已开播时长，并让你确认录制方式；追开播不可用时会提示原因并降级为从当前时刻。</p>
             <p><b>Bilibili：</b>粘贴 <span class="code">live.bilibili.com/房间号</span>，默认从当前时刻录制；普通观看侧无 DVR，不支持追开播。</p>
             <p><b>Twitch：</b>粘贴频道 URL 录制当前直播；仅当本场有可访问的增长中 VOD 时才可能追开播。<span class="code">/videos/</span> 链接是回放。</p>
             <p><b>TwitCasting：</b>主播页默认从当前时刻录制；<span class="code">/movie/ID</span> 下载单条，<span class="code">/show</span> 拉取历史列表。密码保护内容会弹窗要求输入密码。</p>
@@ -669,6 +682,30 @@
     <div class="dfoot">
       <button class="btn" onclick="closeTcPasswordPrompt()">取消</button>
       <button class="btn pri" id="btnTcPasswordConfirm" onclick="confirmTcPassword()">确认下载</button>
+    </div>
+  </div>
+</div>
+
+<!-- ====== 直播任务提醒 ====== -->
+<div class="scrim" id="liveNoticeOverlay">
+  <div class="dlg" style="width:520px" role="dialog" aria-modal="true" aria-labelledby="liveNoticeTitle">
+    <div class="dhead">
+      <svg class="ico s18"><use href="#i-radio"></use></svg><b id="liveNoticeTitle">直播任务</b>
+      <button class="btn sm gh" onclick="resolveLiveNotice(false)" aria-label="取消"><svg class="ico s14"><use href="#i-x"></use></svg></button>
+    </div>
+    <div class="dbody">
+      <p class="notice" id="liveNoticeSummary"></p>
+      <p class="mono dim" id="liveNoticeMeta" style="overflow-wrap:anywhere"></p>
+      <div class="row" id="liveNoticeModeRow">
+        <span class="lb">录制方式</span>
+        <span class="sel"><select class="ctl" id="liveNoticeMode" onchange="onLiveNoticeModeChange()"></select><svg class="ico s14 cv"><use href="#i-chevron"></use></svg></span>
+      </div>
+      <p class="notice" id="liveNoticeWarning" style="display:none"></p>
+      <label class="row" style="cursor:pointer"><input type="checkbox" id="liveNoticeMute" style="width:15px;height:15px"><span class="hint">此类提醒不再弹出</span></label>
+    </div>
+    <div class="dfoot">
+      <button class="btn" id="btnLiveNoticeCancel" onclick="resolveLiveNotice(false)">取消</button>
+      <button class="btn pri" id="btnLiveNoticeConfirm" onclick="confirmLiveNotice()">继续</button>
     </div>
   </div>
 </div>

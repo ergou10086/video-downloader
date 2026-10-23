@@ -47,6 +47,7 @@ DEFAULT_CONFIG = {
     "NICO_RECODE": 0,
     "LIVE_STREAM_METHOD": "yt-dlp",
     "LIVE_MODE": "auto",
+    "LIVE_PLATFORM_MODES": "{}",
     "LIVE_DOWNLOAD_TIMEOUT": 0,
     "ENABLE_LOG": 1,
     "MP3_BITRATE": 320,

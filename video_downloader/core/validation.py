@@ -30,6 +30,7 @@ _ERROR_REASONS = {
     "BILI_MULTIP_POLICY": "B站多P策略选项无效",
     "LIVE_STREAM_METHOD": "直播下载方式仅支持 yt-dlp",
     "LIVE_MODE": "直播模式仅支持 auto/catch_up/live_edge/wait",
+    "LIVE_PLATFORM_MODES": "平台直播设置为 JSON，长度不能超过 2000 字符",
     "AUDIO_MODE": "音频模式选项无效",
     "AUDIO_FORMAT": "音频格式选项无效",
     "THREADS": "线程数需在 1-32 之间",
@@ -138,6 +139,14 @@ def validate_config(values, base=None):
             elif key == "YTDLP_DEFAULT_ARGS":
                 value = str(value).strip()
                 if len(value) > 4000:
+                    raise ValueError
+            elif key == "LIVE_PLATFORM_MODES":
+                import json
+                value = str(value).strip() or "{}"
+                if len(value) > 2000:
+                    raise ValueError
+                parsed = json.loads(value)
+                if not isinstance(parsed, dict):
                     raise ValueError
             else:
                 value = str(value).strip()

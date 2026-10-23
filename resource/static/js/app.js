@@ -12,6 +12,11 @@ let download_running = false;
 let downloadGeneration = null;
 let activeTaskYtdlpArgs = "";
 let liveWatchJobs = [];
+let livePlatformModes = {};
+let liveCapabilities = null;
+let liveNoticeResolver = null;
+let liveNoticeKind = "";
+const LIVE_NOTICE_MUTE_KEY = 'video-dl-live-notice-muted';
 const SESSION_TOKEN = window.SESSION_TOKEN || "";
 
 const PLATFORMS = [
@@ -171,6 +176,8 @@ function init() {
   loadDeps();
   connectSSE();
   loadLiveWatch();
+  initSettingsToc();
+  loadLiveCapabilities();
 
   // 页面关闭前提示用户下载仍在进行中
   window.addEventListener('beforeunload', (e) => {
@@ -189,6 +196,7 @@ function init() {
  */
 function fillSelect(id, opts) {
   const s = $(id);
+  s.innerHTML = '';
   opts.forEach(([v,l]) => { const o=document.createElement('option');o.value=v;o.textContent=l;s.appendChild(o); });
 }
 
@@ -298,6 +306,11 @@ function applyConfig(s) {
   $('s_hwaccel').value = s.HWACCEL;
   if(s.LIVE_STREAM_METHOD !== undefined) $('s_live_stream_method').value = s.LIVE_STREAM_METHOD;
   if(s.LIVE_MODE !== undefined) $('s_live_mode').value = s.LIVE_MODE;
+  if(s.LIVE_PLATFORM_MODES !== undefined) {
+    livePlatformModes = parseLivePlatformModes(s.LIVE_PLATFORM_MODES);
+    renderLivePlatformModes();
+  }
+  if(s.LIVE_DOWNLOAD_TIMEOUT !== undefined) $('s_live_timeout').value = s.LIVE_DOWNLOAD_TIMEOUT || 0;
   setSwitch('sw_meta', s.EMBED_META);
   setSwitch('sw_thumb', s.DOWNLOAD_THUMB);
   setSwitch('sw_subtitles', s.DOWNLOAD_SUBTITLES);
@@ -385,6 +398,101 @@ function onBrowserChanged() {
 }
 
 
+function parseLivePlatformModes(value) {
+  if(value && typeof value === 'object') return value;
+  try {
+    const parsed = JSON.parse(value || '{}');
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch(e) { return {}; }
+}
+
+function renderLivePlatformModes() {
+  const host = $('livePlatformModes');
+  if(!host) return;
+  const caps = liveCapabilities || {
+    YouTube: {catch_up:'supported', live_edge:true},
+    Twitch: {catch_up:'supported', live_edge:true}
+  };
+  const rows = Object.entries(caps).filter(([, c]) =>
+    c && c.catch_up === 'supported' && c.live_edge
+  );
+  if(!rows.length) {
+    host.innerHTML = '<div class="live-platform-empty">当前没有同时支持追开播和当前录制的平台</div>';
+    return;
+  }
+  host.innerHTML = rows.map(([name]) => `
+    <label class="live-platform-row">
+      <span class="lb">${name}</span>
+      <span class="sel"><select class="ctl" data-live-platform="${name}">
+        <option value="auto">自动（条件允许时追开播）</option>
+        <option value="catch_up">追开播</option>
+        <option value="live_edge">从当前时刻</option>
+      </select><svg class="ico s14 cv"><use href="#i-chevron"></use></svg></span>
+    </label>`).join('');
+  host.querySelectorAll('select[data-live-platform]').forEach(select => {
+    select.value = livePlatformModes[select.dataset.livePlatform] || 'auto';
+  });
+}
+
+async function loadLiveCapabilities() {
+  try {
+    const r = await api('/api/live/capabilities');
+    if(r && r.platforms) {
+      liveCapabilities = r.platforms;
+      renderLivePlatformModes();
+    }
+  } catch(e) { /* 使用静态兜底 */ }
+}
+
+function collectLivePlatformModes() {
+  const result = {};
+  document.querySelectorAll('#livePlatformModes select[data-live-platform]').forEach(select => {
+    result[select.dataset.livePlatform] = select.value;
+  });
+  return result;
+}
+
+function initSettingsToc() {
+  const toc = $('settingsToc');
+  if(!toc) return;
+  const items = Array.from(toc.querySelectorAll('.settings-toc-item'));
+  const sections = items.map(item => $(item.dataset.target)).filter(Boolean);
+  const setActive = target => {
+    items.forEach(item => item.classList.toggle('on', item.dataset.target === target));
+  };
+  items.forEach(item => {
+    item.onclick = () => {
+      const target = $(item.dataset.target);
+      if(!target) return;
+      setActive(item.dataset.target);
+      target.scrollIntoView({behavior:'smooth', block:'start'});
+    };
+  });
+  try {
+    if(localStorage.getItem('video-dl-settings-toc-collapsed') === '1') {
+      toc.classList.add('collapsed');
+    }
+  } catch(e) {}
+  const toggle = $('settingsTocToggle');
+  if(toggle) {
+    toggle.onclick = () => {
+      toc.classList.toggle('collapsed');
+      try {
+        localStorage.setItem('video-dl-settings-toc-collapsed', toc.classList.contains('collapsed') ? '1' : '0');
+      } catch(e) {}
+    };
+  }
+  // 页面自身就是滚动容器，用 IntersectionObserver 更新当前章节。
+  if('IntersectionObserver' in window) {
+    const observer = new IntersectionObserver(entries => {
+      const visible = entries.filter(entry => entry.isIntersecting)
+        .sort((a, b) => b.intersectionRatio - a.intersectionRatio)[0];
+      if(visible) setActive(visible.target.id);
+    }, {root: document.querySelector('.pad'), threshold:[0.15, 0.4, 0.7]});
+    sections.forEach(section => observer.observe(section));
+  }
+}
+
 /** 从设置表单中收集当前全部配置项。 */
 function collectCfg() {
   return {
@@ -408,6 +516,8 @@ function collectCfg() {
     HWACCEL: $('s_hwaccel').value,
     LIVE_STREAM_METHOD: $('s_live_stream_method').value,
     LIVE_MODE: $('s_live_mode').value,
+    LIVE_PLATFORM_MODES: JSON.stringify(collectLivePlatformModes()),
+    LIVE_DOWNLOAD_TIMEOUT: parseInt($('s_live_timeout').value) || 0,
     EMBED_META: isOn('sw_meta')?1:0,
     DOWNLOAD_THUMB: isOn('sw_thumb')?1:0,
     DOWNLOAD_SUBTITLES: isOn('sw_subtitles')?1:0,
@@ -621,7 +731,10 @@ function clearStartedTaskArgs(value) {
 }
 
 async function doStartDl(url, biliParts, tcPassword, customArgs) {
+  const liveMode = await prepareLiveTask(url);
+  if(liveMode === false) return;
   const body = {url};
+  if(liveMode) body.live_mode = liveMode;
   if(biliParts) body.bili_parts = biliParts;
   if(tcPassword) body.tc_password = tcPassword;
   const taskArgs = customArgs === undefined ? activeTaskYtdlpArgs : customArgs;
@@ -1013,6 +1126,198 @@ async function cancelLiveWatch(jobId) {
     showToast('已取消等待', 'success');
     loadLiveWatch();
   } catch(e) { showToast('取消等待失败: ' + e.message, 'error'); }
+}
+
+// ========== 直播任务检查与提醒 ==========
+function getMutedLiveNotices() {
+  try { return JSON.parse(localStorage.getItem(LIVE_NOTICE_MUTE_KEY) || '{}') || {}; }
+  catch(e) { return {}; }
+}
+
+function isLiveNoticeMuted(kind) {
+  return Boolean(getMutedLiveNotices()[kind]);
+}
+
+function setLiveNoticeMuted(kind) {
+  try {
+    const muted = getMutedLiveNotices();
+    muted[kind] = true;
+    localStorage.setItem(LIVE_NOTICE_MUTE_KEY, JSON.stringify(muted));
+  } catch(e) {}
+}
+
+function clearLiveNoticeMutes() {
+  try { localStorage.removeItem(LIVE_NOTICE_MUTE_KEY); } catch(e) {}
+  showToast('已恢复全部直播提醒', 'success');
+}
+
+function formatLiveDateTime(ts) {
+  if(!ts) return '';
+  return new Date(ts * 1000).toLocaleString('zh-CN', {hour12:false});
+}
+
+function formatLiveElapsed(seconds) {
+  if(seconds == null) return '';
+  const s = Math.max(0, Math.floor(seconds));
+  const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = s % 60;
+  return h > 0 ? `${h} 小时 ${m} 分` : (m > 0 ? `${m} 分 ${sec} 秒` : `${sec} 秒`);
+}
+
+/** 只有明显的直播入口才做探测；否则普通 VOD 不走直播检查。 */
+function isLiveCandidateUrl(url) {
+  try {
+    const u = new URL(url);
+    const host = u.hostname.toLowerCase();
+    const path = u.pathname.toLowerCase();
+    const segs = path.split('/').filter(Boolean);
+    if(host === 'live.bilibili.com' || host.endsWith('.live.bilibili.com')) return true;
+    if(host === 'b23.tv' || host.endsWith('.b23.tv')) return true;
+    if(host.includes('youtube.com') && (path.endsWith('/live') || path.startsWith('/live/'))) return true;
+    if(host.includes('twitch.tv') && segs.length === 1 && !['videos','clips','directory'].includes(segs[0])) return true;
+    if(host.includes('live.nicovideo.jp')) return true;
+    if(host.includes('nicochannel.jp') && segs.length >= 3 && segs[1] === 'live') return true;
+    if(host.includes('twitcasting.tv') && (segs.length === 1 || (segs.length >= 3 && segs[1] === 'movie'))) return true;
+    if((host.includes('x.com') || host.includes('twitter.com')) && path.startsWith('/i/spaces/')) return true;
+  } catch(e) {}
+  return $('s_live_mode') && $('s_live_mode').value === 'wait';
+}
+
+function closeLiveNotice() {
+  const overlay = $('liveNoticeOverlay');
+  if(overlay) overlay.classList.remove('show');
+}
+
+function resolveLiveNotice(value) {
+  const resolver = liveNoticeResolver;
+  const kind = liveNoticeKind;
+  if($('liveNoticeMute') && $('liveNoticeMute').checked && kind) setLiveNoticeMuted(kind);
+  liveNoticeResolver = null;
+  liveNoticeKind = "";
+  closeLiveNotice();
+  if(resolver) resolver(value);
+}
+
+function onLiveNoticeModeChange() {
+  const select = $('liveNoticeMode');
+  const warning = $('liveNoticeWarning');
+  if(!select || !warning) return;
+  const option = select.options[select.selectedIndex];
+  warning.style.display = option && option.dataset.reason ? '' : 'none';
+  if(option && option.dataset.reason) warning.textContent = option.dataset.reason;
+}
+
+function confirmLiveNotice() {
+  const kind = liveNoticeKind;
+  if($('liveNoticeMute') && $('liveNoticeMute').checked && kind) setLiveNoticeMuted(kind);
+  let value = false;
+  if(kind === 'wait_offer') value = 'wait';
+  else if(kind === 'live_started') value = $('liveNoticeMode').value || 'auto';
+  resolveLiveNotice(value);
+}
+
+/** 显示一次直播提醒；返回选择结果（wait/模式名/false）。 */
+function showLiveNotice(opts) {
+  return new Promise(resolve => {
+    liveNoticeResolver = resolve;
+    liveNoticeKind = opts.kind || '';
+    $('liveNoticeTitle').textContent = opts.title || '直播任务';
+    $('liveNoticeSummary').textContent = opts.summary || '';
+    $('liveNoticeMeta').textContent = opts.meta || '';
+    const modeRow = $('liveNoticeModeRow');
+    const modeSelect = $('liveNoticeMode');
+    const warning = $('liveNoticeWarning');
+    const modes = (opts.modes || []).filter(mode => mode.available);
+    if(modes.length) {
+      modeRow.style.display = '';
+      modeSelect.innerHTML = modes.map(mode =>
+        `<option value="${mode.value}" data-reason="${(mode.reason || '').replace(/"/g, '&quot;')}">${mode.label}</option>`
+      ).join('');
+      const preferred = modes.some(mode => mode.value === opts.recommended)
+        ? opts.recommended : modes[0].value;
+      modeSelect.value = preferred;
+      onLiveNoticeModeChange();
+    } else {
+      modeRow.style.display = 'none';
+      modeSelect.innerHTML = '';
+    }
+    warning.style.display = opts.warning ? '' : 'none';
+    warning.textContent = opts.warning || '';
+    $('liveNoticeMute').checked = isLiveNoticeMuted(opts.kind);
+    $('btnLiveNoticeConfirm').textContent = opts.confirmLabel || '继续';
+    $('liveNoticeOverlay').classList.add('show');
+  });
+}
+
+/** 任务开始前检查；返回 null=普通下载，false=取消，字符串=要使用的直播模式。 */
+async function prepareLiveTask(url) {
+  const selectedMode = ($('s_live_mode') && $('s_live_mode').value) || 'auto';
+  if(!isLiveCandidateUrl(url) && selectedMode !== 'wait') return null;
+  let data;
+  try {
+    data = await api('/api/live/inspect', {method:'POST', body:JSON.stringify({url, live_mode:selectedMode})});
+  } catch(e) {
+    showToast('直播状态检查失败: ' + e.message, 'error');
+    return false;
+  }
+  if(!data.is_live_target) return null;
+  if(data.status === 'ended') {
+    showToast('直播已结束，将按普通视频下载', 'warn');
+    return null;
+  }
+  if(data.error) {
+    if(isLiveNoticeMuted('live_error')) { showToast(data.error, 'error'); return false; }
+    await showLiveNotice({
+      kind: 'live_error', title: '无法开始直播任务',
+      summary: data.error, meta: data.platform ? `平台：${data.platform}` : '',
+      confirmLabel: '知道了'
+    });
+    return false;
+  }
+  const title = `${data.platform || ''} · ${data.title || url}`;
+  if(data.status === 'offline' || data.status === 'upcoming') {
+    if(!data.can_wait) {
+      const message = `直播尚未开始，且该平台不支持蹲开播${data.wait_reason ? '：' + data.wait_reason : ''}`;
+      if(isLiveNoticeMuted('live_error')) { showToast(message, 'error'); return false; }
+      await showLiveNotice({
+        kind: 'live_error', title: '暂不能开始录制',
+        summary: message, meta: title, confirmLabel: '知道了'
+      });
+      return false;
+    }
+    if(isLiveNoticeMuted('wait_offer')) return 'wait';
+    const scheduled = data.scheduled_start ? `预约开始：${formatLiveDateTime(data.scheduled_start)}` : '';
+    const choice = await showLiveNotice({
+      kind: 'wait_offer', title: '直播尚未开始',
+      summary: '是否以蹲开播方式等待？开播后将自动开始录制。',
+      meta: [title, scheduled].filter(Boolean).join(' · '),
+      confirmLabel: '蹲开播'
+    });
+    return choice === 'wait' ? 'wait' : false;
+  }
+  if(data.status === 'live') {
+    if(isLiveNoticeMuted('live_started')) {
+      return data.recommended_mode || data.effective_mode || 'auto';
+    }
+    const started = data.started_at ? `开播于 ${formatLiveDateTime(data.started_at)}` : '已开播';
+    const elapsed = data.live_duration_seconds != null ? ` · 已开播 ${formatLiveElapsed(data.live_duration_seconds)}` : '';
+    const choice = await showLiveNotice({
+      kind: 'live_started', title: '直播已开始',
+      summary: '请选择本次录制方式。',
+      meta: `${title} · ${started}${elapsed}`,
+      modes: data.modes || [],
+      recommended: data.recommended_mode || data.effective_mode || 'auto',
+      warning: data.warning || '',
+      confirmLabel: '开始录制'
+    });
+    return choice || false;
+  }
+  const message = data.error || `无法确认直播状态（${data.status || 'unknown'}）`;
+  if(isLiveNoticeMuted('live_error')) { showToast(message, 'error'); return false; }
+  await showLiveNotice({
+    kind: 'live_error', title: '无法开始直播任务',
+    summary: message, meta: title, confirmLabel: '知道了'
+  });
+  return false;
 }
 
 // ========== SSE ==========

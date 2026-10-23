@@ -14,6 +14,7 @@ from video_downloader.core.platform import clean_url, detect_platform, is_live_u
 from video_downloader.core.paths import AppPaths
 from video_downloader.core.subtitles import classify_subtitle_result
 from video_downloader.live import LiveModeError, decide_live
+from video_downloader.live.preferences import resolve_platform_mode
 from video_downloader.services.download_archive import archived_video_id, forget_archived_videos, redownload_command
 from video_downloader.services.withny_archive import WithnyArchiveError, build_ffmpeg_command, load_and_select, redact_line
 
@@ -399,7 +400,11 @@ class DownloadExecutor:
             self._log(f"[提示] 未识别平台，使用: {config_snapshot['PLATFORM']}", "warn")
 
         is_live_download = is_live_url(url, detected)
-        requested_live_mode = live_mode if live_mode is not None else config_snapshot.get("LIVE_MODE", "auto")
+        requested_live_mode = live_mode if live_mode is not None else resolve_platform_mode(
+            effective_platform,
+            config_snapshot.get("LIVE_MODE", "auto"),
+            config_snapshot.get("LIVE_PLATFORM_MODES", "{}"),
+        )
         try:
             live_decision = decide_live(effective_platform, requested_live_mode, is_live_download)
         except LiveModeError as exc:
@@ -1329,7 +1334,7 @@ class DownloadExecutor:
         if missing:
             return {"error": f"缺少依赖: {missing}"}
         config_snapshot = self._app_state.config_snapshot()
-        requested_live_mode = live_mode if live_mode is not None else config_snapshot.get("LIVE_MODE", "auto")
+        requested_live_mode = live_mode
         custom_args_error = self._validate_custom_args(config_snapshot, custom_args)
         if custom_args_error:
             return {"error": custom_args_error}
@@ -1393,10 +1398,17 @@ class DownloadExecutor:
                 else:
                     self._log(f"[{index}/{len(urls)}] 未识别平台，使用: {config_snapshot['PLATFORM']}", "warn")
                 self._log(f"[{index}/{len(urls)}] 下载: {url}", "info")
+                requested_for_url = requested_live_mode
+                if requested_for_url is None:
+                    requested_for_url = resolve_platform_mode(
+                        effective_platform,
+                        config_snapshot.get("LIVE_MODE", "auto"),
+                        config_snapshot.get("LIVE_PLATFORM_MODES", "{}"),
+                    )
                 try:
                     live_decision = decide_live(
                         effective_platform,
-                        requested_live_mode,
+                        requested_for_url,
                         is_live_url(url, detected),
                     )
                 except LiveModeError as exc:

@@ -19,6 +19,9 @@ from .core.constants import DEFAULT_CONFIG, IDLE_TIMEOUT, VERSION
 from .core.command import build_ytdlp_cmd as _build_ytdlp_cmd
 from .core.paths import AppPaths
 from .core.platform import detect_platform, is_live_url
+from .live.inspect import LiveInspector
+from .live.modes import CAPABILITIES
+from .live.preferences import resolve_platform_mode
 from .live.probe import ProbeService
 from .live.wait import LiveWatchService, WatchJobStore
 from .state.app_state import AppState
@@ -272,6 +275,7 @@ class AppContainer:
         watch_store = WatchJobStore(
             self._paths.download_dir / ".live-jobs" / "jobs.sqlite",
         )
+        live_inspector = LiveInspector(probe_service)
 
         def on_live_watch(job, probe) -> dict:
             add_log(
@@ -293,17 +297,45 @@ class AppContainer:
                            tc_password: str | None = None,
                            custom_args: str | None = None,
                            live_mode: str | None = None) -> dict:
-            requested = live_mode if live_mode is not None else app_state.config_snapshot().get("LIVE_MODE", "auto")
+            config = app_state.config_snapshot()
+            platform = detect_platform(url) or config.get("PLATFORM", "")
+            requested = live_mode if live_mode is not None else resolve_platform_mode(
+                platform, config.get("LIVE_MODE", "auto"), config.get("LIVE_PLATFORM_MODES", "{}"),
+            )
             requested_value = str(getattr(requested, "value", requested)).lower()
             if requested_value == "wait":
-                return live_watch_service.add(url)
+                record_mode = resolve_platform_mode(
+                    platform, "auto", config.get("LIVE_PLATFORM_MODES", "{}"),
+                )
+                if record_mode == "wait":
+                    record_mode = "auto"
+                return live_watch_service.add(url, record_mode=record_mode)
             return download_executor.start_download(
                 url,
                 bili_parts=bili_parts,
                 tc_password=tc_password,
                 custom_args=custom_args,
-                live_mode=live_mode,
+                live_mode=requested,
             )
+
+        def inspect_live_url(url: str, live_mode: str | None = None) -> dict:
+            config = app_state.config_snapshot()
+            platform = detect_platform(url) or config.get("PLATFORM", "")
+            requested = live_mode if live_mode is not None else resolve_platform_mode(
+                platform, config.get("LIVE_MODE", "auto"), config.get("LIVE_PLATFORM_MODES", "{}"),
+            )
+            return live_inspector.inspect(url, requested_mode=requested)
+
+        def live_capabilities() -> dict:
+            return {
+                name: {
+                    "catch_up": capability.catch_up.value,
+                    "catch_up_reason": capability.catch_up_reason,
+                    "live_edge": capability.live_edge,
+                    "wait": capability.wait,
+                }
+                for name, capability in CAPABILITIES.items()
+            }
 
         def submit_password(url: str, password: str) -> dict:
             return download_executor.submit_password(url, password)
@@ -403,6 +435,8 @@ class AppContainer:
                 start_download=start_download,
                 list_live_watch_jobs=list_live_watch_jobs,
                 cancel_live_watch=cancel_live_watch,
+                inspect_live_url=inspect_live_url,
+                live_capabilities=live_capabilities,
                 start_withny_archive=start_withny_archive,
                 start_withny_live=start_withny_live,
                 batch_txt_download=batch_txt_download,
