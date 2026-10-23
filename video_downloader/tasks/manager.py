@@ -141,6 +141,27 @@ class TaskManager:
             self._broadcast()
         return {"ok": True, "removed": len(removable)}
 
+    def submit_password(self, task_id: str, url: str, password: str) -> dict:
+        """把密码确认路由到对应任务执行器（并行任务不能共用全局执行器）。"""
+        with self._lock:
+            runtime = self._runtimes.get(task_id)
+        if not runtime:
+            return {"error": "任务已结束或不支持密码确认"}
+        try:
+            return runtime["executor"].submit_password(url, password)
+        except Exception as exc:
+            return {"error": str(exc)}
+
+    def submit_archive_choice(self, task_id: str, request_id: str, redownload: bool) -> dict:
+        with self._lock:
+            runtime = self._runtimes.get(task_id)
+        if not runtime:
+            return {"error": "任务已结束或不支持归档确认"}
+        try:
+            return runtime["executor"].submit_archive_choice(request_id, redownload)
+        except Exception as exc:
+            return {"error": str(exc)}
+
     def cancel(self, task_id: str) -> dict:
         with self._lock:
             task = self._tasks.get(task_id)

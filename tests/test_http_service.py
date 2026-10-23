@@ -76,7 +76,9 @@ def make_dependencies(exit_event):
         stop_download=value,
         get_current_command=lambda: {"ok": True, "command": "yt-dlp https://example.com"},
         submit_password=lambda url, password: {"ok": True},
+        submit_task_password=lambda task_id, url, password: {"ok": True, "task_id": task_id},
         submit_archive_choice=lambda request_id, redownload: {"request_id": request_id, "redownload": redownload},
+        submit_task_archive_choice=lambda task_id, request_id, redownload: {"ok": True, "task_id": task_id},
         fetch_bili_playlist=lambda url: {"parts": [], "total": 0},
         save_preset=named_value,
         load_preset=named_value,
@@ -241,6 +243,20 @@ class HttpServiceTests(unittest.TestCase):
         self.assertEqual(json.loads(body)["id"], "t1")
         status, body, _ = self.request("/api/tasks/clear", method="POST", payload={})
         self.assertEqual(status, 200)
+
+    def test_task_prompt_routing(self):
+        status, body, _ = self.request(
+            "/api/submit-password", method="POST",
+            payload={"url": "https://example.com", "password": "pw", "task_id": "t1"},
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(json.loads(body)["task_id"], "t1")
+        status, body, _ = self.request(
+            "/api/archive-choice", method="POST",
+            payload={"request_id": "r1", "redownload": True, "task_id": "t1"},
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(json.loads(body)["task_id"], "t1")
 
     def test_live_inspect_and_capabilities_routes(self):
         status, body, _ = self.request("/api/live/inspect", method="POST", payload={"url": "https://example.com"})

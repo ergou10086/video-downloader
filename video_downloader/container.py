@@ -414,6 +414,12 @@ class AppContainer:
         def clear_tasks() -> dict:
             return task_manager.clear_finished()
 
+        def submit_task_password(task_id: str, url: str, password: str) -> dict:
+            return task_manager.submit_password(task_id, url, password)
+
+        def submit_task_archive_choice(task_id: str, request_id: str, redownload: bool) -> dict:
+            return task_manager.submit_archive_choice(task_id, request_id, redownload)
+
         def get_current_command() -> dict:
             return download_executor.get_current_ytdlp_command()
 
@@ -527,7 +533,9 @@ class AppContainer:
                 stop_download=stop_download,
                 get_current_command=get_current_command,
                 submit_password=submit_password,
+                submit_task_password=submit_task_password,
                 submit_archive_choice=download_executor.submit_archive_choice,
+                submit_task_archive_choice=submit_task_archive_choice,
                 fetch_bili_playlist=fetch_bili_playlist,
                 save_preset=save_preset,
                 load_preset=load_preset,

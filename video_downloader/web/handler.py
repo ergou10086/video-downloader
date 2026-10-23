@@ -44,7 +44,9 @@ class HttpHandlerDependencies:
     stop_download: object
     get_current_command: object
     submit_password: object
+    submit_task_password: object
     submit_archive_choice: object
+    submit_task_archive_choice: object
     fetch_bili_playlist: object
     save_preset: object
     load_preset: object
@@ -294,7 +296,14 @@ def create_handler(dependencies):
                 if not request_id or not isinstance(redownload, bool):
                     self._json({"error": "归档确认需要 request_id 和布尔值 redownload"}, status=400)
                     return
-                self._json(dependencies.submit_archive_choice(request_id, redownload))
+                task_id = data.get("task_id")
+                if task_id is not None and not isinstance(task_id, str):
+                    self._json({"error": "字段 task_id 类型错误"}, status=400)
+                    return
+                if task_id:
+                    self._json(dependencies.submit_task_archive_choice(task_id, request_id, redownload))
+                else:
+                    self._json(dependencies.submit_archive_choice(request_id, redownload))
             elif path == "/api/submit-password":
                 url = self._field(data, "url", str, "")
                 if url is None:
@@ -305,7 +314,14 @@ def create_handler(dependencies):
                 if not password.strip():
                     self._json({"error": "密码不能为空"}, status=400)
                     return
-                self._json(dependencies.submit_password(url, password))
+                task_id = data.get("task_id")
+                if task_id is not None and not isinstance(task_id, str):
+                    self._json({"error": "字段 task_id 类型错误"}, status=400)
+                    return
+                if task_id:
+                    self._json(dependencies.submit_task_password(task_id, url, password))
+                else:
+                    self._json(dependencies.submit_password(url, password))
             elif path == "/api/start-urls":
                 urls = self._field(data, "urls", list, [])
                 if urls is None:

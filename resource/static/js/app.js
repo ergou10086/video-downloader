@@ -1495,6 +1495,7 @@ function connectSSE() {
       if(d.total !== undefined) setStatValue('statTotal', d.total);
       updateStatsVisibility();
     } else if(evt.type === 'archive_choice_required') {
+      if(evt.task_id && evt.data) evt.data.task_id = evt.task_id;
       showArchiveChoice(evt.data);
     } else if(evt.type === 'archive_choice_closed') {
       closeArchiveChoice(evt.data.request_id);
@@ -1503,6 +1504,7 @@ function connectSSE() {
       // 仅 TwitCasting 平台显示密码弹窗，其他平台忽略
       if(d.platform !== 'TwitCasting') return;
       pendingTcUrl = d.url;
+      pendingTcTaskId = evt.task_id || '';
       showTcPasswordPrompt(d.reason === 'retry');
     } else if(evt.type === 'history') {
       if(evt.data && evt.data.length && !$('page-history').classList.contains('active')) setHistoryDot(true);
@@ -1827,6 +1829,7 @@ async function doUpdateNow() {
 // ========== Bilibili 分P 选择 ==========
 let pendingPartCallback = null;
 let pendingTcUrl = null;
+let pendingTcTaskId = '';
 
 function showPartSelector(parts) {
   const list = $('partList');
@@ -1921,7 +1924,8 @@ async function chooseArchiveRedownload(redownload) {
   $('btnArchiveRedownload').disabled = true;
   try {
     const result = await api('/api/archive-choice', {method:'POST', body:JSON.stringify({
-      request_id: choice.request_id, redownload
+      request_id: choice.request_id, redownload,
+      ...(choice.task_id ? {task_id: choice.task_id} : {})
     })});
     if(result.error) showToast(result.error, 'error');
     closeArchiveChoice(choice.request_id);
@@ -1954,17 +1958,21 @@ function showTcPasswordPrompt(isRetry) {
 function closeTcPasswordPrompt() {
   $('tcPasswordOverlay').classList.remove('show');
   pendingTcUrl = null;
+  pendingTcTaskId = '';
 }
 
 function confirmTcPassword() {
   const pw = $('tcPasswordInput').value.trim();
   if(!pw) { showToast('请输入密码', 'error'); return; }
   const url = pendingTcUrl;
+  const taskId = pendingTcTaskId;
   closeTcPasswordPrompt();
   if(!url) return;
-  // 批量下载运行中 → 提交密码到等待中的批量线程；否则启动新的单链接下载
-  if(download_running) {
-    api('/api/submit-password', {method:'POST', body:JSON.stringify({url: url, password: pw})});
+  // 批量下载/任务运行中 → 提交密码到等待中的执行器；否则启动新的单链接下载
+  if(download_running || taskId) {
+    api('/api/submit-password', {method:'POST', body:JSON.stringify({
+      url: url, password: pw, ...(taskId ? {task_id: taskId} : {})
+    })});
   } else {
     doStartDl(url, null, pw);
   }
