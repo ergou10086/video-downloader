@@ -56,6 +56,8 @@ def make_dependencies(exit_event):
             "url": url, **({"custom_args": custom_args} if custom_args else {}),
             **({"live_mode": live_mode} if live_mode else {}),
         },
+        list_live_watch_jobs=lambda: [],
+        cancel_live_watch=lambda job_id: {"ok": True, "id": job_id},
         start_withny_archive=lambda: {"ok": True, "kind": "withny-archive"},
         start_withny_live=lambda: {"ok": True, "kind": "withny-live"},
         batch_txt_download=lambda bili_parts_map=None, custom_args=None: {
@@ -216,6 +218,14 @@ class HttpServiceTests(unittest.TestCase):
         })
         self.assertEqual(status, 200)
         self.assertEqual(json.loads(body)["live_mode"], "live_edge")
+
+    def test_live_watch_routes(self):
+        status, body, _ = self.request("/api/live/watch-jobs")
+        self.assertEqual(status, 200)
+        self.assertEqual(json.loads(body), {"jobs": []})
+        status, body, _ = self.request("/api/live/watch-cancel", method="POST", payload={"id": "job-1"})
+        self.assertEqual(status, 200)
+        self.assertEqual(json.loads(body)["id"], "job-1")
 
     def test_start_rejects_oversized_custom_args(self):
         with self.assertRaises(HTTPError) as raised:

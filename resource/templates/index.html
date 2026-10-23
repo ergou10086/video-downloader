@@ -189,6 +189,11 @@
           </div>
         </div>
 
+        <div class="sect" id="liveWatchSect" style="display:none">
+          <div class="sh"><b>等待开播</b><span class="rule"></span><span class="note" id="liveWatchCount"></span></div>
+          <div id="liveWatchList"></div>
+        </div>
+
         <div class="console" id="logConsole">
           <div class="chead">
             <svg class="ico s14"><use href="#i-terminal"></use></svg>
@@ -273,7 +278,7 @@
               <div class="row"><span class="lb">硬件加速</span><span class="sel"><select class="ctl" id="s_hwaccel"></select><svg class="ico s14 cv"><use href="#i-chevron"></use></svg></span></div>
               <div class="row"><span class="lb">音频输出格式</span><span class="sel"><select class="ctl" id="s_audiofmt"></select><svg class="ico s14 cv"><use href="#i-chevron"></use></svg></span></div>
               <div class="row"><span class="lb">直播下载方式</span><span class="sel"><select class="ctl" id="s_live_stream_method"><option value="yt-dlp">yt-dlp（默认）</option></select><svg class="ico s14 cv"><use href="#i-chevron"></use></svg></span></div>
-              <div class="row"><span class="lb">直播模式</span><span class="sel"><select class="ctl" id="s_live_mode"><option value="auto">自动（推荐）</option><option value="catch_up">追开播（条件）</option><option value="live_edge">从当前时刻</option></select><svg class="ico s14 cv"><use href="#i-chevron"></use></svg></span></div>
+              <div class="row"><span class="lb">直播模式</span><span class="sel"><select class="ctl" id="s_live_mode"><option value="auto">自动（推荐）</option><option value="catch_up">追开播（条件）</option><option value="live_edge">从当前时刻</option><option value="wait">蹲开播（开播后自动录制）</option></select><svg class="ico s14 cv"><use href="#i-chevron"></use></svg></span></div>
               <div class="row"><span class="lb">嵌入元数据</span><span class="sw on" id="sw_meta" onclick="toggleSwitch(this)"><i></i></span></div>
               <div class="row"><span class="lb">下载封面</span><span class="sw on" id="sw_thumb" onclick="toggleSwitch(this)"><i></i></span></div>
             </div>
@@ -483,7 +488,7 @@
 
           <div class="dsec">
             <h3><svg class="ico s14"><use href="#i-radio"></use></svg>直播录制</h3>
-            <p><b>直播模式：</b>在「设置 → 直播模式」选择自动/追开播/从当前。自动模式：YouTube/Twitch 尝试追开播（受 DVR/VOD 条件限制），其他平台默认从当前时刻。</p>
+            <p><b>直播模式：</b>在「设置 → 直播模式」选择自动/追开播/从当前/蹲开播。自动模式：YouTube/Twitch 尝试追开播（受 DVR/VOD 条件限制），其他平台默认从当前时刻。蹲开播会把固定直播间/频道或单场事件加入等待列表，开播后自动开始录制。</p>
             <p><b>Bilibili：</b>粘贴 <span class="code">live.bilibili.com/房间号</span>，默认从当前时刻录制；普通观看侧无 DVR，不支持追开播。</p>
             <p><b>Twitch：</b>粘贴频道 URL 录制当前直播；仅当本场有可访问的增长中 VOD 时才可能追开播。<span class="code">/videos/</span> 链接是回放。</p>
             <p><b>TwitCasting：</b>主播页默认从当前时刻录制；<span class="code">/movie/ID</span> 下载单条，<span class="code">/show</span> 拉取历史列表。密码保护内容会弹窗要求输入密码。</p>

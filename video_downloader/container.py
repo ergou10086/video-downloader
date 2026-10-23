@@ -19,6 +19,8 @@ from .core.constants import DEFAULT_CONFIG, IDLE_TIMEOUT, VERSION
 from .core.command import build_ytdlp_cmd as _build_ytdlp_cmd
 from .core.paths import AppPaths
 from .core.platform import detect_platform, is_live_url
+from .live.probe import ProbeService
+from .live.wait import LiveWatchService, WatchJobStore
 from .state.app_state import AppState
 from .services.download_executor import DownloadExecutor
 from .services.nicochannel_auth import NicochannelAuthService
@@ -84,6 +86,7 @@ class AppContainer:
 
         # ---- 空闲计时器 ----
         idle_timer: threading.Timer | None = None
+        live_watch_service: LiveWatchService | None = None
 
         def cancel_idle_timer() -> None:
             nonlocal idle_timer
@@ -95,6 +98,8 @@ class AppContainer:
             nonlocal idle_timer
             cancel_idle_timer()
             if download_manager.snapshot()["running"] or app_state.has_sse_clients():
+                return
+            if live_watch_service is not None and live_watch_service.has_active_jobs():
                 return
 
             def do_idle_exit() -> None:
@@ -259,10 +264,39 @@ class AppContainer:
             ensure_po_token_provider=po_token_provider.ensure_running,
         )
 
+        # ---- 直播 WAIT 服务 ----
+        probe_service = ProbeService(
+            str(self._paths.executable("yt-dlp", exe_suffix)),
+            plugin_dirs=[str(path) for path in self._paths.plugin_dirs()],
+        )
+        watch_store = WatchJobStore(
+            self._paths.download_dir / ".live-jobs" / "jobs.sqlite",
+        )
+
+        def on_live_watch(job, probe) -> dict:
+            add_log(
+                f"[蹲开播] 检测到开播: {probe.platform} {job.url}，开始录制",
+                "success",
+            )
+            return download_executor.start_download(job.url, live_mode=job.record_mode)
+
+        live_watch_service = LiveWatchService(
+            store=watch_store,
+            probe_service=probe_service,
+            on_live=on_live_watch,
+            publish=app_state.publish,
+            max_wait_hours=72.0,
+            start_thread=False,
+        )
+
         def start_download(url: str, bili_parts: str | None = None,
                            tc_password: str | None = None,
                            custom_args: str | None = None,
                            live_mode: str | None = None) -> dict:
+            requested = live_mode if live_mode is not None else app_state.config_snapshot().get("LIVE_MODE", "auto")
+            requested_value = str(getattr(requested, "value", requested)).lower()
+            if requested_value == "wait":
+                return live_watch_service.add(url)
             return download_executor.start_download(
                 url,
                 bili_parts=bili_parts,
@@ -317,6 +351,8 @@ class AppContainer:
         def batch_txt_download(bili_parts_map: dict | None = None,
                                custom_args: str | None = None) -> dict:
             """从 urls.txt 批量下载（混合平台）。"""
+            if str(app_state.config_snapshot().get("LIVE_MODE", "auto")).lower() == "wait":
+                return {"error": "蹲开播仅支持单条链接，请逐条添加"}
             urls, err = read_urls_file()
             if err:
                 return {"error": err}
@@ -329,13 +365,22 @@ class AppContainer:
 
         def start_urls_download(urls: list, custom_args: str | None = None) -> dict:
             """从输入框的多行文本批量下载（每行一个链接）。"""
+            if str(app_state.config_snapshot().get("LIVE_MODE", "auto")).lower() == "wait":
+                return {"error": "蹲开播仅支持单条链接，请逐条添加"}
             save_config()
             return download_executor.batch_download(urls, custom_args=custom_args)
+
+        def list_live_watch_jobs() -> list[dict]:
+            return live_watch_service.list_jobs()
+
+        def cancel_live_watch(job_id: str) -> dict:
+            return live_watch_service.cancel(job_id)
 
         def request_exit() -> None:
             ticket = download_manager.request_stop()
             _kill_proc_tree(ticket.process)
             po_token_provider.stop()
+            live_watch_service.stop()
             app_state.publish({"type": "exit"})
             exit_event.set()
 
@@ -356,6 +401,8 @@ class AppContainer:
                 cancel_idle_timer=cancel_idle_timer,
                 start_idle_timer=start_idle_timer,
                 start_download=start_download,
+                list_live_watch_jobs=list_live_watch_jobs,
+                cancel_live_watch=cancel_live_watch,
                 start_withny_archive=start_withny_archive,
                 start_withny_live=start_withny_live,
                 batch_txt_download=batch_txt_download,
@@ -401,6 +448,7 @@ class AppContainer:
                 add_log("[提示] yt-dlp: github.com/yt-dlp/yt-dlp/releases", "warn")
                 add_log("[提示] ffmpeg: www.gyan.dev/ffmpeg/builds/ (full_build)", "warn")
             config = app_state.config_snapshot()
+            live_watch_service.start()
 
             url = http_service.start()
             start_idle_timer()
@@ -425,6 +473,7 @@ class AppContainer:
                 request_exit()
             print("\n正在关闭服务器...", flush=True)
             http_service.stop()
+            live_watch_service.stop()
             print("已退出。", flush=True)
 
         return WiredApp(

@@ -26,7 +26,7 @@ class ConfigValidationTests(unittest.TestCase):
         self.assertEqual(validated["PROXY_ADDR"], "127.0.0.1")
 
     def test_live_mode_accepts_known_values(self):
-        for value in ("auto", "catch_up", "live_edge"):
+        for value in ("auto", "catch_up", "live_edge", "wait"):
             validated, errors = validate_config({"LIVE_MODE": value})
             self.assertEqual(errors, [])
             self.assertEqual(validated["LIVE_MODE"], value)

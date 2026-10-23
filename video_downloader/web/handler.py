@@ -28,6 +28,8 @@ class HttpHandlerDependencies:
     cancel_idle_timer: object
     start_idle_timer: object
     start_download: object
+    list_live_watch_jobs: object
+    cancel_live_watch: object
     start_withny_archive: object
     start_withny_live: object
     batch_txt_download: object
@@ -123,6 +125,8 @@ def create_handler(dependencies):
                 self._json(dependencies.updater.snapshot())
             elif path == "/api/current-command":
                 self._json(dependencies.get_current_command())
+            elif path == "/api/live/watch-jobs":
+                self._json({"jobs": dependencies.list_live_watch_jobs()})
             elif path.startswith("/static/"):
                 if not self._is_local_request():
                     self._forbidden()
@@ -157,6 +161,7 @@ def create_handler(dependencies):
                     "stats": dict(dependencies.app_state.batch_stats),
                     "archive_prompt": dependencies.app_state.archive_prompt,
                     "update": dependencies.updater.snapshot(),
+                    "live_watch": dependencies.list_live_watch_jobs(),
                 }}
             # 每个 SSE 连接使用有界队列；慢连接的丢旧保新策略由 AppState 统一执行。
             client_queue = queue.Queue(maxsize=256)
@@ -241,6 +246,14 @@ def create_handler(dependencies):
                 self._json(dependencies.start_withny_archive())
             elif path == "/api/start-withny-live":
                 self._json(dependencies.start_withny_live())
+            elif path == "/api/live/watch-cancel":
+                job_id = self._field(data, "id", str, "")
+                if job_id is None:
+                    return
+                if not job_id:
+                    self._json({"error": "缺少等待任务 id"}, status=400)
+                    return
+                self._json(dependencies.cancel_live_watch(job_id))
             elif path == "/api/archive-choice":
                 request_id = self._field(data, "request_id", str, "")
                 if request_id is None:

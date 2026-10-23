@@ -29,7 +29,7 @@ _ERROR_REASONS = {
     "HWACCEL": "硬件加速选项无效",
     "BILI_MULTIP_POLICY": "B站多P策略选项无效",
     "LIVE_STREAM_METHOD": "直播下载方式仅支持 yt-dlp",
-    "LIVE_MODE": "直播模式仅支持 auto/catch_up/live_edge",
+    "LIVE_MODE": "直播模式仅支持 auto/catch_up/live_edge/wait",
     "AUDIO_MODE": "音频模式选项无效",
     "AUDIO_FORMAT": "音频格式选项无效",
     "THREADS": "线程数需在 1-32 之间",

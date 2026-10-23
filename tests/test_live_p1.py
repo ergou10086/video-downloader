@@ -1,0 +1,246 @@
+import json
+import tempfile
+import unittest
+from pathlib import Path
+from types import SimpleNamespace
+
+from video_downloader.live.probe import (
+    BilibiliProbe,
+    LiveProbe,
+    LiveStatus,
+    ProbeError,
+    ProbeService,
+    TwitCastingProbe,
+    YtDlpProbe,
+)
+from video_downloader.live.urls import TargetKind, classify_target
+from video_downloader.live.wait import LiveWatchService, WatchJobStore, WatchStatus
+
+
+class UrlClassifierTests(unittest.TestCase):
+    def test_youtube_channel_event_and_archive(self):
+        self.assertEqual(classify_target("https://www.youtube.com/@a/live").kind, TargetKind.CHANNEL)
+        event = classify_target("https://www.youtube.com/live/abc123")
+        self.assertEqual(event.kind, TargetKind.EVENT)
+        self.assertEqual(event.stable_id, "abc123")
+        self.assertEqual(classify_target("https://youtu.be/abc123").kind, TargetKind.EVENT)
+        self.assertEqual(classify_target("https://www.youtube.com/watch?v=abc123").kind, TargetKind.EVENT)
+        self.assertEqual(classify_target("https://www.youtube.com/@a/streams").kind, TargetKind.LIST)
+
+    def test_bilibili_room_and_short_link(self):
+        target = classify_target("https://live.bilibili.com/123")
+        self.assertEqual(target.kind, TargetKind.CHANNEL)
+        self.assertEqual(target.stable_id, "123")
+        short = classify_target("https://b23.tv/abc")
+        self.assertTrue(short.needs_expand)
+
+    def test_twitch(self):
+        self.assertEqual(classify_target("https://www.twitch.tv/xqc").kind, TargetKind.CHANNEL)
+        self.assertEqual(classify_target("https://www.twitch.tv/videos/123").kind, TargetKind.ARCHIVE)
+        self.assertEqual(classify_target("https://www.twitch.tv/directory").kind, TargetKind.LIST)
+
+    def test_niconico_nicochannel_twitcasting_x_withny(self):
+        self.assertEqual(classify_target("https://live.nicovideo.jp/watch/lv123").kind, TargetKind.EVENT)
+        self.assertEqual(classify_target("https://nicochannel.jp/ch/live/sm1").kind, TargetKind.EVENT)
+        self.assertEqual(classify_target("https://nicochannel.jp/ch/lives").kind, TargetKind.LIST)
+        self.assertEqual(classify_target("https://twitcasting.tv/user").kind, TargetKind.CHANNEL)
+        self.assertEqual(classify_target("https://twitcasting.tv/user/movie/123").kind, TargetKind.EVENT)
+        self.assertEqual(classify_target("https://x.com/i/spaces/abc").kind, TargetKind.EVENT)
+        self.assertEqual(classify_target("https://withny.com/@user").kind, TargetKind.CHANNEL)
+
+    def test_unknown_url_is_not_watchable(self):
+        target = classify_target("https://example.com/video/1")
+        self.assertEqual(target.kind, TargetKind.UNKNOWN)
+        self.assertFalse(target.can_watch)
+
+
+class ProbeTests(unittest.TestCase):
+    def test_bilibili_live(self):
+        def http_json(url, **kwargs):
+            return {
+                "code": 0,
+                "data": {
+                    "room_id": 123,
+                    "live_status": 1,
+                    "live_time": "2026-10-23 20:00:00",
+                    "title": "test",
+                    "uname": "streamer",
+                },
+            }
+
+        target = classify_target("https://live.bilibili.com/123")
+        probe = BilibiliProbe(http_json=http_json).probe(target)
+        self.assertEqual(probe.status, LiveStatus.LIVE)
+        self.assertIn("bilibili:123:", probe.stream_instance_key)
+        self.assertEqual(probe.title, "test")
+
+    def test_bilibili_offline_and_rate_limit(self):
+        def offline(url, **kwargs):
+            return {"code": 0, "data": {"room_id": 123, "live_status": 0}}
+
+        target = classify_target("https://live.bilibili.com/123")
+        self.assertEqual(BilibiliProbe(http_json=offline).probe(target).status, LiveStatus.OFFLINE)
+
+        def limited(url, **kwargs):
+            return {"code": -352, "message": "风控"}
+
+        with self.assertRaises(ProbeError) as raised:
+            BilibiliProbe(http_json=limited).probe(target)
+        self.assertTrue(raised.exception.retryable)
+
+    def test_twitcasting_live(self):
+        def http_json(url, **kwargs):
+            return {"is_live": True, "movie": {"id": 99, "title": "live", "user": {"name": "u"}}}
+
+        target = classify_target("https://twitcasting.tv/u")
+        probe = TwitCastingProbe(http_json=http_json).probe(target)
+        self.assertEqual(probe.status, LiveStatus.LIVE)
+        self.assertEqual(probe.stable_id, "99")
+
+    def test_ytdlp_upcoming_and_error_mapping(self):
+        def runner(command, timeout):
+            return SimpleNamespace(
+                returncode=0,
+                stdout=json.dumps({
+                    "id": "abc",
+                    "live_status": "is_upcoming",
+                    "release_timestamp": 2000,
+                    "title": "soon",
+                    "uploader": "u",
+                }),
+                stderr="",
+            )
+
+        target = classify_target("https://www.youtube.com/live/abc")
+        probe = YtDlpProbe("yt-dlp", runner=runner).probe(target)
+        self.assertEqual(probe.status, LiveStatus.UPCOMING)
+        self.assertEqual(probe.scheduled_start, 2000)
+
+        def offline_runner(command, timeout):
+            return SimpleNamespace(returncode=1, stdout="", stderr="ERROR: This channel is not live")
+
+        with self.assertRaises(ProbeError) as raised:
+            YtDlpProbe("yt-dlp", runner=offline_runner).probe(target)
+        self.assertEqual(raised.exception.status, LiveStatus.OFFLINE)
+
+    def test_probe_service_wraps_provider_errors(self):
+        class Broken:
+            def probe(self, target, timeout=20.0):
+                raise ProbeError("network", retryable=True)
+
+        target = classify_target("https://live.bilibili.com/1")
+        service = ProbeService(ytdlp_path="", providers={"Bilibili": Broken()})
+        probe = service.probe(target)
+        self.assertEqual(probe.status, LiveStatus.ERROR)
+        self.assertTrue(probe.retryable)
+
+
+class WaitServiceTests(unittest.TestCase):
+    def _probe(self, status, *, scheduled=None, title="t"):
+        return LiveProbe(
+            platform="Bilibili",
+            target_kind=TargetKind.CHANNEL,
+            stable_id="1",
+            status=status,
+            scheduled_start=scheduled,
+            title=title,
+        )
+
+    def test_offline_then_live_triggers_once(self):
+        with tempfile.TemporaryDirectory() as directory:
+            now = [1000.0]
+            store = WatchJobStore(Path(directory) / "jobs.sqlite")
+            probes = [self._probe(LiveStatus.OFFLINE), self._probe(LiveStatus.LIVE)]
+            calls = []
+            class FakeProbe:
+                def probe(self, target, **kwargs):
+                    return probes.pop(0)
+
+            def on_live(job, probe):
+                calls.append(job.id)
+                return {"ok": True}
+
+            service = LiveWatchService(
+                store=store, probe_service=FakeProbe(), on_live=on_live,
+                clock=lambda: now[0], jitter=lambda: 1.0, start_thread=False,
+            )
+            result = service.add("https://live.bilibili.com/1")
+            self.assertTrue(result["waiting"])
+            service.tick(wait=True)
+            job = store.get(result["job"]["id"])
+            self.assertEqual(job.status, WatchStatus.WAITING)
+            next_probe = job.next_probe_at
+            now[0] = next_probe + 1
+            service.tick(now=now[0], wait=True)
+            job = store.get(result["job"]["id"])
+            self.assertEqual(job.status, WatchStatus.TRIGGERED)
+            self.assertEqual(len(calls), 1)
+            # 已触发任务不会再次启动
+            service.tick(now=now[0] + 10000, wait=True)
+            self.assertEqual(len(calls), 1)
+            service.stop()
+
+    def test_upcoming_schedules_near_window(self):
+        with tempfile.TemporaryDirectory() as directory:
+            now = [1000.0]
+            store = WatchJobStore(Path(directory) / "jobs.sqlite")
+            probe = self._probe(LiveStatus.UPCOMING, scheduled=1600.0)
+
+            class FakeProbe:
+                def probe(self, target, **kwargs):
+                    return probe
+
+            service = LiveWatchService(
+                store=store, probe_service=FakeProbe(), on_live=lambda job, probe: {"ok": True},
+                clock=lambda: now[0], jitter=lambda: 1.0, start_thread=False,
+            )
+            result = service.add("https://live.bilibili.com/1")
+            service.tick(wait=True)
+            job = store.get(result["job"]["id"])
+            self.assertEqual(job.status, WatchStatus.WAITING_NEAR)
+            self.assertEqual(job.next_probe_at - now[0], 20.0)
+            service.stop()
+
+    def test_duplicate_and_cancel(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = WatchJobStore(Path(directory) / "jobs.sqlite")
+
+            class FakeProbe:
+                def probe(self, target, **kwargs):
+                    return LiveProbe("Bilibili", TargetKind.CHANNEL, "1", LiveStatus.OFFLINE)
+
+            service = LiveWatchService(
+                store=store, probe_service=FakeProbe(), on_live=lambda job, probe: {"ok": True},
+                clock=lambda: 1000.0, jitter=lambda: 1.0, start_thread=False,
+            )
+            first = service.add("https://live.bilibili.com/1")
+            second = service.add("https://live.bilibili.com/1")
+            self.assertTrue(second.get("duplicate"))
+            self.assertEqual(first["job"]["id"], second["job"]["id"])
+            cancelled = service.cancel(first["job"]["id"])
+            self.assertEqual(cancelled["job"]["status"], "cancelled")
+            self.assertEqual(service.tick(wait=True), 0)
+            service.stop()
+
+    def test_restart_recovers_interrupted_probing(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = WatchJobStore(Path(directory) / "jobs.sqlite")
+
+            class FakeProbe:
+                def probe(self, target, **kwargs):
+                    return LiveProbe("Bilibili", TargetKind.CHANNEL, "1", LiveStatus.OFFLINE)
+
+            service = LiveWatchService(
+                store=store, probe_service=FakeProbe(), on_live=lambda job, probe: {"ok": True},
+                clock=lambda: 1000.0, jitter=lambda: 1.0, start_thread=False,
+            )
+            service.add("https://live.bilibili.com/1")
+            # 模拟进程在 PROBING 状态崩溃
+            store.recover_interrupted()
+            recovered = store.list_recent()[0]
+            self.assertEqual(recovered.status, WatchStatus.WAITING)
+            service.stop()
+
+
+if __name__ == "__main__":
+    unittest.main()

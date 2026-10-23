@@ -11,6 +11,7 @@ let lastUrlPlatform = "YouTube";
 let download_running = false;
 let downloadGeneration = null;
 let activeTaskYtdlpArgs = "";
+let liveWatchJobs = [];
 const SESSION_TOKEN = window.SESSION_TOKEN || "";
 
 const PLATFORMS = [
@@ -138,7 +139,7 @@ function init() {
   fillSelect('s_audiomode', [['0','不单独处理音频'],['1','分离音画输出'],['2','同时输出音频'],['3','只输出音频']]);
   fillSelect('s_audiofmt', [['m4a','m4a(原生)'],['mp3','MP3'],['wav','WAV']]);
   fillSelect('s_hwaccel', [['cpu','CPU软编码'],['h264_nvenc','N卡 NVENC'],['h264_qsv','Intel QSV'],['h264_amf','AMD AMF']]);
-  fillSelect('s_live_mode', [['auto','自动（推荐）'],['catch_up','追开播（条件）'],['live_edge','从当前时刻']]);
+  fillSelect('s_live_mode', [['auto','自动（推荐）'],['catch_up','追开播（条件）'],['live_edge','从当前时刻'],['wait','蹲开播（开播后自动录制）']]);
   fillSelect('s_browser', [['chrome','Chrome'],['edge','Edge'],['firefox','Firefox'],['brave','Brave'],['opera','Opera']]);
   $('s_browser').addEventListener('change', onBrowserChanged);
   fillSelect('s_subtitle_lang_preset', SUBTITLE_LANG_PRESETS);
@@ -169,6 +170,7 @@ function init() {
   loadConfig();
   loadDeps();
   connectSSE();
+  loadLiveWatch();
 
   // 页面关闭前提示用户下载仍在进行中
   window.addEventListener('beforeunload', (e) => {
@@ -491,6 +493,10 @@ async function startDl() {
 
   // 多链接：走批量下载（每行一个），跳过单条 Bilibili 分P 选择
   if(urls.length > 1) {
+    if($('s_live_mode').value === 'wait') {
+      showToast('蹲开播仅支持单条链接，请逐条添加', 'error');
+      return;
+    }
     try { await saveSettingsNoAlert(); } catch(e) { showToast('设置保存失败: ' + e.message, 'error'); return; }
     doStartUrls(urls, activeTaskYtdlpArgs);
     return;
@@ -622,6 +628,11 @@ async function doStartDl(url, biliParts, tcPassword, customArgs) {
   if(taskArgs) body.custom_args = taskArgs;
   const r = await api('/api/start', {method:'POST', body:JSON.stringify(body)});
   if(r.error) { showToast(r.error, 'error'); return; }
+  if(r.waiting) {
+    showToast('已加入等待开播列表', 'success');
+    loadLiveWatch();
+    return;
+  }
   clearStartedTaskArgs(taskArgs);
   // SSE owns task state: preparation may already have failed or been stopped
   // before this response arrives. Do not overwrite that newer state here.
@@ -937,6 +948,73 @@ async function startCoverDownload() {
   }
 }
 
+// ========== 蹲开播任务 ==========
+const LIVE_WATCH_LABELS = {
+  probing: '探测中', waiting: '等待开播', waiting_near: '临近开播',
+  starting: '启动录制', triggered: '已触发录制', error: '探测错误',
+  expired: '已结束/超时', cancelled: '已取消'
+};
+const LIVE_WATCH_TERMINAL = new Set(['triggered', 'expired', 'cancelled']);
+
+function fmtWatchTime(ts) {
+  if(!ts) return '';
+  const d = new Date(ts * 1000);
+  return d.toLocaleTimeString('zh-CN', {hour12:false});
+}
+
+function renderLiveWatch(jobs) {
+  liveWatchJobs = Array.isArray(jobs) ? jobs : [];
+  const sect = $('liveWatchSect');
+  const list = $('liveWatchList');
+  if(!sect || !list) return;
+  if(!liveWatchJobs.length) {
+    sect.style.display = 'none';
+    list.innerHTML = '';
+    return;
+  }
+  sect.style.display = '';
+  const active = liveWatchJobs.filter(j => !LIVE_WATCH_TERMINAL.has(j.status));
+  $('liveWatchCount').textContent = active.length
+    ? `等待中 ${active.length} 个 · 共 ${liveWatchJobs.length} 个`
+    : `共 ${liveWatchJobs.length} 个`;
+  list.innerHTML = liveWatchJobs.slice(0, 12).map(job => {
+    const status = LIVE_WATCH_LABELS[job.status] || job.status;
+    const title = job.probe && job.probe.title ? job.probe.title : job.url;
+    const next = job.status === 'waiting' || job.status === 'waiting_near'
+      ? `下次探测 ${fmtWatchTime(job.next_probe_at)}`
+      : (job.last_error || '');
+    const blip = job.status === 'triggered' ? 'ok'
+      : (job.status === 'error' || job.status === 'expired') ? 'err'
+      : (job.status === 'waiting' || job.status === 'waiting_near' || job.status === 'probing') ? 'live' : 'idle';
+    const esc = s => { const d = document.createElement('div'); d.textContent = s == null ? '' : String(s); return d.innerHTML; };
+    const canCancel = !LIVE_WATCH_TERMINAL.has(job.status);
+    return `<div class="srow" style="gap:10px;align-items:center;flex-wrap:wrap">
+      <span class="st"><span class="blip ${blip}"></span>${esc(job.platform)} · ${esc(title)}</span>
+      <span class="dim">${esc(status)}${next ? ' · ' + esc(next) : ''}</span>
+      ${canCancel ? `<button class="btn sm gh" data-cancel="${esc(job.id)}">取消</button>` : ''}
+    </div>`;
+  }).join('');
+  list.querySelectorAll('button[data-cancel]').forEach(btn => {
+    btn.onclick = () => cancelLiveWatch(btn.dataset.cancel);
+  });
+}
+
+async function loadLiveWatch() {
+  try {
+    const r = await api('/api/live/watch-jobs');
+    renderLiveWatch(r.jobs || []);
+  } catch(e) { /* 保持静默，避免影响下载页 */ }
+}
+
+async function cancelLiveWatch(jobId) {
+  try {
+    const r = await api('/api/live/watch-cancel', {method:'POST', body:JSON.stringify({id:jobId})});
+    if(r.error) { showToast(r.error, 'error'); return; }
+    showToast('已取消等待', 'success');
+    loadLiveWatch();
+  } catch(e) { showToast('取消等待失败: ' + e.message, 'error'); }
+}
+
 // ========== SSE ==========
 let sseRetryDelay = 1000;
 const SSE_MAX_RETRY = 16000;
@@ -985,6 +1063,8 @@ function connectSSE() {
     } else if(evt.type === 'history') {
       if(evt.data && evt.data.length && !$('page-history').classList.contains('active')) setHistoryDot(true);
       renderHistory(evt.data);
+    } else if(evt.type === 'live_watch') {
+      renderLiveWatch(evt.data && evt.data.jobs ? evt.data.jobs : []);
     } else if(evt.type === 'ready') {
       const readyData = Array.isArray(evt.data) ? {logs:evt.data, running:false} : evt.data;
       downloadGeneration = readyData.generation;
@@ -995,6 +1075,7 @@ function connectSSE() {
       if($('btnSubtitleDownload')) $('btnSubtitleDownload').disabled = download_running || readyData.phase === 'suspended';
       if($('btnCoverDownload')) $('btnCoverDownload').disabled = download_running || readyData.phase === 'suspended';
       if(readyData.progress) renderProgress(readyData.progress);
+      if(Array.isArray(readyData.live_watch)) renderLiveWatch(readyData.live_watch);
       if(readyData.stats) {
         $('statOk').textContent = readyData.stats.ok || 0;
         $('statFail').textContent = readyData.stats.fail || 0;

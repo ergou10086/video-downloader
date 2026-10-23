@@ -74,8 +74,8 @@ MP3_BITRATE_OPTIONS = [128, 192, 256, 320]
 BILI_POLICY_OPTIONS = ["all", "select"]
 LIVE_STREAM_METHOD_OPTIONS = ["yt-dlp"]
 LIVE_STREAM_METHOD_LABELS = ["yt-dlp (默认)"]
-LIVE_MODE_OPTIONS = ["auto", "catch_up", "live_edge"]
-LIVE_MODE_LABELS = ["自动（推荐）", "追开播（平台支持时）", "从当前时刻"]
+LIVE_MODE_OPTIONS = ["auto", "catch_up", "live_edge", "wait"]
+LIVE_MODE_LABELS = ["自动（推荐）", "追开播（平台支持时）", "从当前时刻", "蹲开播（开播后自动录制）"]
 SUBTITLE_TYPE_OPTIONS = ["all", "manual", "auto"]
 
 PLATFORM_INFO = [
