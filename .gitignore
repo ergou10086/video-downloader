@@ -53,6 +53,8 @@ dependency/package.json
 dependency/package-lock.json
 dependency/bgutil-ytdlp-pot-provider/
 dependency/development/
+dependency/BililiveRecorder/
+dependency/BililiveRecorder-*.zip
 yt-dlp.exe
 ffmpeg.exe
 ffprobe.exe

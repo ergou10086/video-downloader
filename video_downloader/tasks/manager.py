@@ -57,7 +57,7 @@ class TaskManager:
         self._thread.join(timeout=3)
         with self._lock:
             threads = [rt["thread"] for rt in self._runtimes.values()]
-        deadline = time.monotonic() + 3
+        deadline = time.monotonic() + 45
         for thread in threads:
             if thread is not threading.current_thread():
                 thread.join(timeout=max(0, deadline - time.monotonic()))
@@ -314,7 +314,13 @@ class TaskManager:
                 raise RuntimeError(result["error"])
             done.wait()
             with self._lock:
-                if task.cancel_requested:
+                recording_status = item.history[-1].get("status") if item.history else None
+                if item.kind == "live" and recording_status in {"stopped", "timeout", "gaps", "earliest"}:
+                    item.status = {"stopped": TaskStatus.STOPPED, "timeout": TaskStatus.TIMED_OUT,
+                                   "gaps": TaskStatus.PARTIAL, "earliest": TaskStatus.PARTIAL}[recording_status]
+                elif item.kind == "live" and recording_status == "fail":
+                    item.status = TaskStatus.FAILED
+                elif task.cancel_requested:
                     item.status = TaskStatus.CANCELLED
                 elif item.stats["fail"] or (not item.history and item.error):
                     item.status = TaskStatus.FAILED
@@ -329,6 +335,8 @@ class TaskManager:
                 item.finished_at, item.indeterminate = self._clock(), False
                 item.speed = item.eta = ""
                 item.message = {TaskStatus.CANCELLED: "已取消", TaskStatus.FAILED: "失败",
+                                TaskStatus.STOPPED: "已停止（已收尾）", TaskStatus.TIMED_OUT: "已到录制时限（已收尾）",
+                                TaskStatus.PARTIAL: "已保留录制，请查看完整性报告",
                                 TaskStatus.COMPLETED: "已跳过" if item.stats["skipped"] else "已完成"}.get(item.status, item.message)
                 task.prompts.pop(item.id, None)
                 self._runtimes[task.id]["children"].pop(item.id, None)
@@ -343,7 +351,15 @@ class TaskManager:
                     item.message = "已取消" if task.cancel_requested else "任务异常，未执行"
             self._aggregate(task)
             failures = sum(i.status is TaskStatus.FAILED for i in task.items)
-            if task.cancel_requested:
+            live_outcomes = [i.status for i in task.items if i.status in {
+                TaskStatus.STOPPED, TaskStatus.TIMED_OUT, TaskStatus.PARTIAL}]
+            if failures and any(i.kind == "live" and i.status is TaskStatus.FAILED for i in task.items):
+                task.status, task.message = TaskStatus.FAILED, "直播录制或验证失败，请查看报告"
+            elif live_outcomes:
+                task.status = TaskStatus.PARTIAL if failures or TaskStatus.PARTIAL in live_outcomes else live_outcomes[0]
+                task.message = {TaskStatus.STOPPED: "已停止（已收尾）", TaskStatus.TIMED_OUT: "已到录制时限（已收尾）",
+                                TaskStatus.PARTIAL: "部分录制，请查看完整性报告"}[task.status]
+            elif task.cancel_requested:
                 task.status, task.message = TaskStatus.CANCELLED, "已取消"
             elif failures or task.error:
                 task.status = TaskStatus.FAILED
@@ -399,7 +415,9 @@ class TaskManager:
         with self._lock:
             record = {"url": url, "title": title, "platform": platform, "status": status, "output": output_path}
             item.history.append(record)
-            item.stats[{"success": "ok", "skipped": "skipped"}.get(status, "fail")] += 1
+            counter = {"success": "ok", "skipped": "skipped", "fail": "fail", "gaps": "fail"}.get(status)
+            if counter:
+                item.stats[counter] += 1
             task.history.append(record)
             task.history = task.history[-50:]
             if title:

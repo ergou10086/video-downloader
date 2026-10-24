@@ -64,6 +64,8 @@ class HttpHandlerDependencies:
     audio_loudnorm: object
     audio_volume: object
     request_exit: object
+    list_live_recordings: object = None
+    get_live_report: object = None
 
 
 def create_handler(dependencies):
@@ -87,6 +89,16 @@ def create_handler(dependencies):
             return secrets.compare_digest(token, dependencies.session_token)
 
         def _forbidden(self):
+            # As with the recording webhook, unread POST bytes can turn a 403
+            # into a TCP reset on Windows. Drain only a bounded small body.
+            if self.command == "POST":
+                try:
+                    length = int(self.headers.get("Content-Length", "0"))
+                    if 0 < length <= 65536:
+                        self.connection.settimeout(0.5)
+                        self.rfile.read(length)
+                except (ValueError, OSError):
+                    pass
             self.send_error(403, "Forbidden")
 
         def do_GET(self):
@@ -136,6 +148,12 @@ def create_handler(dependencies):
                 self._json({"jobs": dependencies.list_live_watch_jobs()})
             elif path == "/api/live/capabilities":
                 self._json({"platforms": dependencies.live_capabilities()})
+            elif path == "/api/live/recordings":
+                self._json({"recordings": dependencies.list_live_recordings() if dependencies.list_live_recordings else []})
+            elif path == "/api/live/report":
+                job_id = parse_qs(parsed.query).get("job_id", [""])[0]
+                report = dependencies.get_live_report(job_id) if dependencies.get_live_report else None
+                self._json(report if report is not None else {"error": "报告不存在或仍在生成"}, status=200 if report is not None else 404)
             elif path == "/api/tasks":
                 self._json({"tasks": dependencies.list_tasks()})
             elif path.startswith("/static/"):

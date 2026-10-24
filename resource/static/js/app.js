@@ -12,6 +12,7 @@ let download_running = false;
 let downloadGeneration = null;
 let activeTaskYtdlpArgs = "";
 let liveWatchJobs = [];
+const liveRecordings = new Map();
 let tasksCache = [];
 let expandedTasks = new Set();
 let taskModeEnabled = true;
@@ -183,6 +184,7 @@ function init() {
   loadDeps();
   connectSSE();
   loadLiveWatch();
+  api('/api/live/recordings').then(data => (data.recordings || []).reverse().forEach(renderLiveRecording)).catch(() => {});
   loadTasks();
   initSettingsToc();
   loadLiveCapabilities();
@@ -319,6 +321,9 @@ function applyConfig(s) {
     renderLivePlatformModes();
   }
   if(s.LIVE_DOWNLOAD_TIMEOUT !== undefined) $('s_live_timeout').value = s.LIVE_DOWNLOAD_TIMEOUT || 0;
+  for(const [key, id] of Object.entries({LIVE_MAX_RETRIES:'s_live_retries', LIVE_WATCHDOG_SECONDS:'s_live_watchdog', LIVE_MIN_FREE_MB:'s_live_free_mb', LIVE_ESTIMATED_BITRATE_KBPS:'s_live_bitrate'})) {
+    if(s[key] !== undefined) $(id).value = s[key];
+  }
   if(s.TASK_MODE !== undefined) {
     taskModeEnabled = String(s.TASK_MODE) === '1';
     setSwitch('sw_task_mode', s.TASK_MODE);
@@ -534,6 +539,10 @@ function collectCfg() {
     LIVE_MODE: $('s_live_mode').value,
     LIVE_PLATFORM_MODES: JSON.stringify(collectLivePlatformModes()),
     LIVE_DOWNLOAD_TIMEOUT: parseInt($('s_live_timeout').value) || 0,
+    LIVE_MAX_RETRIES: Number($('s_live_retries').value),
+    LIVE_WATCHDOG_SECONDS: Number($('s_live_watchdog').value),
+    LIVE_MIN_FREE_MB: Number($('s_live_free_mb').value),
+    LIVE_ESTIMATED_BITRATE_KBPS: Number($('s_live_bitrate').value),
     TASK_MODE: isOn('sw_task_mode') ? 1 : 0,
     TASK_MAX_PARALLEL: Math.max(1, Math.min(8, parseInt($('s_task_parallel').value) || 1)),
     TASK_LIVE_PARALLEL: Math.max(1, Math.min(8, parseInt($('s_task_live_parallel').value) || 1)),
@@ -1179,7 +1188,8 @@ async function cancelLiveWatch(jobId) {
 // ========== 多任务列表 ==========
 const TASK_STATUS_LABELS = {
   queued: '排队中', running: '运行中', completed: '已完成',
-  failed: '失败', cancelled: '已取消', waiting: '等待开播'
+  failed: '失败', cancelled: '已取消', waiting: '等待开播',
+  stopped: '已停止（已收尾）', timed_out: '已到录制时限', partial: '部分录制，请查看报告'
 };
 
 function escapeTaskText(value) {
@@ -1622,6 +1632,8 @@ function connectSSE() {
     } else if(evt.type === 'history') {
       if(evt.data && evt.data.length && !$('page-history').classList.contains('active')) setHistoryDot(true);
       renderHistory(evt.data);
+    } else if(evt.type === 'live_recording') {
+      renderLiveRecording(evt.data || {});
     } else if(evt.type === 'live_watch') {
       renderLiveWatch(evt.data && evt.data.jobs ? evt.data.jobs : []);
     } else if(evt.type === 'task_snapshot') {
@@ -1639,6 +1651,7 @@ function connectSSE() {
       if($('btnCoverDownload')) $('btnCoverDownload').disabled = download_running || readyData.phase === 'suspended';
       if(readyData.progress) renderProgress(readyData.progress);
       if(Array.isArray(readyData.live_watch)) renderLiveWatch(readyData.live_watch);
+      api('/api/live/recordings').then(data => (data.recordings || []).reverse().forEach(renderLiveRecording)).catch(() => {});
       if(readyData.stats) {
         $('statOk').textContent = readyData.stats.ok || 0;
         $('statFail').textContent = readyData.stats.fail || 0;
@@ -1777,14 +1790,30 @@ function syncHistoryViewButtons() {
 function thumbHtml(h) {
   const ok = h.status === 'success';
   const skipped = h.status === 'skipped';
-  const color = ok ? 'var(--ok)' : skipped ? 'var(--fg3)' : 'var(--err)';
+  const labels = {stopped:'已停止（已收尾）', timeout:'已到时限', gaps:'有缺口', earliest:'最早可用'};
+  const label = ok ? '成功' : skipped ? '跳过' : labels[h.status] || '失败';
+  const color = ok ? 'var(--ok)' : skipped || labels[h.status] ? 'var(--fg3)' : 'var(--err)';
   const cover = h.filepath
     ? `<img loading="lazy" alt="封面"
            src="/api/cover?path=${encodeURIComponent(h.filepath)}&token=${encodeURIComponent(SESSION_TOKEN)}"
            onload="this.classList.add('show')" onerror="this.remove()" onclick="openCover(this.src)">`
     : '';
   return `<div class="thumb">${icon('alert','s20')}${cover}` +
-         `<span class="hstat"><span class="pd" style="background:${color}"></span>${ok?'成功':skipped?'跳过':'失败'}</span></div>`;
+         `<span class="hstat"><span class="pd" style="background:${color}"></span>${label}</span></div>`;
+}
+
+function renderLiveRecording(data) {
+  if(!data.job_id) return;
+  liveRecordings.set(data.job_id, {...(liveRecordings.get(data.job_id) || {}), ...data});
+  while(liveRecordings.size > 20) liveRecordings.delete(liveRecordings.keys().next().value);
+  $('liveRecordingSect').style.display = '';
+  const conclusions = {complete:'文件验证通过', from_earliest_available:'平台最早可用内容', gaps:'有缺口或边界诊断，请检查报告', failed:'录制或文件验证失败'};
+  $('liveRecordingList').innerHTML = Array.from(liveRecordings.values()).reverse().map(job => {
+    const state = job.conclusion ? conclusions[job.conclusion] || job.conclusion : `录制中 · 分段 ${job.part || 1}`;
+    const reason = {user:'已停止（已收尾）', timeout:'已到录制时限', crash:'进程崩溃', disk_full:'磁盘不足'}[job.stop_reason] || '';
+    const reportLink = job.report ? `<p><a target="_blank" rel="noopener" href="/api/live/report?job_id=${encodeURIComponent(job.job_id)}&token=${encodeURIComponent(SESSION_TOKEN)}">查看完整性报告</a></p>` : '';
+    return `<div class="notice"><b>${escHtml(job.engine || '直播')} ${job.degraded ? '· 已降级' : ''}</b><p>${escHtml(reason ? reason + ' · ' + state : state)}</p><small class="mono">${escHtml(job.report || job.report_dir || '')}</small>${reportLink}</div>`;
+  }).join('');
 }
 
 function platformHtml(name) {

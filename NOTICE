@@ -1,0 +1,15 @@
+BililiveRecorder (optional external process)
+Version: 2.20.0
+Copyright: BililiveRecorder contributors
+License: GNU General Public License v3.0 (GPL-3.0)
+License text: dependency/BililiveRecorder.LICENSE
+Corresponding source: https://github.com/BililiveRecorder/BililiveRecorder/tree/v2.20.0
+Source archive: https://github.com/BililiveRecorder/BililiveRecorder/archive/refs/tags/v2.20.0.zip
+Official binary: https://github.com/BililiveRecorder/BililiveRecorder/releases/tag/v2.20.0
+win-x64 CLI archive SHA256: 4fcd057125dda3d37836bf9e192b68c4af0ed229f7fdbcd195c4bdb3918d9403
+
+The recorder runs as a separate executable from dependency/BililiveRecorder/.
+Its executable and runtime libraries are not embedded in this application's
+PyInstaller executable. Keep its LICENSE, SOURCE.txt, SHA256.txt and complete
+corresponding source with any distribution containing the optional binaries.
+This notice does not change the license of the video-downloader source code.

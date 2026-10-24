@@ -45,10 +45,14 @@ DEFAULT_CONFIG = {
     "STRICT_FILENAME": 0,
     "NICO_COMMENTS": 0,
     "NICO_RECODE": 0,
-    "LIVE_STREAM_METHOD": "yt-dlp",
+    "LIVE_STREAM_METHOD": "auto",
     "LIVE_MODE": "auto",
     "LIVE_PLATFORM_MODES": "{}",
     "LIVE_DOWNLOAD_TIMEOUT": 0,
+    "LIVE_MAX_RETRIES": 2,
+    "LIVE_WATCHDOG_SECONDS": 60,
+    "LIVE_MIN_FREE_MB": 256,
+    "LIVE_ESTIMATED_BITRATE_KBPS": 8000,
     "TASK_MODE": 1,
     "TASK_MAX_PARALLEL": 1,
     "TASK_LIVE_PARALLEL": 1,
@@ -77,8 +81,8 @@ BROWSER_OPTIONS = ["chrome", "edge", "firefox", "brave", "opera"]
 PROXY_TYPE_OPTIONS = ["http", "socks5"]
 MP3_BITRATE_OPTIONS = [128, 192, 256, 320]
 BILI_POLICY_OPTIONS = ["all", "select"]
-LIVE_STREAM_METHOD_OPTIONS = ["yt-dlp"]
-LIVE_STREAM_METHOD_LABELS = ["yt-dlp (默认)"]
+LIVE_STREAM_METHOD_OPTIONS = ["auto", "yt-dlp", "bililive-recorder"]
+LIVE_STREAM_METHOD_LABELS = ["自动（B站优先录播姬）", "yt-dlp", "BililiveRecorder（仅B站）"]
 LIVE_MODE_OPTIONS = ["auto", "catch_up", "live_edge", "wait"]
 LIVE_MODE_LABELS = ["自动（推荐）", "追开播（平台支持时）", "从当前时刻", "蹲开播（开播后自动录制）"]
 TASK_ORDER_OPTIONS = ["none", "live_first", "download_first"]

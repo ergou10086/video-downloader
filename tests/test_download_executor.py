@@ -179,13 +179,13 @@ class DownloadExecutorTests(unittest.TestCase):
             executor, callbacks = create_executor(Path(directory))
             executor._app_state.config_snapshot = lambda: {"LIVE_DOWNLOAD_TIMEOUT": 1}
             executor._on_finished = Mock()
-            executor._spawn = Mock(return_value=CompletedProcess(1))
-            executor._start_reader = Mock(return_value=(Queue(), threading.Event()))
-            executor.kill_process_tree = Mock()
             handle = executor._download_manager.begin("single")
-            with patch("video_downloader.services.download_executor.time.monotonic", side_effect=[0, 61]):
+            with patch("video_downloader.services.download_executor.LiveRunner") as runner:
+                runner.return_value.run.return_value = {
+                    "status": "timeout", "title": "live", "output": "recording.mp4",
+                    "report": "integrity-report.json", "conclusion": "complete", "stop_reason": "timeout"}
                 executor._run_single(handle, ["yt-dlp", "url"], "url", "Niconico", True)
-            executor.kill_process_tree.assert_called_once()
+                self.assertEqual(runner.return_value.run.call_args.kwargs["config"]["LIVE_DOWNLOAD_TIMEOUT"], 1)
             self.assertEqual(callbacks["add_history"].call_args.args[3], "timeout")
             executor._on_finished.assert_called_once_with(handle)
 
@@ -721,12 +721,15 @@ class DownloadExecutorTests(unittest.TestCase):
             done = threading.Event()
             done.set()
             executor._start_reader = Mock(side_effect=[(Queue(), done), (Queue(), done)])
-            with patch("video_downloader.services.download_executor.threading.Thread", DirectThread):
-                result = executor.batch_download([
-                    " https://youtube.com/live/abc ",
-                    " ",
-                    "https://www.twitch.tv/videos/123",
-                ])
+            with patch("video_downloader.services.download_executor.LiveRunner") as runner:
+                runner.return_value.run.return_value = {
+                    "status": "success", "title": "live", "output": "recording.mp4", "report": "report.json"}
+                with patch("video_downloader.services.download_executor.threading.Thread", DirectThread):
+                    result = executor.batch_download([
+                        " https://youtube.com/live/abc ",
+                        " ",
+                        "https://www.twitch.tv/videos/123",
+                    ])
             self.assertEqual(result, {"ok": True, "total": 2})
             self.assertEqual(callbacks["build_command"].call_args_list[0].kwargs["is_live"], True)
             self.assertEqual(callbacks["build_command"].call_args_list[1].kwargs["is_live"], False)

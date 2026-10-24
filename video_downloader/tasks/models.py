@@ -19,12 +19,18 @@ class TaskStatus(str, Enum):
     FAILED = "failed"
     CANCELLED = "cancelled"
     WAITING = "waiting"
+    STOPPED = "stopped"
+    TIMED_OUT = "timed_out"
+    PARTIAL = "partial"
 
 
 TERMINAL_TASK_STATUSES = {
     TaskStatus.COMPLETED,
     TaskStatus.FAILED,
     TaskStatus.CANCELLED,
+    TaskStatus.STOPPED,
+    TaskStatus.TIMED_OUT,
+    TaskStatus.PARTIAL,
 }
 
 

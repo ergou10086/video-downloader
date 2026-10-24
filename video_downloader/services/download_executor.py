@@ -15,6 +15,7 @@ from video_downloader.core.paths import AppPaths
 from video_downloader.core.subtitles import classify_subtitle_result
 from video_downloader.live import LiveModeError, decide_live
 from video_downloader.live.preferences import resolve_platform_mode
+from video_downloader.live.runner import LiveRunner
 from video_downloader.services.download_archive import archived_video_id, forget_archived_videos, redownload_command
 from video_downloader.services.withny_archive import WithnyArchiveError, build_ffmpeg_command, load_and_select, redact_line
 
@@ -95,6 +96,11 @@ class DownloadExecutor:
         self._current_ytdlp_command = None
         self._archive_choice_lock = threading.Lock()
         self._archive_choice = None
+        self._live_runner = None
+        self._live_config = None
+        self._effective_live_mode = None
+        self._live_finished = threading.Event()
+        self._live_finished.set()
 
     def submit_archive_choice(self, request_id, redownload):
         with self._archive_choice_lock:
@@ -484,6 +490,8 @@ class DownloadExecutor:
             cmd += ["--verbose"]
         if self._download_manager.is_cancelled(handle):
             return
+        self._live_config = dict(config_snapshot, _custom_live_args=custom_args or "")
+        self._effective_live_mode = live_mode
         self._update_progress(0, "正在连接直播..." if is_live_download else "正在下载...")
         self._run_single(
             handle, cmd, url, effective_platform, is_live_download,
@@ -1040,6 +1048,12 @@ class DownloadExecutor:
     def _run_single(self, handle, cmd, url, effective_platform, is_live_download,
                     audio_mode="0", audio_fmt="mp3", verbose=False, subtitle_cmd=None,
                     tc_direct_tried=False, tc_firefox_tried=False, archive_retry=False):
+        if is_live_download:
+            try:
+                self._run_live(handle, cmd, url, effective_platform)
+            finally:
+                self._finish(handle, None)
+            return
         # 线程局部代际会随进度回调传递，旧工作线程无法覆盖新任务界面状态。
         self._app_state.download_thread_context.task_id = handle.generation
         stats = self._app_state.batch_stats
@@ -1383,6 +1397,77 @@ class DownloadExecutor:
         finally:
             self._finish(handle, proc)
 
+    def _run_live(self, handle, cmd, url, platform):
+        self._app_state.download_thread_context.task_id = handle.generation
+        self._remember_ytdlp_command(cmd)
+        runner = LiveRunner(
+            self._paths, self._exe_suffix, log=self._log, progress=self._update_progress,
+            publish_process=lambda proc: self._download_manager.publish_process(handle, proc),
+            clear_process=lambda proc: self._download_manager.clear_process(handle, proc),
+            force_kill=self.kill_process_tree, emit_event=self._emit_event)
+        self._live_runner = runner
+        self._live_finished.clear()
+        try:
+            direct_tried = firefox_tried = ffmpeg_tried = False
+            password_attempts = 0
+            while True:
+                self._remember_ytdlp_command(cmd)
+                result = runner.run(cmd, url=url, platform=platform,
+                                    mode=self._effective_live_mode or "live_edge",
+                                    config=self._live_config or self._app_state.config_snapshot(),
+                                    cancel=handle.cancel_event)
+                if (platform != "TwitCasting" or result["status"] != "fail" or result.get("output")
+                        or handle.cancel_event.is_set()):
+                    break
+                lines = result.get("error_lines", [])
+                recovery = self._twitcasting_recovery(
+                    cmd, m3u8_400=any(self._is_twitcasting_m3u8_400(line) for line in lines),
+                    access_error=any(self._is_twitcasting_access_error(line) for line in lines),
+                    direct_tried=direct_tried, firefox_tried=firefox_tried)
+                if recovery:
+                    cmd, direct_tried, firefox_tried, strategy = recovery
+                    self._log(f"[TwitCasting 直播] 启动前恢复：{strategy}", "warn")
+                    continue
+                if not ffmpeg_tried and any("Initialization fragment found after media fragments" in line for line in lines):
+                    ffmpeg_tried = True
+                    cmd = self._with_ffmpeg_downloader(cmd)
+                    continue
+                password_required = any("--video-password" in line for line in lines)
+                password_retry = any("format is not available" in line.lower() for line in lines)
+                if not (password_required or password_retry):
+                    break
+                if self._on_finished is None:
+                    self._emit_event("password_required", {"url": url, "platform": platform,
+                                                          "reason": "retry" if password_retry else "missing"})
+                    break
+                if password_attempts >= 2:
+                    break
+                password_attempts += 1
+                password = self._wait_for_password(url, platform, reason="retry" if password_retry else "missing", handle=handle)
+                if not password or handle.cancel_event.is_set():
+                    break
+                cmd = self._replace_pair_options(cmd, {"--video-password"}, ["--video-password", password])
+            labels = {"success": "直播录制完成（文件验证通过）", "stopped": "已停止（已收尾）",
+                      "timeout": "已到录制时限（已收尾）", "gaps": "录制有缺口，请查看完整性报告",
+                      "earliest": "已录制平台最早可用内容，请查看报告", "fail": "直播录制失败，请查看报告"}
+            status = result["status"]
+            self._update_progress(1 if status == "success" else 0, labels[status], "", "")
+            self._log(f"[直播] {labels[status]}；报告：{result['report']}", "success" if status == "success" else "warn")
+            stats = self._app_state.batch_stats
+            if status == "success":
+                stats["ok"] = stats.get("ok", 0) + 1
+            elif status not in {"stopped", "timeout", "earliest"}:
+                stats["fail"] = stats.get("fail", 0) + 1
+            self._add_history(url, result["title"], platform, status, result["output"])
+            self._app_state.publish({"type": "stats", "data": dict(stats)})
+            return result
+        finally:
+            self._live_runner = None
+            self._live_finished.set()
+
+    def wait_for_live_finalization(self, timeout=45):
+        return self._live_finished.wait(timeout)
+
     def batch_download(self, urls, bili_parts_map=None, custom_args=None, live_mode=None):
         urls = [url for raw_url in urls if (url := clean_url(raw_url))]
         if not urls:
@@ -1560,6 +1645,12 @@ class DownloadExecutor:
                                 direct_tried=tc_direct_tried,
                                 firefox_tried=tc_firefox_tried,
                             )
+                        if is_live_for_url:
+                            self._live_config = dict(cmd_config, _custom_live_args=custom_args or "")
+                            self._effective_live_mode = live_mode_for_url
+                            self._run_live(handle, cmd, url, effective_platform)
+                            url_done = True
+                            continue
                         self._remember_ytdlp_command(cmd)
                         proc = self._spawn(cmd)
                         if not self._download_manager.publish_process(handle, proc):
@@ -1856,6 +1947,11 @@ class DownloadExecutor:
                 self._password_value = None
                 self._password_event.set()
         self._update_progress(0, "正在停止...", "", "")
+        if self._live_runner is not None:
+            # The worker retains its slot through Ctrl+C, file closure and ffprobe.
+            # Never release it early or another task can collide with finalization.
+            self._broadcast_download_state()
+            return {"ok": True, "stopping": True, "stopped": False}
         if ticket.process is not None:
             self.kill_process_tree(ticket.process)
             self._log("[停止] 下载进程已终止", "warn")

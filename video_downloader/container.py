@@ -24,6 +24,7 @@ from .live.modes import CAPABILITIES
 from .live.preferences import resolve_platform_mode
 from .live.probe import ProbeService
 from .live.wait import LiveWatchService, WatchJobStore
+from .live.session import RecordingStore, recover_interrupted
 from .state.app_state import AppState
 from .services.download_executor import DownloadExecutor
 from .services.download_archive import TaskArchiveSession
@@ -61,6 +62,8 @@ class AppContainer:
         self._exe_suffix = exe_suffix
         self._paths = AppPaths(tool_dir)
         self._paths.ensure_runtime_dirs()
+        recover_interrupted(self._paths.download_dir / ".live-jobs")
+        self._recordings = RecordingStore(self._paths.download_dir / ".live-jobs")
         self._log_dir = self._paths.log_dir
 
     def wire(self) -> WiredApp:
@@ -532,10 +535,10 @@ class AppContainer:
             return live_watch_service.cancel(job_id)
 
         def request_exit() -> None:
-            ticket = download_manager.request_stop()
-            _kill_proc_tree(ticket.process)
+            download_executor.stop_download()
             live_watch_service.stop()
             task_manager.stop()
+            download_executor.wait_for_live_finalization()
             po_token_provider.stop()
             app_state.publish({"type": "exit"})
             exit_event.set()
@@ -593,6 +596,8 @@ class AppContainer:
                 audio_loudnorm=audio_loudnorm,
                 audio_volume=audio_volume,
                 request_exit=request_exit,
+                list_live_recordings=self._recordings.recent,
+                get_live_report=self._recordings.report,
             )
             return HttpService(lambda: create_handler(deps), port=0)
 

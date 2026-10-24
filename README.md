@@ -261,6 +261,10 @@ v2.5.0 的完整更新内容和升级说明请查看：
 - v2.5.0 WebUI 视觉与交互体系重构：[DarkKandaoMaster](https://github.com/DarkKandaoMaster)
 - v2.5.0 设置控件、TwitCasting 下载与进度、BgUtils Provider 及目录收拢：[ErgouTree（GitHub：@ergou10086）](https://github.com/ergou10086)
 
+## 直播录制 P2/P3
+
+直播录制新增 P2/P3：优雅停止、会话与完整性报告、磁盘/超时/看门狗，以及外置 BililiveRecorder 引擎。安装、设置限制、验证范围与一手资料见 [直播录制 P2/P3 说明](docs/直播录制-P2-P3.md)。完整性报告通过前不会显示录制成功；第三方许可见 [NOTICE](NOTICE)。
+
 ## 致谢
 
 - [yt-dlp](https://github.com/yt-dlp/yt-dlp) - 强大的视频下载引擎
