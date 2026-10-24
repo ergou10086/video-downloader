@@ -64,6 +64,7 @@ class HttpHandlerDependencies:
     audio_loudnorm: object
     audio_volume: object
     request_exit: object
+    network_diagnostics: object = None
     list_live_recordings: object = None
     get_live_report: object = None
 
@@ -156,6 +157,9 @@ def create_handler(dependencies):
                 self._json(report if report is not None else {"error": "报告不存在或仍在生成"}, status=200 if report is not None else 404)
             elif path == "/api/tasks":
                 self._json({"tasks": dependencies.list_tasks()})
+            elif path == "/api/network-test":
+                self._json(dependencies.network_diagnostics.snapshot() if dependencies.network_diagnostics
+                           else {"running": False, "phase": "unavailable", "message": "网络检测不可用", "result": None})
             elif path.startswith("/static/"):
                 if not self._is_local_request():
                     self._forbidden()
@@ -192,6 +196,7 @@ def create_handler(dependencies):
                     "update": dependencies.updater.snapshot(),
                     "live_watch": dependencies.list_live_watch_jobs(),
                     "tasks": dependencies.list_tasks(),
+                    "network_test": dependencies.network_diagnostics.snapshot() if dependencies.network_diagnostics else None,
                 }}
             # 每个 SSE 连接使用有界队列；慢连接的丢旧保新策略由 AppState 统一执行。
             client_queue = queue.Queue(maxsize=256)
@@ -225,9 +230,6 @@ def create_handler(dependencies):
             if not self._is_authorized(parsed):
                 self._forbidden()
                 return
-            if self.headers.get_content_type() != "application/json":
-                self._json({"error": "Content-Type 必须为 application/json"}, status=415)
-                return
             try:
                 length = int(self.headers.get("Content-Length", 0))
             except ValueError:
@@ -239,6 +241,13 @@ def create_handler(dependencies):
             if length > 65536:
                 self.send_error(413, "Request body too large")
                 return
+            if self.headers.get_content_type() != "application/json":
+                # Drain a bounded authenticated request before closing. Leaving
+                # unread bytes can cause a Windows TCP reset to hide the 415.
+                if length:
+                    self.rfile.read(length)
+                self._json({"error": "Content-Type 必须为 application/json"}, status=415)
+                return
             try:
                 body = self.rfile.read(length).decode("utf-8") if length else "{}"
                 data = json.loads(body) if body else {}
@@ -248,7 +257,22 @@ def create_handler(dependencies):
             if not isinstance(data, dict):
                 self._json({"error": "JSON 请求体必须是对象"}, status=400)
                 return
-            if path == "/api/start":
+            if path.startswith("/api/network-test/"):
+                service = dependencies.network_diagnostics
+                if service is None:
+                    self._json({"error": "网络检测不可用"})
+                elif path == "/api/network-test/start":
+                    self._json(service.start())
+                elif path == "/api/network-test/cancel":
+                    self._json(service.cancel())
+                elif path == "/api/network-test/apply":
+                    mode = self._field(data, "mode", str, "")
+                    result_id = self._field(data, "result_id", str, "")
+                    if mode is not None and result_id is not None:
+                        self._json(service.apply(mode, result_id))
+                else:
+                    self.send_error(404)
+            elif path == "/api/start":
                 url = self._field(data, "url", str, "")
                 if url is None:
                     return

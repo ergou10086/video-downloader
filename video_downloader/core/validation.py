@@ -37,6 +37,11 @@ _ERROR_REASONS = {
     "LIVE_MODE": "直播模式仅支持 auto/catch_up/live_edge/wait",
     "LIVE_PLATFORM_MODES": "平台直播设置为 JSON，长度不能超过 2000 字符",
     "TASK_ORDER": "任务排序仅支持 none/live_first/download_first",
+    "TASK_MAX_PARALLEL": "并行任务数需在 1-5 之间",
+    "TASK_LIVE_PARALLEL": "任务内直播并行数需在 2-5 之间",
+    "TASK_DOWNLOAD_PARALLEL": "任务内下载并行数需在 1-5 之间",
+    "TASK_MIXED_PARALLEL": "任务内并行开关仅支持 0 或 1",
+    "TASK_DOWNLOAD_SPEED_LIMIT": "普通下载限速需在 0-100000 MiB/s 之间",
     "AUDIO_MODE": "音频模式选项无效",
     "AUDIO_FORMAT": "音频格式选项无效",
     "THREADS": "线程数需在 1-32 之间",
@@ -78,7 +83,7 @@ def validate_config(values, base=None):
     proxy_enabled = values.get("PROXY_ENABLED", result["PROXY_ENABLED"])
     try:
         proxy_enabled = int(proxy_enabled) == 1
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         proxy_enabled = bool(result["PROXY_ENABLED"])
     enums = {
         "PLATFORM": [item["name"] for item in PLATFORM_INFO],
@@ -108,14 +113,16 @@ def validate_config(values, base=None):
         "LIVE_MIN_FREE_MB": (64, 102400),
         "LIVE_ESTIMATED_BITRATE_KBPS": (128, 100000),
         "TASK_MODE": (0, 1),
-        "TASK_MAX_PARALLEL": (1, 8),
-        "TASK_LIVE_PARALLEL": (1, 8),
+        "TASK_MAX_PARALLEL": (1, 5),
+        "TASK_LIVE_PARALLEL": (2, 5),
+        "TASK_DOWNLOAD_PARALLEL": (1, 5),
     }
     booleans = {
         "MERGE_MODE", "PROXY_ENABLED", "USE_COOKIES", "EMBED_META",
         "DOWNLOAD_THUMB", "DOWNLOAD_SUBTITLES", "WIN_FILENAMES", "STRICT_FILENAME",
         "NICO_COMMENTS", "NICO_RECODE", "ENABLE_LOG", "DEL_WAV_AFTER_CONVERT",
         "YOUTUBE_PO_TOKEN_ENABLED",
+        "TASK_MIXED_PARALLEL",
     }
     for key, value in values.items():
         if key not in DEFAULT_CONFIG:
@@ -124,6 +131,11 @@ def validate_config(values, base=None):
             if key in enums:
                 value = str(value)
                 if value not in enums[key]:
+                    raise ValueError
+            elif key == "TASK_DOWNLOAD_SPEED_LIMIT":
+                import math
+                value = float(value)
+                if not math.isfinite(value) or not 0 <= value <= 100000:
                     raise ValueError
             elif key in integer_ranges:
                 value = int(value)
@@ -167,7 +179,7 @@ def validate_config(values, base=None):
                 if len(value) > 200:
                     raise ValueError
             result[key] = value
-        except (TypeError, ValueError):
+        except (TypeError, ValueError, OverflowError):
             errors.append(_err(key))
     if result["HWACCEL"] != "cpu" and result["OUTPUT_FORMAT"] == "webm":
         result["HWACCEL"] = "cpu"

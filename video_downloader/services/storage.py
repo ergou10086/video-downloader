@@ -10,6 +10,18 @@ from video_downloader.core.paths import AppPaths
 
 
 class StorageService:
+    @staticmethod
+    def _migrate_task_limits(config):
+        config = dict(config)
+        for key, low in (("TASK_MAX_PARALLEL", 1), ("TASK_LIVE_PARALLEL", 2)):
+            try:
+                value = int(config[key])
+                if 1 <= value <= 8:
+                    config[key] = max(low, min(5, value))
+            except (KeyError, TypeError, ValueError, OverflowError):
+                pass
+        return config
+
     def __init__(self, tool_dir, app_state, validate_config, log, emit_event):
         self._tool_dir = tool_dir
         self._paths = AppPaths(tool_dir)
@@ -53,7 +65,7 @@ class StorageService:
                 except Exception as exc:
                     config = dict(DEFAULT_CONFIG)
                     self._log(f"[配置] settings.ini 无法解析，已回退默认设置: {exc}", "warn")
-            validated, _ = self._validate_config(config)
+            validated, _ = self._validate_config(self._migrate_task_limits(config))
             self._app_state.replace_config(validated)
             return self._app_state.config_snapshot()
 
@@ -134,7 +146,7 @@ class StorageService:
             try:
                 with self._app_state.config_lock:
                     previous = self._app_state.config_snapshot()
-                    validated, errors = self._validate_config(presets[name], previous)
+                    validated, errors = self._validate_config(self._migrate_task_limits(presets[name]), previous)
                     if errors:
                         return {"error": f"预设包含无效设置: {', '.join(errors)}"}
                     self._app_state.replace_config(validated)

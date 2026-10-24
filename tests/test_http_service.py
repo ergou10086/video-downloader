@@ -100,6 +100,39 @@ def make_dependencies(exit_event):
 
 
 class HttpServiceTests(unittest.TestCase):
+    def test_network_test_status_start_cancel_and_scoped_apply_routes(self):
+        diagnostic = Mock()
+        diagnostic.snapshot.return_value = {"running":False, "phase":"completed"}
+        diagnostic.start.return_value = {"ok":True}
+        diagnostic.cancel.return_value = {"ok":True}
+        diagnostic.apply.return_value = {"ok":True}
+        self.dependencies = replace(self.dependencies, network_diagnostics=diagnostic)
+        self.service.stop()
+        self.service = HttpService(lambda: create_handler(self.dependencies), port=0)
+        self.url = self.service.start()
+        status, body, _ = self.request("/api/network-test")
+        self.assertEqual(json.loads(body)["phase"], "completed")
+        for path in ("start", "cancel"):
+            self.assertEqual(self.request("/api/network-test/" + path, method="POST", payload={})[0], 200)
+        self.request("/api/network-test/apply", method="POST", payload={
+            "mode":"reliable", "result_id":"measured-id", "settings":{"TASK_MAX_PARALLEL":999}})
+        diagnostic.apply.assert_called_once_with("reliable", "measured-id")
+
+    def test_network_test_routes_require_token_and_typed_mode(self):
+        diagnostic = Mock()
+        self.dependencies = replace(self.dependencies, network_diagnostics=diagnostic)
+        self.service.stop()
+        self.service = HttpService(lambda: create_handler(self.dependencies), port=0)
+        self.url = self.service.start()
+        with self.assertRaises(HTTPError) as error:
+            self.request("/api/network-test/start", method="POST", payload={}, token=False)
+        self.assertEqual(error.exception.code, 403)
+        with self.assertRaises(HTTPError) as error:
+            self.request("/api/network-test/apply", method="POST", payload={"mode":[], "result_id":"id"})
+        self.assertEqual(error.exception.code, 400)
+        diagnostic.start.assert_not_called()
+        diagnostic.apply.assert_not_called()
+
     def test_task_password_route_accepts_explicit_skip_and_scoped_prompt(self):
         status, body, _ = self.request("/api/submit-password", method="POST", payload={
             "task_id": "task-1", "item_id": "item-1", "request_id": "prompt-1",

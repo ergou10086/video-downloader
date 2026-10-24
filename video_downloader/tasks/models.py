@@ -63,7 +63,9 @@ class Task:
     cancel_requested: bool = False
     order_index: int = 0
     config: dict = field(default_factory=dict, repr=False)
-    live_parallel: int = 1
+    mixed_parallel: bool = True
+    live_parallel: int = 2
+    download_parallel: int = 1
     items: list[Task] = field(default_factory=list)
     stats: dict = field(default_factory=lambda: {"ok": 0, "fail": 0, "skipped": 0, "total": 0})
     prompts: dict = field(default_factory=dict, repr=False)
@@ -106,6 +108,9 @@ class Task:
             "logs": list(self.logs[-60:]) if include_logs else [],
             "created_ago": max(0, int(time.time() - self.created_at)),
             "url_count": len(self.urls),
+            "mixed_parallel": self.mixed_parallel,
+            "live_parallel": self.live_parallel,
+            "download_parallel": self.download_parallel,
             "stats": dict(self.stats),
             "items": [item.to_dict(include_logs=False) for item in self.items],
             "prompts": [dict(prompt) for prompt in self.prompts.values()],

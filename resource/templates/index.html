@@ -10,7 +10,7 @@
 <link rel="stylesheet" href="/static/css/dark.css">
 <link rel="stylesheet" href="/static/css/responsive.css">
 <link rel="stylesheet" href="/static/css/animations.css">
-<link rel="stylesheet" href="/static/css/settings.css?v=tasks-2">
+<link rel="stylesheet" href="/static/css/settings.css?v=task-network-1">
 </head>
 <body>
 
@@ -294,11 +294,23 @@
 
             <section class="settings-section" id="set-network">
               <div class="sh"><b>网络与代理</b><span class="rule"></span></div>
-              <div class="row"><span class="lb">并发线程数</span><input type="range" id="s_threads" min="1" max="8" value="4"><span class="rval" id="thr_val">4</span></div>
+              <div class="row"><span class="lb">并发线程数</span><input type="range" id="s_threads" min="1" max="32" value="4"><span class="rval" id="thr_val">4</span></div>
               <div class="row"><span class="lb">下载限速</span><input type="range" id="s_speed" min="0" max="50" value="0"><span class="rval" id="spd_val">不限</span></div>
               <div class="row"><span class="lb">启用代理</span><span class="sw" id="sw_proxy" onclick="toggleSwitch(this)"><i></i></span></div>
               <div class="row"><span class="lb">代理类型</span><span class="sel" style="max-width:150px"><select class="ctl" id="s_proxytype"><option value="http">HTTP</option><option value="socks5">SOCKS5</option></select><svg class="ico s14 cv"><use href="#i-chevron"></use></svg></span></div>
               <div class="row"><span class="lb">代理地址</span><input type="text" class="ctl mono" id="s_proxyaddr" value="127.0.0.1" style="flex:1"><span class="dim">:</span><input type="text" class="ctl mono" id="s_proxyport" value="7890" style="width:88px;flex:none"></div>
+              <div class="network-check">
+                <div class="row"><span class="lb">自动调整并发</span><button class="btn" id="btnNetworkTest" onclick="startNetworkTest()">快速检测网络</button><button class="btn gh" id="btnNetworkCancel" onclick="cancelNetworkTest()" disabled>取消检测</button></div>
+                <div class="hint">使用当前代理设置访问 Cloudflare 测试节点，约 20 秒、最多 32 MiB 测试数据（不含协议开销）；检测期间暂停新任务启动，请先完成或取消已有任务。</div>
+                <p id="networkTestStatus" role="status" aria-live="polite">检测后可选择高性能或高可靠配置。</p>
+                <div id="networkTestMetrics" class="network-metrics"></div>
+                <div id="networkTestNotes" class="hint"></div>
+                <div id="networkProfiles" class="network-profiles" style="display:none">
+                  <div class="network-profile"><b>高性能</b><p id="networkPerformanceSummary"></p><p class="mono" id="networkPerformanceSettings"></p><button class="btn" id="btnNetworkPerformance" onclick="applyNetworkProfile('performance')">应用高性能</button></div>
+                  <div class="network-profile"><b>高可靠</b><p id="networkReliableSummary"></p><p class="mono" id="networkReliableSettings"></p><button class="btn" id="btnNetworkReliable" onclick="applyNetworkProfile('reliable')">应用高可靠</button></div>
+                </div>
+                <div class="hint">检测结果 15 分钟内可用，切换网络或代理后请重新检测。快速检测给出本轮线路的观测区间，不代表所有平台的带宽上下限，也不能保证不漏录。高可靠方案仅对普通 yt-dlp 视频限速，保留直播带宽。</div>
+              </div>
             </section>
 
             <section class="settings-section" id="set-cookie">
@@ -334,10 +346,13 @@
             <section class="settings-section" id="set-tasks">
               <div class="sh"><b>任务与并发</b><span class="rule"></span><span class="note">一次点击创建一个任务</span></div>
               <div class="row"><span class="lb">启用任务模式</span><span class="sw on" id="sw_task_mode" onclick="toggleSwitch(this)"><i></i></span><span class="hint">下载/录制进入任务列表；关闭则使用旧单任务模式</span></div>
-              <div class="row"><span class="lb">最大并行任务数</span><input type="number" class="ctl mono" id="s_task_parallel" min="1" max="8" value="1" style="width:100px"><span class="hint">1 表示串行（不并行）；建议 2–4</span></div>
+              <div class="row"><span class="lb">最大并行任务数</span><input type="number" class="ctl mono" id="s_task_parallel" min="1" max="5" value="2" style="width:100px"><span class="hint">默认 2，最多 5；1 表示任务间串行</span></div>
               <div class="row"><span class="lb">任务排序</span><span class="sel"><select class="ctl" id="s_task_order"></select><svg class="ico s14 cv"><use href="#i-chevron"></use></svg></span></div>
-              <div class="row"><span class="lb">任务内直播并行数</span><input type="number" class="ctl mono" id="s_task_live_parallel" min="1" max="8" value="1" style="width:100px"><span class="hint">默认 1，全部链接串行；开启后直播可并行，普通下载最多一路，同任务总链接并行数不超过此值</span></div>
-              <div class="hint">排序仅影响排队任务，不中断正在运行的任务。下载设置在提交时固定；并行上限与排序对队列实时生效。总录制路数最多为两个并行数的乘积；下载线程和限速分别作用于每条链接。</div>
+              <div class="row"><span class="lb">任务内直播与下载并行</span><span class="sw on" id="sw_task_mixed" onclick="toggleSwitch(this);onTaskMixedChange()"><i></i></span><span class="hint">默认开启，直播与视频使用独立额度；关闭后全部链接按输入顺序串行</span></div>
+              <div class="row"><span class="lb">任务内直播并行数</span><input type="number" class="ctl mono" id="s_task_live_parallel" min="2" max="5" value="2" style="width:100px"><span class="hint">默认 2，可设置 2–5 路，不占用视频下载额度</span></div>
+              <div class="row"><span class="lb">任务内视频并行数</span><input type="number" class="ctl mono" id="s_task_download_parallel" min="1" max="5" value="1" style="width:100px"><span class="hint">默认 1，视频下载串行；最多 5 路，不占用直播额度</span></div>
+              <div class="row"><span class="lb">普通下载限速</span><input type="number" class="ctl mono" id="s_task_download_speed" min="0" max="100000" step="0.1" value="0" style="width:110px"><span class="hint">MiB/s / 每条普通 yt-dlp 视频；0 不限，不限制直播，Withny 专用流程不适用</span></div>
+              <div class="hint">排序只影响排队任务；任务间并行数与排序对队列实时生效，任务内设置在提交时固定。默认共可运行 4 路直播 + 2 路视频，上限共 25 路直播 + 25 路视频；每条链接还会使用所设下载线程。</div>
               <div class="hint">任务列表在本次运行期间保留，重启后不恢复。归档和密码确认在对应任务详情内处理；蹲开播仍由等待开播面板管理。</div>
             </section>
 
@@ -742,6 +757,6 @@
 <script src="/static/js/theme.js"></script>
 <script src="/static/js/audio-convert.js"></script>
 <script src="/static/js/audio-volume.js"></script>
-<script src="/static/js/app.js?v=tasks-2"></script>
+<script src="/static/js/app.js?v=task-network-1"></script>
 </body>
 </html>

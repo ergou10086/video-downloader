@@ -30,6 +30,7 @@ from .services.download_executor import DownloadExecutor
 from .services.download_archive import TaskArchiveSession
 from .services.nicochannel_auth import NicochannelAuthService
 from .services.download_manager import DownloadManager
+from .services.network_diagnostics import NetworkDiagnostics
 from .services.po_token_provider import PoTokenProviderService
 from .services.storage import StorageService
 from .services.tools import ToolService
@@ -318,7 +319,7 @@ class AppContainer:
         task_manager = TaskManager(
             base_app_state=app_state,
             executor_factory=make_task_executor,
-            max_parallel_getter=lambda: app_state.config_snapshot().get("TASK_MAX_PARALLEL", 1),
+            max_parallel_getter=lambda: app_state.config_snapshot().get("TASK_MAX_PARALLEL", 2),
             order_getter=lambda: app_state.config_snapshot().get("TASK_ORDER", "none"),
             publish=app_state.publish,
             cancel_idle_timer=cancel_idle_timer,
@@ -536,6 +537,7 @@ class AppContainer:
 
         def request_exit() -> None:
             download_executor.stop_download()
+            network_diagnostics.stop()
             live_watch_service.stop()
             task_manager.stop()
             download_executor.wait_for_live_finalization()
@@ -544,6 +546,12 @@ class AppContainer:
             exit_event.set()
 
         # ---- HTTP 服务 ----
+        network_diagnostics = NetworkDiagnostics(
+            app_state=app_state, save_config=save_config,
+            begin_guard=tool_service._begin_maintenance,
+            end_guard=tool_service._end_maintenance, publish=app_state.publish,
+        )
+
         def create_http_service() -> HttpService:
             deps = HttpHandlerDependencies(
                 session_token=session_token,
@@ -596,6 +604,7 @@ class AppContainer:
                 audio_loudnorm=audio_loudnorm,
                 audio_volume=audio_volume,
                 request_exit=request_exit,
+                network_diagnostics=network_diagnostics,
                 list_live_recordings=self._recordings.recent,
                 get_live_report=self._recordings.report,
             )

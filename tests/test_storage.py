@@ -12,6 +12,26 @@ from video_downloader.services.storage import StorageService
 
 
 class StorageServiceTests(unittest.TestCase):
+    def test_old_task_limits_are_clamped_without_losing_other_settings(self):
+        (Path(self.temp_dir.name) / "settings.ini").write_text(
+            "[settings]\ntask_max_parallel=8\ntask_live_parallel=1\nresolution=720\n", encoding="utf-8")
+        config = self.storage.load_config()
+        self.assertEqual(config["TASK_MAX_PARALLEL"], 5)
+        self.assertEqual(config["TASK_LIVE_PARALLEL"], 2)
+        self.assertEqual(config["TASK_DOWNLOAD_PARALLEL"], 1)
+        self.assertEqual(config["TASK_MIXED_PARALLEL"], 1)
+        self.assertEqual(config["RESOLUTION"], "720")
+
+    def test_old_preset_limits_migrate_to_new_ranges(self):
+        self.state.replace_config(DEFAULT_CONFIG)
+        (Path(self.temp_dir.name) / "presets.json").write_text(json.dumps({
+            "old": {"TASK_MAX_PARALLEL":8, "TASK_LIVE_PARALLEL":1, "RESOLUTION":"1080"}
+        }), encoding="utf-8")
+        result = self.storage.load_preset("old")
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["config"]["TASK_MAX_PARALLEL"], 5)
+        self.assertEqual(result["config"]["TASK_LIVE_PARALLEL"], 2)
+
     def setUp(self):
         self.temp_dir = tempfile.TemporaryDirectory()
         self.state = AppState()

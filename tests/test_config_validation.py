@@ -6,15 +6,29 @@ from video_downloader.core.validation import validate_config
 
 class ConfigValidationTests(unittest.TestCase):
     def test_task_live_parallel_default_and_bounds(self):
-        self.assertEqual(validate_config({})[0]["TASK_LIVE_PARALLEL"], 1)
-        for value in (1, 8):
+        self.assertEqual(validate_config({})[0]["TASK_LIVE_PARALLEL"], 2)
+        for value in (2, 5):
             config, errors = validate_config({"TASK_LIVE_PARALLEL": value})
             self.assertEqual(errors, [])
             self.assertEqual(config["TASK_LIVE_PARALLEL"], value)
-        for value in (0, 9, "bad"):
+        for value in (0, 1, 6, "bad"):
             config, errors = validate_config({"TASK_LIVE_PARALLEL": value})
             self.assertTrue(errors)
-            self.assertEqual(config["TASK_LIVE_PARALLEL"], 1)
+            self.assertEqual(config["TASK_LIVE_PARALLEL"], 2)
+
+    def test_task_parallel_defaults_and_download_limits(self):
+        defaults, _ = validate_config({})
+        self.assertEqual(defaults["TASK_MAX_PARALLEL"], 2)
+        self.assertEqual(defaults["TASK_MIXED_PARALLEL"], 1)
+        self.assertEqual(defaults["TASK_DOWNLOAD_PARALLEL"], 1)
+        for key in ("TASK_MAX_PARALLEL", "TASK_DOWNLOAD_PARALLEL"):
+            for value in (1, 5):
+                self.assertEqual(validate_config({key:value})[1], [])
+            for value in (0, 6):
+                self.assertTrue(validate_config({key:value})[1])
+        for value in (-1, float("inf"), float("nan")):
+            self.assertTrue(validate_config({"TASK_DOWNLOAD_SPEED_LIMIT":value})[1])
+        self.assertEqual(validate_config({"TASK_DOWNLOAD_SPEED_LIMIT":0.3})[0]["TASK_DOWNLOAD_SPEED_LIMIT"], 0.3)
     def test_disabled_proxy_accepts_empty_port(self):
         validated, errors = validate_config({"PROXY_ENABLED": 0, "PROXY_PORT": ""})
         self.assertEqual(errors, [])

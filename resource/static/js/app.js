@@ -19,6 +19,10 @@ let taskModeEnabled = true;
 let taskSnapshotVersion = 0;
 let taskLoadRequest = 0;
 const seenTaskPrompts = new Set();
+let networkPollTimer = null;
+let networkResultId = '';
+let networkApplying = false;
+let networkEventVersion = 0;
 let livePlatformModes = {};
 let liveCapabilities = null;
 let liveNoticeResolver = null;
@@ -186,6 +190,7 @@ function init() {
   loadLiveWatch();
   api('/api/live/recordings').then(data => (data.recordings || []).reverse().forEach(renderLiveRecording)).catch(() => {});
   loadTasks();
+  loadNetworkStatus();
   initSettingsToc();
   loadLiveCapabilities();
 
@@ -331,6 +336,10 @@ function applyConfig(s) {
   }
   if(s.TASK_MAX_PARALLEL !== undefined) $('s_task_parallel').value = s.TASK_MAX_PARALLEL;
   if(s.TASK_LIVE_PARALLEL !== undefined) $('s_task_live_parallel').value = s.TASK_LIVE_PARALLEL;
+  setSwitch('sw_task_mixed', s.TASK_MIXED_PARALLEL === undefined ? 1 : s.TASK_MIXED_PARALLEL);
+  if(s.TASK_DOWNLOAD_PARALLEL !== undefined) $('s_task_download_parallel').value = s.TASK_DOWNLOAD_PARALLEL;
+  if(s.TASK_DOWNLOAD_SPEED_LIMIT !== undefined) $('s_task_download_speed').value = s.TASK_DOWNLOAD_SPEED_LIMIT;
+  onTaskMixedChange();
   if(s.TASK_ORDER !== undefined) $('s_task_order').value = s.TASK_ORDER;
   setSwitch('sw_meta', s.EMBED_META);
   setSwitch('sw_thumb', s.DOWNLOAD_THUMB);
@@ -544,8 +553,11 @@ function collectCfg() {
     LIVE_MIN_FREE_MB: Number($('s_live_free_mb').value),
     LIVE_ESTIMATED_BITRATE_KBPS: Number($('s_live_bitrate').value),
     TASK_MODE: isOn('sw_task_mode') ? 1 : 0,
-    TASK_MAX_PARALLEL: Math.max(1, Math.min(8, parseInt($('s_task_parallel').value) || 1)),
-    TASK_LIVE_PARALLEL: Math.max(1, Math.min(8, parseInt($('s_task_live_parallel').value) || 1)),
+    TASK_MAX_PARALLEL: Math.max(1, Math.min(5, parseInt($('s_task_parallel').value) || 2)),
+    TASK_MIXED_PARALLEL: isOn('sw_task_mixed') ? 1 : 0,
+    TASK_LIVE_PARALLEL: Math.max(2, Math.min(5, parseInt($('s_task_live_parallel').value) || 2)),
+    TASK_DOWNLOAD_PARALLEL: Math.max(1, Math.min(5, parseInt($('s_task_download_parallel').value) || 1)),
+    TASK_DOWNLOAD_SPEED_LIMIT: Math.max(0, Math.min(100000, parseFloat($('s_task_download_speed').value) || 0)),
     TASK_ORDER: $('s_task_order').value,
     EMBED_META: isOn('sw_meta')?1:0,
     DOWNLOAD_THUMB: isOn('sw_thumb')?1:0,
@@ -582,6 +594,98 @@ async function resetSettings() {
   if(!confirm('确定恢复默认设置？')) return;
   await api('/api/reset-config', {method:'POST'});
   location.reload();
+}
+
+function onTaskMixedChange() {
+  const disabled = !isOn('sw_task_mixed');
+  $('s_task_live_parallel').disabled = disabled;
+  $('s_task_download_parallel').disabled = disabled;
+}
+
+function describeNetworkSettings(settings) {
+  const limit = settings.TASK_DOWNLOAD_SPEED_LIMIT;
+  return `${settings.TASK_MAX_PARALLEL} 个任务；每任务 ${settings.TASK_LIVE_PARALLEL} 路直播 + ${settings.TASK_DOWNLOAD_PARALLEL} 路视频；每链接 ${settings.THREADS} 分片线程；视频${limit ? '限速 ' + limit + ' MiB/s' : '不限速'}。全局限速设为不限。`;
+}
+
+function renderNetworkTest(data) {
+  if(!data) return;
+  clearTimeout(networkPollTimer);
+  $('btnNetworkTest').disabled = Boolean(data.running) || networkApplying;
+  $('btnNetworkCancel').disabled = !data.running;
+  $('networkTestStatus').textContent = data.message || '尚未检测';
+  const result = data.phase === 'completed' ? data.result : null;
+  networkResultId = result?.id || '';
+  $('networkProfiles').style.display = result ? '' : 'none';
+  $('networkTestMetrics').textContent = '';
+  $('networkTestNotes').textContent = '';
+  if(result) {
+    const m = result.metrics;
+    const fmt = (value, unit) => Number.isFinite(value) ? value + unit : '未测得';
+    $('networkTestMetrics').textContent = [
+      `线路：${result.route} · ${m.duration_seconds} 秒 · 下载 ${m.downloaded_mib} MiB · ${m.sample_count} 个 HTTP 样本`,
+      `吞吐观测区间：${fmt(m.download_low_mbps, ' Mbps')} – ${fmt(m.download_high_mbps, ' Mbps')}`,
+      `单连接：${fmt(m.single_mbps, ' Mbps')} · 多连接：${fmt(m.parallel_mbps, ' Mbps')}`,
+      `HTTP 首字节延迟（含握手）：${fmt(m.http_latency_ms, ' ms')} · 抖动：${fmt(m.http_jitter_ms, ' ms')}`,
+      `负载延迟：${fmt(m.loaded_latency_ms, ' ms')} · HTTP 请求失败率：${(m.request_failure_rate * 100).toFixed(1)}% · ${m.confidence === 'limited' ? '样本有限' : '样本正常'}`
+    ].join('\n');
+    $('networkTestNotes').textContent = (result.notes || []).join(' ');
+    for(const [mode, name] of [['performance','Performance'],['reliable','Reliable']]) {
+      const profile = result.profiles[mode];
+      $('network' + name + 'Summary').textContent = profile.summary;
+      $('network' + name + 'Settings').textContent = describeNetworkSettings(profile.settings);
+      $('btnNetwork' + name).disabled = networkApplying;
+    }
+  }
+  if(data.running) networkPollTimer = setTimeout(loadNetworkStatus, 700);
+}
+
+async function loadNetworkStatus() {
+  const version = networkEventVersion;
+  try {
+    const result = await api('/api/network-test');
+    if(version === networkEventVersion) renderNetworkTest(result);
+  } catch(e) {
+    $('networkTestStatus').textContent = '读取检测状态失败：' + e.message;
+    $('btnNetworkTest').disabled = false;
+  }
+}
+
+async function startNetworkTest() {
+  $('btnNetworkTest').disabled = true;
+  try {
+    await saveSettingsNoAlert();
+    const result = await api('/api/network-test/start', {method:'POST', body:'{}'});
+    if(result.error) showToast(result.error, 'error');
+    await loadNetworkStatus();
+  } catch(e) {
+    showToast('网络检测启动失败：' + e.message, 'error');
+    $('btnNetworkTest').disabled = false;
+  }
+}
+
+async function cancelNetworkTest() {
+  try {
+    await api('/api/network-test/cancel', {method:'POST', body:'{}'});
+    await loadNetworkStatus();
+  } catch(e) { showToast('取消检测失败：' + e.message, 'error'); }
+}
+
+async function applyNetworkProfile(mode) {
+  if(!networkResultId || networkApplying) return;
+  const resultId = networkResultId;
+  networkApplying = true;
+  $('btnNetworkPerformance').disabled = $('btnNetworkReliable').disabled = true;
+  $('btnNetworkTest').disabled = true;
+  try {
+    // Preserve unrelated edits; the server then patches only tuning fields and
+    // rejects recommendations measured with different proxy settings.
+    await saveSettingsNoAlert();
+    const result = await api('/api/network-test/apply', {method:'POST', body:JSON.stringify({mode, result_id:resultId})});
+    if(result.error) { showToast(result.error, 'error'); return; }
+    applyConfig(result.config);
+    showToast((mode === 'performance' ? '高性能' : '高可靠') + '配置已保存，将用于新任务', 'success');
+  } catch(e) { showToast('应用自动配置失败：' + e.message, 'error'); }
+  finally { networkApplying = false; loadNetworkStatus(); }
 }
 
 async function loadDeps() {
@@ -1639,6 +1743,9 @@ function connectSSE() {
     } else if(evt.type === 'task_snapshot') {
       taskSnapshotVersion++;
       renderTasks(evt.data && evt.data.tasks ? evt.data.tasks : []);
+    } else if(evt.type === 'network_test') {
+      networkEventVersion++;
+      renderNetworkTest(evt.data);
     } else if(evt.type === 'ready') {
       taskSnapshotVersion++;
       const readyData = Array.isArray(evt.data) ? {logs:evt.data, running:false} : evt.data;
@@ -1660,6 +1767,10 @@ function connectSSE() {
         updateStatsVisibility();
       }
       if(Array.isArray(readyData.tasks)) renderTasks(readyData.tasks);
+      if(readyData.network_test) {
+        networkEventVersion++;
+        renderNetworkTest(readyData.network_test);
+      }
       if(readyData.archive_prompt) showArchiveChoice(readyData.archive_prompt);
       else closeArchiveChoice();
       if(readyData.update) {

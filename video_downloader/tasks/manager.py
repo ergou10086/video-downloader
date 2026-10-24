@@ -76,11 +76,11 @@ class TaskManager:
             self._wake.clear()
 
     @staticmethod
-    def _limit(value):
+    def _limit(value, default=1, minimum=1):
         try:
-            return max(1, min(8, int(value)))
-        except (TypeError, ValueError):
-            return 1
+            return max(minimum, min(5, int(value)))
+        except (TypeError, ValueError, OverflowError):
+            return default
 
     def submit(self, urls, *, kind=None, live_mode=None, bili_parts=None,
                bili_parts_map=None, tc_password=None, custom_args=None,
@@ -106,7 +106,9 @@ class TaskManager:
                 urls=cleaned, kind=kind or ("live" if any(i.kind == "live" for i in items) else "download"),
                 live_mode=live_mode, bili_parts=bili_parts, bili_parts_map=copy.deepcopy(bili_parts_map),
                 tc_password=tc_password, custom_args=custom_args, order_index=self._order_seq,
-                config=config, live_parallel=self._limit(config.get("TASK_LIVE_PARALLEL", 1)),
+                config=config, mixed_parallel=bool(int(config.get("TASK_MIXED_PARALLEL", 1))),
+                live_parallel=self._limit(config.get("TASK_LIVE_PARALLEL", 2), default=2, minimum=2),
+                download_parallel=self._limit(config.get("TASK_DOWNLOAD_PARALLEL", 1)),
                 items=items, message="排队中", operation=operation, selection=dict(selection or {}),
                 stats={"ok": 0, "fail": 0, "skipped": 0, "total": len(items)})
             self._tasks[task.id] = task
@@ -232,7 +234,7 @@ class TaskManager:
         with self._lock:
             if self._stopping.is_set() or not self._accepting():
                 return
-            free = self._limit(self._max_parallel_getter()) - len(self._runtimes)
+            free = self._limit(self._max_parallel_getter(), default=2) - len(self._runtimes)
             queued = [t for t in self._tasks.values() if t.status is TaskStatus.QUEUED and not t.cancel_requested]
             order = self._order_getter()
             queued.sort(key=lambda t: (
@@ -261,12 +263,17 @@ class TaskManager:
                 workers = {w: item for w, item in workers.items() if w.is_alive()}
                 if task.cancel_requested:
                     pending.clear()
-                while pending and len(workers) < task.live_parallel:
-                    normal_running = any(item.kind != "live" for item in workers.values())
-                    # Download URLs stay serial and FIFO. With internal parallelism
-                    # enabled they may overlap live URLs, within the same total cap.
-                    index = next((i for i, item in enumerate(pending)
-                                  if item.kind == "live" or not normal_running), None)
+                while pending and not task.cancel_requested:
+                    live_running = sum(item.kind == "live" for item in workers.values())
+                    downloads_running = len(workers) - live_running
+                    if not task.mixed_parallel:
+                        index = 0 if not workers else None
+                    else:
+                        # Separate lanes: a long recording cannot occupy a video
+                        # slot, and queued videos cannot consume live capacity.
+                        index = next((i for i, item in enumerate(pending)
+                                      if (live_running < task.live_parallel if item.kind == "live"
+                                          else downloads_running < task.download_parallel)), None)
                     if index is None:
                         break
                     item = pending.pop(index)
@@ -283,7 +290,12 @@ class TaskManager:
             self._complete(task)
 
     def _run_item(self, task, item):
-        state = TaskAppState(self._base_app_state, task.id, task.config,
+        config = dict(task.config)
+        video_limit = float(config.get("TASK_DOWNLOAD_SPEED_LIMIT", 0))
+        if item.kind != "live" and video_limit > 0:
+            configured = float(config.get("SPEED_LIMIT", 0))
+            config["SPEED_LIMIT"] = min(configured, video_limit) if configured > 0 else video_limit
+        state = TaskAppState(self._base_app_state, task.id, config,
                              publish=lambda event: self._on_state(task, item, event))
         done, dm = threading.Event(), DownloadManager()
         callbacks = TaskCallbacks(

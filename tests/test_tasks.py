@@ -260,7 +260,7 @@ class TaskRegressionTests(unittest.TestCase):
         self.assertTrue(wait_until(lambda: len(started) == 3))
         manager.cancel_all()
         self.assertTrue(wait_until(lambda: not manager.has_active()))
-        state.update_config({"TASK_LIVE_PARALLEL": 1})
+        state.update_config({"TASK_MIXED_PARALLEL": 0})
         started.clear()
         manager.submit(urls)
         self.assertTrue(wait_until(lambda: len(started) == 1))
@@ -426,6 +426,61 @@ class TaskRegressionTests(unittest.TestCase):
         manager, _, started, executors = self.make()
         result = manager.submit(["https://youtube.com/watch?v=live"], kind="live")
         self.assertEqual(result["task"]["items"][0]["kind"], "live")
+
+    def test_default_lanes_allow_two_recordings_and_one_video_regardless_of_order(self):
+        for live_first in (True, False):
+            manager, _, started, executors = self.make()
+            videos = [f"https://example.com/video{i}" for i in range(3)]
+            lives = [f"https://twitch.tv/channel{i}" for i in range(3)]
+            urls = lives + videos if live_first else videos + lives
+            manager.submit(urls)
+            self.assertTrue(wait_until(lambda: len(started) == 3))
+            self.assertEqual(set(started), {videos[0], lives[0], lives[1]})
+            executors[videos[0]].finish()
+            self.assertTrue(wait_until(lambda: videos[1] in started))
+            self.assertNotIn(lives[2], started)
+            executors[lives[0]].finish()
+            self.assertTrue(wait_until(lambda: lives[2] in started))
+            manager.stop()
+
+    def test_independent_limits_allow_five_live_and_five_videos(self):
+        manager, _, started, _ = self.make(config={"TASK_LIVE_PARALLEL": 5, "TASK_DOWNLOAD_PARALLEL": 5})
+        manager.submit([f"https://twitch.tv/channel{i}" for i in range(6)] +
+                       [f"https://example.com/video{i}" for i in range(6)])
+        self.assertTrue(wait_until(lambda: len(started) == 10))
+        task = manager.list_tasks()[0]
+        self.assertEqual(sum("twitch" in url for url in started), 5)
+        self.assertEqual(task["download_parallel"], 5)
+
+    def test_master_switch_makes_even_mixed_urls_strictly_serial(self):
+        manager, _, started, executors = self.make(config={
+            "TASK_MIXED_PARALLEL": 0, "TASK_LIVE_PARALLEL": 5, "TASK_DOWNLOAD_PARALLEL": 5})
+        urls = ["https://twitch.tv/a", "https://example.com/v", "https://twitch.tv/b"]
+        manager.submit(urls)
+        self.assertTrue(wait_until(lambda: len(started) == 1))
+        self.assertEqual(started, urls[:1])
+        executors[urls[0]].finish()
+        self.assertTrue(wait_until(lambda: len(started) == 2))
+        self.assertEqual(started, urls[:2])
+
+    def test_parent_concurrency_is_capped_at_five_even_for_old_config(self):
+        manager, _, started, _ = self.make(parallel=8)
+        for i in range(6):
+            manager.submit([f"https://example.com/{i}"])
+        self.assertTrue(wait_until(lambda: len(started) == 5))
+        self.assertEqual(len(manager._runtimes), 5)
+
+    def test_video_only_speed_budget_never_limits_recording(self):
+        states = []
+        def factory(task, state, dm, cb, done):
+            states.append(state.config_snapshot())
+            return FakeExecutor(task, cb, done)
+        manager, _, _, _ = self.make(factory=factory, config={
+            "TASK_DOWNLOAD_SPEED_LIMIT": .3, "SPEED_LIMIT": 0})
+        manager.submit(["https://twitch.tv/a", "https://example.com/v"])
+        self.assertTrue(wait_until(lambda: not manager.has_active()))
+        self.assertEqual(sorted(s["SPEED_LIMIT"] for s in states), [0, .3])
+
 
 
 
