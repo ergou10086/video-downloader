@@ -56,9 +56,10 @@ def cookie_from_file(path):
 class BililiveEngine:
     name = "bililive-recorder"
 
-    def __init__(self, binary, session, room_id, *, cookie=""):
+    def __init__(self, binary, session, room_id, *, cookie="", danmaku=True):
         self.binary, self.session, self.room_id = str(binary), session, int(room_id)
         self.cookie = cookie
+        self.danmaku = danmaku
         self.user, self.password = secrets.token_urlsafe(12), secrets.token_urlsafe(32)
         # 2.20 suppresses Kestrel's listening-address log; reserve an OS-assigned
         # port. A bind race is a startup failure handled before media fallback.
@@ -74,7 +75,7 @@ class BililiveEngine:
         command = [self.binary, "portable", str(directory), str(self.room_id),
                    "--bind", self.base_url, "--http-basic-user", self.user,
                    "--http-basic-pass", self.password, "--enable-file-browser", "false",
-                   "--mode", "Standard", "--danmaku", "All", "--webhook-url", self.events.url,
+                   "--mode", "Standard", "--danmaku", "All" if self.danmaku else "None", "--webhook-url", self.events.url,
                    "--log", "Information", "--flog", "Error"]
         if self.cookie:
             command += ["--cookie", self.cookie]

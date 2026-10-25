@@ -194,6 +194,8 @@ class RecordingStore:
                 result.append({"job_id": data["job_id"], "engine": parts[-1]["engine"] if parts else "",
                                "part": len(parts), "report_dir": str(path.parent),
                                "conclusion": data.get("conclusion"), "stop_reason": data.get("stop_reason"),
+                               "comments": data.get("comments", {}),
+                               "catch_up": data.get("catch_up", {}),
                                "report": str(path.parent / "integrity-report.json") if data.get("conclusion") else ""})
             except (OSError, ValueError, KeyError, TypeError):
                 continue

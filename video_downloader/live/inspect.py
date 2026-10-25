@@ -57,13 +57,15 @@ class LiveInspector:
         probe = self._probe_service.probe(target, timeout=20.0)
         now = self._clock()
         requested = _safe_mode(requested_mode)
-        catch_up_available = capability.catch_up is Support.SUPPORTED
+        catch_up_available = probe.catch_up_available and capability.catch_up is not Support.UNSUPPORTED
+        catch_up_reason = (capability.catch_up_reason if capability.catch_up is Support.UNSUPPORTED
+                           else probe.catch_up_reason or capability.catch_up_reason)
         modes = [
             {
                 "value": LiveMode.CATCH_UP.value,
                 "label": "追开播",
                 "available": catch_up_available,
-                "reason": capability.catch_up_reason if not catch_up_available else "",
+                "reason": catch_up_reason,
             },
             {
                 "value": LiveMode.LIVE_EDGE.value,
@@ -92,13 +94,16 @@ class LiveInspector:
             "modes": modes,
             "probe_error": probe.error,
             "source": probe.source,
+            "catch_up_reason": catch_up_reason,
         })
 
         if probe.status is LiveStatus.LIVE:
             effective = _choose_live_mode(platform, requested, catch_up_available)
             warning = ""
-            if requested is LiveMode.CATCH_UP and not catch_up_available:
-                warning = f"{platform} 不支持追开播：{capability.catch_up_reason}；已降级为从当前时刻录制"
+            if (requested is LiveMode.CATCH_UP or (requested is LiveMode.AUTO and
+                    auto_mode_for(platform) is LiveMode.CATCH_UP)) and not catch_up_available:
+                label = "不支持追开播" if capability.catch_up is Support.UNSUPPORTED else "追开播不可用"
+                warning = f"{platform} {label}：{catch_up_reason}；已降级为从当前时刻录制"
             base.update({
                 "recommended_mode": effective.value,
                 "effective_mode": effective.value,

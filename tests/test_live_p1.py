@@ -164,6 +164,7 @@ class PreferencesAndInspectTests(unittest.TestCase):
         probe = LiveProbe(
             "YouTube", TargetKind.EVENT, "abc", LiveStatus.LIVE,
             started_at=900.0, title="live", uploader="u",
+            catch_up_available=True, catch_up_reason="已验证 DASH",
         )
         result = self._inspector(probe).inspect("https://youtube.com/live/abc", "auto")
         self.assertEqual(result["status"], "live")

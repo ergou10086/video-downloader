@@ -237,7 +237,10 @@ function selectPlatform(name) {
 }
 
 /** 切换开关状态。 */
-function toggleSwitch(el) { el.classList.toggle('on'); }
+function toggleSwitch(el) {
+  el.classList.toggle('on');
+  if(el.getAttribute('role') === 'switch') el.setAttribute('aria-checked', String(el.classList.contains('on')));
+}
 /** 判断开关是否处于开启状态。 */
 function isOn(id) { return $(id).classList.contains('on'); }
 
@@ -326,6 +329,9 @@ function applyConfig(s) {
     renderLivePlatformModes();
   }
   if(s.LIVE_DOWNLOAD_TIMEOUT !== undefined) $('s_live_timeout').value = s.LIVE_DOWNLOAD_TIMEOUT || 0;
+  setSwitch('sw_live_danmaku', s.LIVE_DANMAKU_ENABLED);
+  setSwitch('sw_live_danmaku_anon', s.LIVE_DANMAKU_ANONYMIZE);
+  $('s_live_danmaku_formats').value = s.LIVE_DANMAKU_FORMATS || 'srt,ass';
   for(const [key, id] of Object.entries({LIVE_MAX_RETRIES:'s_live_retries', LIVE_WATCHDOG_SECONDS:'s_live_watchdog', LIVE_MIN_FREE_MB:'s_live_free_mb', LIVE_ESTIMATED_BITRATE_KBPS:'s_live_bitrate'})) {
     if(s[key] !== undefined) $(id).value = s[key];
   }
@@ -367,6 +373,7 @@ function applyConfig(s) {
 /** 根据值设置开关的开关状态。 */
 function setSwitch(id, val) {
   if(val) $(id).classList.add('on'); else $(id).classList.remove('on');
+  if($(id).getAttribute('role') === 'switch') $(id).setAttribute('aria-checked', String(!!val));
 }
 
 /** 音频模式切换时更新格式选择器的可用状态。 */
@@ -443,8 +450,8 @@ function renderLivePlatformModes() {
     YouTube: {catch_up:'supported', live_edge:true},
     Twitch: {catch_up:'supported', live_edge:true}
   };
-  const rows = Object.entries(caps).filter(([, c]) =>
-    c && c.catch_up === 'supported' && c.live_edge
+  const rows = Object.entries(caps).filter(([name, c]) =>
+    c && ['supported','conditional'].includes(c.catch_up) && c.live_edge && ['YouTube','Twitch'].includes(name)
   );
   if(!rows.length) {
     host.innerHTML = '<div class="live-platform-empty">当前没有同时支持追开播和当前录制的平台</div>';
@@ -548,6 +555,9 @@ function collectCfg() {
     LIVE_MODE: $('s_live_mode').value,
     LIVE_PLATFORM_MODES: JSON.stringify(collectLivePlatformModes()),
     LIVE_DOWNLOAD_TIMEOUT: parseInt($('s_live_timeout').value) || 0,
+    LIVE_DANMAKU_ENABLED: isOn('sw_live_danmaku') ? 1 : 0,
+    LIVE_DANMAKU_ANONYMIZE: isOn('sw_live_danmaku_anon') ? 1 : 0,
+    LIVE_DANMAKU_FORMATS: $('s_live_danmaku_formats').value,
     LIVE_MAX_RETRIES: Number($('s_live_retries').value),
     LIVE_WATCHDOG_SECONDS: Number($('s_live_watchdog').value),
     LIVE_MIN_FREE_MB: Number($('s_live_free_mb').value),
@@ -1923,7 +1933,9 @@ function renderLiveRecording(data) {
     const state = job.conclusion ? conclusions[job.conclusion] || job.conclusion : `录制中 · 分段 ${job.part || 1}`;
     const reason = {user:'已停止（已收尾）', timeout:'已到录制时限', crash:'进程崩溃', disk_full:'磁盘不足'}[job.stop_reason] || '';
     const reportLink = job.report ? `<p><a target="_blank" rel="noopener" href="/api/live/report?job_id=${encodeURIComponent(job.job_id)}&token=${encodeURIComponent(SESSION_TOKEN)}">查看完整性报告</a></p>` : '';
-    return `<div class="notice"><b>${escHtml(job.engine || '直播')} ${job.degraded ? '· 已降级' : ''}</b><p>${escHtml(reason ? reason + ' · ' + state : state)}</p><small class="mono">${escHtml(job.report || job.report_dir || '')}</small>${reportLink}</div>`;
+    const commentLabels = {exported:'弹幕已导出', partial:'弹幕部分导出', failed:'弹幕导出失败，媒体保留', unavailable:'弹幕来源不可用'};
+    const comments = commentLabels[job.comments?.status] || '';
+    return `<div class="notice"><b>${escHtml(job.engine || '直播')} ${job.degraded ? '· 已降级' : ''}</b><p>${escHtml(reason ? reason + ' · ' + state : state)}</p>${job.reason ? `<p>${escHtml(job.reason)}</p>` : ''}${comments ? `<p>${escHtml(comments)}</p>` : ''}<small class="mono">${escHtml(job.report || job.report_dir || '')}</small>${reportLink}</div>`;
   }).join('');
 }
 

@@ -37,16 +37,17 @@ class IntegrityChecker:
             return result
         try:
             completed = subprocess.run(
-                [self.ffprobe, "-v", "error", "-show_error", "-show_format", "-show_streams",
+                [self.ffprobe, "-v", "error", "-show_error", "-show_format", "-show_streams", "-show_data_hash", "sha256",
                  "-of", "json", str(path)], capture_output=True, timeout=self.timeout, **hidden_options())
             metadata = json.loads(completed.stdout or b"{}")
             if completed.returncode or completed.stderr or metadata.get("error"):
                 result["errors"].append("ffprobe_error")
             streams = metadata.get("streams", [])
-            result["streams"] = [{key: stream.get(key) for key in
+            result["streams"] = [{**{key: stream.get(key) for key in
                                   ("index", "codec_type", "codec_name", "width", "height", "sample_rate",
-                                   "channels", "start_time", "duration", "time_base", "avg_frame_rate")} for stream in streams]
-            kinds = {stream.get("codec_type") for stream in streams}
+                                   "channels", "start_time", "duration", "time_base", "avg_frame_rate", "extradata_hash")},
+                                  "attached_pic": bool(stream.get("disposition", {}).get("attached_pic"))} for stream in streams]
+            kinds = {stream.get("codec_type") for stream in streams if not stream.get("disposition", {}).get("attached_pic")}
             if ("a" in expected and "audio" not in kinds) or ("v" in expected and "video" not in kinds):
                 result["errors"].append("missing_track")
             result["container"] = metadata.get("format", {}).get("format_name", "")
@@ -113,7 +114,7 @@ class IntegrityChecker:
         usable = any(file["valid"] for file in files)
         issues = list(warnings)
         missing_pair = expected == "separate" and not {"audio", "video"}.issubset(
-            {s.get("codec_type") for file in files for s in file.get("streams", [])})
+            {s.get("codec_type") for file in files for s in file.get("streams", []) if not s.get("attached_pic")})
         if missing_pair:
             issues.append("missing_track_pair")
         if any(file.get("warnings") for file in files):

@@ -21,6 +21,8 @@ from urllib.parse import urlencode, urlparse
 from urllib.request import Request, urlopen
 
 from .urls import LiveTarget, TargetKind
+from .catchup import CatchUpPlanner, context_arguments
+from .process import hidden_options
 
 
 class LiveStatus(str, Enum):
@@ -50,6 +52,8 @@ class LiveProbe:
     observed_at: float = 0.0
     error: str = ""
     retryable: bool = True
+    catch_up_available: bool = False
+    catch_up_reason: str = "尚未验证该场直播的追播能力"
 
     def to_dict(self) -> dict:
         return {
@@ -68,6 +72,8 @@ class LiveProbe:
             "observed_at": self.observed_at,
             "error": self.error,
             "retryable": self.retryable,
+            "catch_up_available": self.catch_up_available,
+            "catch_up_reason": self.catch_up_reason,
         }
 
 
@@ -214,10 +220,11 @@ class YtDlpProbe:
     platform = "*"
 
     def __init__(self, ytdlp_path: str, runner: Callable[..., object] | None = None,
-                 plugin_dirs: list[str] | None = None):
+                 plugin_dirs: list[str] | None = None, command_context=None):
         self._ytdlp_path = ytdlp_path
         self._plugin_dirs = list(plugin_dirs or [])
         self._runner = runner or self._default_runner
+        self._command_context = command_context
 
     @staticmethod
     def _default_runner(command, timeout):
@@ -228,11 +235,13 @@ class YtDlpProbe:
             encoding="utf-8",
             errors="replace",
             timeout=timeout,
+            **hidden_options(),
         )
 
     def _command(self, target: LiveTarget) -> list[str]:
         command = [
             self._ytdlp_path,
+            "--ignore-config",
             "--simulate",
             "--dump-single-json",
             "--no-warnings",
@@ -241,6 +250,9 @@ class YtDlpProbe:
         ]
         for plugin_dir in self._plugin_dirs:
             command.extend(["--plugin-dirs", plugin_dir])
+        if self._command_context:
+            command += context_arguments(self._command_context(target))
+        command += ["--no-live-from-start", "--no-playlist"]
         command.append(target.url)
         return command
 
@@ -299,6 +311,10 @@ class YtDlpProbe:
             scheduled = None
         stable = str(info.get("id") or target.stable_id)
         stream_key = f"{target.platform or ''}:{stable}:{timestamp or ''}" if status is LiveStatus.LIVE else ""
+        evidence = None
+        if status is LiveStatus.LIVE and target.platform in {"YouTube", "Twitch"}:
+            evidence = CatchUpPlanner(self._runner).probe(self._command(target), target.url, target.platform,
+                                                        edge_info=info)
         return LiveProbe(
             platform=target.platform or "",
             target_kind=target.kind,
@@ -313,6 +329,8 @@ class YtDlpProbe:
             live_status_raw=str(info.get("live_status") or info.get("is_live") or ""),
             source="yt_dlp",
             observed_at=time.time(),
+            catch_up_available=bool(evidence and evidence.available),
+            catch_up_reason=evidence.reason if evidence else "该平台尚未验证追播，使用从当前时刻录制",
         )
 
 
@@ -357,12 +375,14 @@ class ProbeService:
         plugin_dirs: list[str] | None = None,
         cache_ttl: float = 15.0,
         clock: Callable[[], float] = time.time,
+        command_context=None,
     ):
         self._providers = dict(providers or {
             "Bilibili": BilibiliProbe(http_json=http_json),
             "TwitCasting": TwitCastingProbe(http_json=http_json),
         })
-        self._fallback = YtDlpProbe(ytdlp_path or "", runner=runner, plugin_dirs=plugin_dirs)
+        self._fallback = YtDlpProbe(ytdlp_path or "", runner=runner, plugin_dirs=plugin_dirs,
+                                    command_context=command_context)
         self._cache: dict[tuple[str, str], tuple[float, LiveProbe]] = {}
         self._cache_ttl = cache_ttl
         self._clock = clock

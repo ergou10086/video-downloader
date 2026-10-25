@@ -19,6 +19,9 @@ from .engines.ytdlp import YtDlpEngine
 from .integrity import IntegrityChecker
 from .session import LiveSession, media_files, redact_command
 from .urls import classify_target
+from .catchup import BackfillJob, CatchUpEvidence, CatchUpPlanner, at_live_edge
+from .danmaku.service import process_comments
+from .splice import reconcile
 
 
 class LiveRunner:
@@ -55,7 +58,8 @@ class LiveRunner:
             if not room.isdigit() or int(room) <= 0:
                 raise EngineUnavailable("未取得数字直播间 ID")
             binary = validate_install(self.paths.dependency_dir / "BililiveRecorder")
-            return BililiveEngine(binary, self.session, room, cookie=cookie)
+            return BililiveEngine(binary, self.session, room, cookie=cookie,
+                                  danmaku=bool(config.get("LIVE_DANMAKU_ENABLED", 0)))
         except (EngineUnavailable, OSError, ValueError) as exc:
             self.log(f"[直播] 已降级为 yt-dlp LIVE_EDGE：{exc}", "warn")
             self.session.event("engine_fallback", reason=str(exc))
@@ -98,6 +102,8 @@ class LiveRunner:
         checker = IntegrityChecker(self.paths.executable("ffprobe", self.suffix), self.paths.executable("ffmpeg", self.suffix))
         reason, forced, warnings, webhook_complete = "error", False, [], True
         engine, proc, title = None, None, "直播录制"
+        backfill, catch_up_evidence = None, None
+        original_command = list(command)
         error_lines = []
         max_retries = int(config.get("LIVE_MAX_RETRIES", 2))
         timeout = int(config.get("LIVE_DOWNLOAD_TIMEOUT", 0)) * 60
@@ -118,6 +124,30 @@ class LiveRunner:
             if free < required:
                 reason = "disk_full"
                 raise OSError(f"磁盘预检未通过：可用 {free // 1024**2} MiB，预计需要 {required // 1024**2} MiB")
+            if not cancel.is_set() and mode == "catch_up" and platform in {"YouTube", "Twitch"}:
+                self.progress(-1, "正在验证本场直播的追播能力...")
+                catch_up_evidence = CatchUpPlanner(cancel=cancel, force_kill=self.force_kill).probe(command, url, platform)
+                if (catch_up_evidence.strategy == "tail_and_backfill"
+                        and str(config.get("AUDIO_MODE", "0")) != "0"):
+                    catch_up_evidence = CatchUpEvidence(False, "Twitch 双路追播暂仅验证音视频合并模式；本次按音频设置从当前录制")
+                if catch_up_evidence.strategy == "tail_and_backfill":
+                    backfill_bytes = int(max(0, time.time() - catch_up_evidence.started_at) * bitrate * 1000 / 8 * 1.3)
+                    session.data["disk_preflight"]["backfill_required_bytes"] = backfill_bytes
+                    if free < required + backfill_bytes:
+                        catch_up_evidence = CatchUpEvidence(False, "磁盘不足以同时保存本场回填与实时尾部；只录当前时刻")
+                session.data["catch_up"] = catch_up_evidence.to_dict()
+                session.data["requested_mode"] = mode
+                if not catch_up_evidence.available:
+                    mode, command = "live_edge", at_live_edge(command)
+                    session.data["mode"] = mode
+                    session.event("mode_downgrade", reason=catch_up_evidence.reason)
+                    self.log("[直播] 已降级为从当前时刻：" + catch_up_evidence.reason, "warn")
+                    self.emit_event("live_recording", {"job_id": session.root.name, "degraded": True,
+                                                        "reason": catch_up_evidence.reason})
+                elif catch_up_evidence.strategy == "tail_and_backfill":
+                    command = at_live_edge(command)
+                    self.log("[直播] 已验证本场 VOD；先录实时尾部，独立回填，结束后核对重叠", "info")
+                session.save()
             engine = self._engine(command, platform, url, config)
             attempt, next_reason = 0, "initial"
             while not cancel.is_set():
@@ -139,6 +169,15 @@ class LiveRunner:
                 proc = process.spawn(cmd, cwd=str(session.root), env=env)
                 if not self.publish_process(proc):
                     cancel.set()
+                if (not cancel.is_set() and backfill is None and catch_up_evidence
+                        and catch_up_evidence.available and catch_up_evidence.strategy == "tail_and_backfill"):
+                    try:
+                        backfill = BackfillJob(original_command, catch_up_evidence, session, env, self.force_kill)
+                        backfill.start()
+                    except Exception as exc:
+                        warnings.append("backfill_start_failed_live_tail_retained")
+                        session.event("backfill_start_failed", error=type(exc).__name__)
+                        catch_up_evidence = CatchUpEvidence(False, "回填无法启动，实时尾部继续录制")
                 lines, read_done, reader = self._reader(proc)
                 started, last_activity, last_size = self.clock(), self.clock(), 0
                 last_check, warned, stop_requested = 0, False, None
@@ -253,6 +292,14 @@ class LiveRunner:
                     else:
                         reason = "crash"
                         break
+                elif (mode == "catch_up" and catch_up_evidence and catch_up_evidence.strategy == "single_from_start"
+                      and "--live-from-start" in engine.original):
+                    # A successful probe can go stale. Failures in the catch-up
+                    # path do not consume the only chance to record the live edge.
+                    engine.original = at_live_edge(engine.original)
+                    warnings.append("catch_up_failed_live_edge_retained")
+                    session.event("catch_up_failed_fallback_to_edge")
+                    self.log("[直播] 追播失败，转为从当前时刻录制；已下载分段保留", "warn")
                 elif fatal_error or attempt >= max_retries:
                     reason = "watchdog" if stop_requested == "watchdog" else "crash"
                     break
@@ -279,6 +326,11 @@ class LiveRunner:
                 self.clear_process(proc)
             if engine:
                 engine.close()
+            try:
+                backfill_result = backfill.finish() if backfill else None
+            except Exception as exc:
+                backfill_result = {"error": type(exc).__name__}
+                warnings.append("backfill_stop_failed_live_tail_retained")
             # Raw CLI startup logs include credentials. Keep only our redacted journal.
             log_dir = session.root / ".engine-logs"
             if log_dir.is_dir():
@@ -295,7 +347,17 @@ class LiveRunner:
                                     expected=expected, retries=len(session.data["retries"]),
                                     forced=forced, warnings=list(dict.fromkeys(warnings)),
                                     webhook_complete=webhook_complete)
-            checker.concatenate(session, report)
+            if backfill:
+                report["backfill"] = backfill_result
+                report["catch_up"] = catch_up_evidence.to_dict()
+                joined = reconcile(session, checker, media_files(backfill.directory), report)
+                if joined["status"] != "joined" and report["conclusion"] != "failed":
+                    report["conclusion"] = "gaps"
+                    report["warnings"].append("backfill_join_unverified_live_tail_retained")
+            else:
+                checker.concatenate(session, report)
+            if catch_up_evidence:
+                report["catch_up"] = catch_up_evidence.to_dict()
             if str(config.get("AUDIO_MODE", "0")) == "2" and report["files"] and report["conclusion"] != "failed":
                 self.progress(-1, "正在导出直播音频...")
                 audio_format = config.get("AUDIO_FORMAT", "mp3")
@@ -315,16 +377,24 @@ class LiveRunner:
                     except (OSError, subprocess.TimeoutExpired):
                         report["warnings"].append("audio_export_failed_media_retained")
                         report["conclusion"] = "gaps"
+            try:
+                report["comments"] = process_comments(session, report, config)
+            except Exception as exc:
+                report["comments"] = {"status": "failed", "error": type(exc).__name__}
+            session.data["comments"] = report["comments"]
+            if report["comments"]["status"] in {"failed", "partial", "unavailable"}:
+                self.log("[弹幕] 导出未完全完成，媒体录制结果保留；请查看 comments-report.json", "warn")
             session.finish(reason, report)
             title = (session.data.get("probe") or {}).get("title") or title
         report_path = str(session.root / "integrity-report.json")
         self.emit_event("live_recording", {"job_id": session.root.name, "engine": getattr(engine, "name", ""),
                                              "conclusion": report["conclusion"], "stop_reason": reason,
+                                             "comments": report.get("comments", {}),
                                              "report": report_path})
         if report["conclusion"] == "failed":
             status = "fail"
         elif reason == "user":
-            status = "stopped" if report["conclusion"] == "complete" else "gaps"
+            status = "stopped" if report["conclusion"] in {"complete", "from_earliest_available"} else "gaps"
         elif reason == "timeout":
             status = "timeout"
         elif report["conclusion"] == "gaps":

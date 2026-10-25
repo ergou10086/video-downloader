@@ -285,7 +285,11 @@
               <div class="row"><span class="lb">无增长告警</span><input type="number" class="ctl mono" id="s_live_watchdog" min="10" max="600" value="60" style="width:110px"><span class="hint">秒；连续两倍时间无媒体增长或下载进度则收尾并按策略重试</span></div>
               <div class="row"><span class="lb">磁盘安全余量</span><input type="number" class="ctl mono" id="s_live_free_mb" min="64" max="102400" value="256" style="width:110px"><span class="hint">MiB；低于余量自动收尾</span></div>
               <div class="row"><span class="lb">预检估算码率</span><input type="number" class="ctl mono" id="s_live_bitrate" min="128" max="100000" value="8000" style="width:110px"><span class="hint">Kbps；预计时长 × 码率 × 1.3；不限时先预留 15 分钟并持续检查</span></div>
-              <div class="hint">B站录播姬使用原始 FLV、最高可用画质并登记弹幕 XML。代理、浏览器 Cookie、自定义参数或音频处理等设置需要 yt-dlp 时会明确降级。文件验证覆盖容器、全文件时间戳、首尾解码；不承诺平台分片全部可用。</div>
+              <div class="hint">YouTube 先验证可追播 DASH；Twitch 先录实时尾部、独立回填本场 VOD。无法验证重叠时保留两路文件并报告缺口。B站录播姬使用原始 FLV、最高可用画质；代理、浏览器 Cookie、自定义参数或音频处理需要 yt-dlp 时会明确降级。</div>
+              <div class="row"><span class="lb">录制直播弹幕</span><span class="sw" id="sw_live_danmaku" role="switch" aria-label="录制直播弹幕" aria-checked="false" tabindex="0" onclick="toggleSwitch(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSwitch(this)}"><i></i></span><span class="hint">本轮支持 B站录播姬 XML；其他引擎暂不采集，不影响媒体录制</span></div>
+              <div class="row"><span class="lb">弹幕导出格式</span><span class="sel"><select class="ctl" id="s_live_danmaku_formats"><option value="srt,ass">SRT + ASS</option><option value="srt">SRT</option><option value="ass">ASS</option></select></span><span class="hint">结束后逐个媒体分段生成同名字幕；密集弹幕超出轨道容量会丢弃并计数</span></div>
+              <div class="row"><span class="lb">导出匿名化</span><span class="sw" id="sw_live_danmaku_anon" role="switch" aria-label="导出匿名化" aria-checked="false" tabindex="0" onclick="toggleSwitch(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSwitch(this)}"><i></i></span><span class="hint">事件库与字幕的 UID/昵称作会话内哈希；录播姬原始 XML 仍含原始身份信息</span></div>
+              <div class="hint">弹幕时间来自录播姬 XML，相对媒体的精度尚待实测标定。评论导出状态、丢弃数量与时间锚点见 comments-report.json；导出失败不影响媒体结果。</div>
               <div class="sh" style="margin-top:4px"><b>平台默认录制方式</b><span class="rule"></span><span class="note">仅显示同时支持追开播与当前录制的平台</span></div>
               <div id="livePlatformModes" class="live-platform-modes"></div>
               <div class="hint">追开播不可用时会提示原因并降级为从当前时刻；条件平台（Niconico/NicoChannel/TwitCasting/X）在探测能力接入前不显示。</div>

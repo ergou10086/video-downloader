@@ -1,0 +1,18 @@
+{
+  "packages": [
+    {
+      "name": "pysubs2",
+      "version": "1.8.0",
+      "url": "https://files.pythonhosted.org/packages/99/09/0fc0719162e5ad723f71d41cf336f18b6b5054d70dc0fe42ace6b4d2bdc9/pysubs2-1.8.0-py3-none-any.whl",
+      "sha256": "05716f5039a9ebe32cd4d7673f923cf36204f3a3e99987f823ab83610b7035a0",
+      "license": "MIT"
+    },
+    {
+      "name": "defusedxml",
+      "version": "0.7.1",
+      "url": "https://files.pythonhosted.org/packages/07/6c/aa3f2f849e01cb6a001cd8554a88d4c77c5c1a31c95bdf1cf9301e6d9ef4/defusedxml-0.7.1-py2.py3-none-any.whl",
+      "sha256": "a352e7e428770286cc899e2542b6cdaedb2b4953ff269a210103ec58f6198a61",
+      "license": "PSFL"
+    }
+  ]
+}

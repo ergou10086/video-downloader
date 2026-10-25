@@ -35,6 +35,9 @@ _ERROR_REASONS = {
     "LIVE_MIN_FREE_MB": "直播磁盘安全余量需在 64-102400 MiB 之间",
     "LIVE_ESTIMATED_BITRATE_KBPS": "直播预估码率需在 128-100000 Kbps 之间",
     "LIVE_MODE": "直播模式仅支持 auto/catch_up/live_edge/wait",
+    "LIVE_DANMAKU_ENABLED": "直播弹幕开关仅支持 0 或 1",
+    "LIVE_DANMAKU_ANONYMIZE": "弹幕匿名化开关仅支持 0 或 1",
+    "LIVE_DANMAKU_FORMATS": "直播弹幕格式仅支持 srt、ass 或 srt,ass",
     "LIVE_PLATFORM_MODES": "平台直播设置为 JSON，长度不能超过 2000 字符",
     "TASK_ORDER": "任务排序仅支持 none/live_first/download_first",
     "TASK_MAX_PARALLEL": "并行任务数需在 1-5 之间",
@@ -99,6 +102,7 @@ def validate_config(values, base=None):
         "AUDIO_FORMAT": AUDIO_FORMAT_OPTIONS,
         "LIVE_STREAM_METHOD": LIVE_STREAM_METHOD_OPTIONS,
         "LIVE_MODE": LIVE_MODE_OPTIONS,
+        "LIVE_DANMAKU_FORMATS": ["srt", "ass", "srt,ass"],
         "TASK_ORDER": TASK_ORDER_OPTIONS,
         "SUBTITLE_TYPE": SUBTITLE_TYPE_OPTIONS,
     }
@@ -123,6 +127,7 @@ def validate_config(values, base=None):
         "NICO_COMMENTS", "NICO_RECODE", "ENABLE_LOG", "DEL_WAV_AFTER_CONVERT",
         "YOUTUBE_PO_TOKEN_ENABLED",
         "TASK_MIXED_PARALLEL",
+        "LIVE_DANMAKU_ENABLED", "LIVE_DANMAKU_ANONYMIZE",
     }
     for key, value in values.items():
         if key not in DEFAULT_CONFIG:

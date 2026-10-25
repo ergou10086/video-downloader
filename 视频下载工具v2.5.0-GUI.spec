@@ -1,13 +1,19 @@
 from pathlib import Path
+import sys
+from PyInstaller.utils.hooks import collect_submodules
 
 
 project_root = Path(SPECPATH)
+sys.path.insert(0, str(project_root / "dependency" / "live-python"))
 entry_script = project_root / "视频下载工具v2.5.0-GUI.py"
 resource_root = project_root / "resource"
 plugin_root = project_root / "dependency" / "yt-dlp-plugins"
 packaging_deps = project_root / "build" / "packaging-deps"
 
 datas = [
+    (str(project_root / "NOTICE"), "licenses"),
+    (str(project_root / "dependency" / "pysubs2.LICENSE"), "licenses"),
+    (str(project_root / "dependency" / "defusedxml.LICENSE"), "licenses"),
     (str(resource_root / "templates"), "templates"),
     (str(resource_root / "static"), "static"),
     (str(plugin_root), "yt-dlp-plugins"),
@@ -15,10 +21,11 @@ datas = [
 
 a = Analysis(
     [str(entry_script)],
-    pathex=[str(project_root), str(packaging_deps)],
+    pathex=[str(project_root), str(packaging_deps), str(project_root / "dependency" / "live-python")],
     binaries=[],
     datas=datas,
-    hiddenimports=["tkinter", "tkinter.filedialog", "yt_dlp", "yt_dlp.cookies", "yt_dlp.utils", "cramjam"],
+    hiddenimports=["tkinter", "tkinter.filedialog", "yt_dlp", "yt_dlp.cookies", "yt_dlp.utils", "cramjam",
+                   *collect_submodules("pysubs2"), "defusedxml.ElementTree"],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],

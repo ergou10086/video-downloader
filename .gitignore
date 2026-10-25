@@ -55,6 +55,7 @@ dependency/bgutil-ytdlp-pot-provider/
 dependency/development/
 dependency/BililiveRecorder/
 dependency/BililiveRecorder-*.zip
+dependency/live-python/
 yt-dlp.exe
 ffmpeg.exe
 ffprobe.exe

@@ -55,11 +55,11 @@ class PlatformCapability:
 # 平台名必须与 core.constants.PLATFORM_INFO 的 name 一致。
 CAPABILITIES: Mapping[str, PlatformCapability] = MappingProxyType({
     "YouTube": PlatformCapability(
-        catch_up=Support.SUPPORTED,
+        catch_up=Support.CONDITIONAL,
         catch_up_reason="DVR/归档可用时才能从头；主播可关闭 DVR",
     ),
     "Twitch": PlatformCapability(
-        catch_up=Support.SUPPORTED,
+        catch_up=Support.CONDITIONAL,
         catch_up_reason="仅本场增长中 VOD 可见时才能从头",
     ),
     "Bilibili": PlatformCapability(
@@ -134,7 +134,7 @@ def resolve_mode(platform: str | None, requested_mode: "LiveMode | str | None") 
 
     capability = capability_for(platform)
     if requested is LiveMode.CATCH_UP:
-        if capability.catch_up is Support.SUPPORTED:
+        if capability.catch_up is Support.SUPPORTED or platform in {"YouTube", "Twitch"}:
             return requested
         if capability.catch_up is Support.CONDITIONAL:
             raise LiveModeError(
