@@ -38,6 +38,8 @@ _ERROR_REASONS = {
     "LIVE_DANMAKU_ENABLED": "直播弹幕开关仅支持 0 或 1",
     "LIVE_DANMAKU_ANONYMIZE": "弹幕匿名化开关仅支持 0 或 1",
     "LIVE_DANMAKU_FORMATS": "直播弹幕格式仅支持 srt、ass 或 srt,ass",
+    "LIVE_DANMAKU_PLATFORMS": "平台弹幕默认值需为已支持平台的 inherit/on/off JSON 对象",
+    "LIVE_DANMAKU_OFFSET_MS": "弹幕时间微调需在 -600000 到 600000 毫秒之间",
     "LIVE_PLATFORM_MODES": "平台直播设置为 JSON，长度不能超过 2000 字符",
     "TASK_ORDER": "任务排序仅支持 none/live_first/download_first",
     "TASK_MAX_PARALLEL": "并行任务数需在 1-5 之间",
@@ -112,6 +114,7 @@ def validate_config(values, base=None):
         "COOKIE_MODE": (1, 2),
         "MP3_BITRATE": (min(MP3_BITRATE_OPTIONS), max(MP3_BITRATE_OPTIONS)),
         "LIVE_DOWNLOAD_TIMEOUT": (0, 1440),
+        "LIVE_DANMAKU_OFFSET_MS": (-600000, 600000),
         "LIVE_MAX_RETRIES": (0, 5),
         "LIVE_WATCHDOG_SECONDS": (10, 600),
         "LIVE_MIN_FREE_MB": (64, 102400),
@@ -171,6 +174,10 @@ def validate_config(values, base=None):
                 value = str(value).strip()
                 if len(value) > 4000:
                     raise ValueError
+            elif key == "LIVE_DANMAKU_PLATFORMS":
+                import json
+                from video_downloader.live.danmaku.preferences import platform_defaults
+                value = json.dumps(platform_defaults(value), ensure_ascii=False, sort_keys=True)
             elif key == "LIVE_PLATFORM_MODES":
                 import json
                 value = str(value).strip() or "{}"

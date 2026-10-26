@@ -12,6 +12,10 @@ def export_ass(events, path, *, width=1920, height=1080, duration_ms=None):
     font = max(12, round(height * 38 / 1080))
     result.styles["Default"] = subs.SSAStyle(fontname="Microsoft YaHei", fontsize=font,
                                            outline=2, shadow=0, alignment=subs.Alignment.TOP_LEFT)
+    for name, rgb in {"SP":(255,210,100), "MSG":(170,220,255)}.items():
+        result.styles[name] = subs.SSAStyle(fontname="Microsoft YaHei", fontsize=font, bold=True,
+                                          primarycolor=subs.Color(*rgb), outline=2, shadow=0,
+                                          alignment=subs.Alignment.TOP_CENTER)
     # A lane stays occupied until the entire previous message exits. This
     # deliberately trades density for collision-free layout, even for long text.
     lanes = {kind: [0] * max(1, height // (font * 3) // 3) for kind in ("scroll", "top", "bottom")}
@@ -38,7 +42,9 @@ def export_ass(events, path, *, width=1920, height=1080, duration_ms=None):
         rgb = f"{color.b:02X}{color.g:02X}{color.r:02X}"
         position = (rf"\move({width + font},{y},{-width},{y})" if kind == "scroll"
                     else rf"\an8\pos({width // 2},{y})")
-        result.append(subs.SSAEvent(start=start, end=end, text="{" + position + rf"\c&H{rgb}&" + "}" + text))
+        style = "SP" if event.kind == "superchat" else "MSG" if event.kind in {"gift","guard"} else "Default"
+        color_tag = rf"\c&H{rgb}&" if style == "Default" else ""
+        result.append(subs.SSAEvent(start=start, end=end, style=style, text="{" + position + color_tag + "}" + text))
     result.save(str(path), format_="ass", encoding="utf-8")
     return {"exported_count": len(result), "dropped_count": dropped,
             "resolution": [width, height], "layout": "exclusive_lanes"}

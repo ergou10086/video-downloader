@@ -360,7 +360,7 @@ def build_ytdlp_cmd(url, config, tool_dir, exe_suffix="", *, is_live=False, live
     if platform_name == "TwitCasting" and (not is_live or use_ffmpeg_for_hls):
         cmd += twitcasting_hls_fallback_args(tool_dir, force_ffmpeg=use_ffmpeg_for_hls)
     # 评论抓取与重编码仅对 Niconico 注入。
-    if platform_name == "Niconico" and cfg["NICO_COMMENTS"]:
+    if platform_name == "Niconico" and cfg["NICO_COMMENTS"] and not is_live:
         cmd += ["--write-comments"]
     if platform_name == "Niconico" and cfg["NICO_RECODE"]:
         cmd += ["--recode-video", fmt]

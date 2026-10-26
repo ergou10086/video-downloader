@@ -83,6 +83,8 @@ class ToolService:
             self._paths.dependency("bgutil-ytdlp-pot-provider/server/src/main.ts"),
             self._paths.dependency("bgutil-ytdlp-pot-provider/server/node_modules"),
         ))
+        from video_downloader.live.danmaku.dependencies import health
+        deps.update(health())
         return deps
 
     def pick_withny_archive(self):

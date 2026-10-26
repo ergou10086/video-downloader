@@ -85,12 +85,12 @@ class ProbeError(Exception):
         self.retryable = retryable
 
 
-def _http_json(url: str, headers: Mapping[str, str] | None = None, timeout: float = 8.0) -> dict:
+def _http_json(url: str, headers: Mapping[str, str] | None = None, timeout: float = 8.0, data=None) -> dict:
     request = Request(url, headers={
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
         "Accept": "application/json, text/plain, */*",
         **(headers or {}),
-    })
+    }, data=data)
     try:
         with urlopen(request, timeout=timeout) as response:
             body = response.read()
@@ -191,7 +191,7 @@ class TwitCastingProbe:
             raise ProbeError("缺少 TwitCasting 主播名", retryable=False)
         data = self._http_json(
             f"https://frontendapi.twitcasting.tv/watch/user/{user}",
-            timeout=timeout,
+            timeout=timeout, data=b"",
         )
         is_live = data.get("is_live")
         movie = data.get("movie") if isinstance(data.get("movie"), dict) else {}

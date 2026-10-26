@@ -248,6 +248,24 @@ class RecordingTests(unittest.TestCase):
             result = runner.run(["app"], url="url", platform="Twitch", mode="live_edge", config={}, cancel=threading.Event())
         self.assertEqual(result["status"], "fail")
 
+    def test_generic_media_rename_cannot_create_a_late_per_file_comment_anchor(self):
+        runner = self.runner()
+        proc = SimpleNamespace(stdout=io.BytesIO(), poll=lambda: 0, wait=lambda timeout: 0, returncode=0)
+        def spawn(*a, **kwargs):
+            directory = runner.session.media / 'part-001'
+            partial = directory / 'recording.mp4.part'
+            partial.write_bytes(b'fixture')
+            partial.rename(directory / 'recording.mp4')
+            return proc
+        lines, done = queue.Queue(), threading.Event()
+        lines.put('LIVE_META:{"title":"fixture"}'); done.set()
+        with patch.object(process, 'spawn', side_effect=spawn), patch.object(runner, '_reader', return_value=(lines, done, Mock())):
+            result = runner.run(['app'], url='url', platform='fixture', mode='live_edge', config={}, cancel=threading.Event())
+        report = json.loads(Path(result['report']).read_text(encoding='utf-8'))
+        self.assertIn('media_started_at', runner.session.data['parts'][0])
+        self.assertNotIn('anchor_utc', report['files'][0])
+        self.assertFalse(runner.session.data['parts'][0]['media_anchors'])
+
     def test_crash_retries_are_bounded_and_keep_all_parts(self):
         runner = self.runner()
         def spawn(*a, **k):

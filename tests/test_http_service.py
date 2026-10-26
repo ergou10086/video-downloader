@@ -100,6 +100,25 @@ def make_dependencies(exit_event):
 
 
 class HttpServiceTests(unittest.TestCase):
+    def test_comment_reexport_requires_auth_and_valid_json_fields(self):
+        export = Mock(return_value={"ok": True, "comments": {"status": "partial"}})
+        self.service.stop()
+        self.dependencies = replace(self.dependencies, export_live_comments=export)
+        self.service = HttpService(lambda: create_handler(self.dependencies), port=0)
+        self.service.start()
+        self.url = f"http://127.0.0.1:{self.service.port}"
+        payload={"job_id":"a"*32,"settings":{"LIVE_DANMAKU_OFFSET_MS":200}}
+        status, body, _ = self.request('/api/live/comments-export', method='POST', payload=payload)
+        self.assertEqual(status, 200)
+        export.assert_called_once_with('a'*32, payload['settings'])
+        for invalid in ({"job_id":1}, {"job_id":"a"*32,"settings":[]}):
+            with self.assertRaises(HTTPError) as error:
+                self.request('/api/live/comments-export', method='POST', payload=invalid)
+            self.assertEqual(error.exception.code,400)
+        with self.assertRaises(HTTPError) as error:
+            self.request('/api/live/comments-export', method='POST', payload=payload, token=False)
+        self.assertEqual(error.exception.code,403)
+
     def test_network_test_status_start_cancel_and_scoped_apply_routes(self):
         diagnostic = Mock()
         diagnostic.snapshot.return_value = {"running":False, "phase":"completed"}

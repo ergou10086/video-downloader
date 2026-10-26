@@ -27,7 +27,7 @@ class YtDlpEngine:
         # JSON progress is independent of localization and title/path quoting.
         result += ["--no-simulate", "--newline",
                    "-P", str(directory), "-o", "recording.%(ext)s",
-                   "--print", "before_dl:LIVE_META:%(.{id,title,is_live,live_status,tbr,vcodec,acodec})j",
+                   "--print", "before_dl:LIVE_META:%(.{id,title,is_live,live_status,timestamp,release_timestamp,tbr,vcodec,acodec})j",
                    "--print", "after_move:LIVE_FILE:%(filepath)j"]
         return result
 

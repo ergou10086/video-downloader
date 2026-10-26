@@ -63,6 +63,29 @@ class LiveDependencyTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError,'different contents'):
             install(self.root)
 
+    def test_managed_upgrade_and_protocol_assets_are_verified(self):
+        data=self.fixture()
+        with patch('scripts.install_live_dependencies.urlopen',return_value=io.BytesIO(data)):
+            target=install(self.root)
+        lock=json.loads((self.root/'dependency/live-python.lock.json').read_text())
+        payload=b'# generated definition\n'
+        lock['assets']=[{'path':'ndgr_client/proto/payload.py','url':'https://raw.githubusercontent.com/owner/repo/commit/file.py','sha256':hashlib.sha256(payload).hexdigest()}]
+        (self.root/'dependency/live-python.lock.json').write_text(json.dumps(lock),encoding='utf-8')
+        with patch('scripts.install_live_dependencies.urlopen',side_effect=[io.BytesIO(data),io.BytesIO(payload)]):
+            install(self.root,upgrade=True)
+        self.assertEqual((target/'ndgr_client/proto/payload.py').read_bytes(),payload)
+        self.assertTrue((target/'ndgr_client/__init__.py').exists())
+
+    def test_failed_upgrade_preserves_previous_verified_runtime(self):
+        data=self.fixture()
+        with patch('scripts.install_live_dependencies.urlopen',return_value=io.BytesIO(data)):
+            target=install(self.root)
+        marker=(target/'installed.json').read_bytes()
+        self.fixture(digest='0'*64)
+        with patch('scripts.install_live_dependencies.urlopen',return_value=io.BytesIO(data)):
+            with self.assertRaises(ValueError):install(self.root,upgrade=True)
+        self.assertEqual((target/'installed.json').read_bytes(),marker)
+
 
 if __name__=='__main__':
     unittest.main()

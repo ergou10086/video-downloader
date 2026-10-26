@@ -23,6 +23,8 @@ class CommentEvent:
     recv_ts: float | None = None
     message_id: str = ""
     source: str = "bililive_xml"
+    time_source: str = "source_relative"
+    anonymized: bool = False
 
     def __post_init__(self):
         if self.kind not in {"chat", "superchat", "gift", "guard"}:
@@ -33,6 +35,8 @@ class CommentEvent:
             raise ValueError("Invalid relative comment time")
         if not self.text or len(self.text) > 10000:
             raise ValueError("Invalid comment text")
+        if self.time_source not in {"source_relative", "server", "receive"}:
+            raise ValueError("Invalid comment time source")
         for value in (self.utc_ts, self.recv_ts):
             if value is not None and not math.isfinite(value):
                 raise ValueError("Invalid absolute comment time")

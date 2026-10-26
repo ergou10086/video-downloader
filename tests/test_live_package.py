@@ -84,6 +84,7 @@ class LiveCommandArgumentTests(unittest.TestCase):
         cmd = self._command("https://live.nicovideo.jp/watch/lv1", "Niconico")
         self.assertIn("--no-live-from-start", cmd)
         self.assertNotIn("--live-from-start", cmd)
+        self.assertNotIn("--write-comments", cmd)
 
 
 if __name__ == "__main__":

@@ -13,6 +13,179 @@
       "url": "https://files.pythonhosted.org/packages/07/6c/aa3f2f849e01cb6a001cd8554a88d4c77c5c1a31c95bdf1cf9301e6d9ef4/defusedxml-0.7.1-py2.py3-none-any.whl",
       "sha256": "a352e7e428770286cc899e2542b6cdaedb2b4953ff269a210103ec58f6198a61",
       "license": "PSFL"
+    },
+    {
+      "name": "websocket-client",
+      "version": "1.9.2",
+      "url": "https://files.pythonhosted.org/packages/d5/d2/cc4dc1271e464942db7ee278baae2daa99ee77cb2af744025c04da585a3e/websocket_client-1.9.2-py3-none-any.whl",
+      "sha256": "e1a673830a9c7bfa47b1cd3d5e4178f4c9651d80a4eab02c9c23a1c3ec6250ce",
+      "license": "Apache-2.0"
+    },
+    {
+      "name": "protobuf",
+      "version": "6.33.5",
+      "url": "https://files.pythonhosted.org/packages/57/bf/2086963c69bdac3d7cff1cc7ff79b8ce5ea0bec6797a017e1be338a46248/protobuf-6.33.5-py3-none-any.whl",
+      "sha256": "69915a973dd0f60f31a08b8318b73eab2bd6a392c79184b3612226b0a3f8ec02",
+      "license": "3-Clause BSD License"
+    },
+    {
+      "name": "ruamel.yaml",
+      "version": "0.19.1",
+      "url": "https://files.pythonhosted.org/packages/b8/0c/51f6841f1d84f404f92463fc2b1ba0da357ca1e3db6b7fbda26956c3b82a/ruamel_yaml-0.19.1-py3-none-any.whl",
+      "sha256": "27592957fedf6e0b62f281e96effd28043345e0e66001f97683aa9a40c667c93",
+      "license": "MIT"
+    },
+    {
+      "name": "anyio",
+      "version": "4.15.1",
+      "url": "https://files.pythonhosted.org/packages/12/b8/4bd346e22b28902df4d651910f5242c28d84e4a5c2435ca5c3f797ed7e2e/anyio-4.15.1-py3-none-any.whl",
+      "sha256": "6152fdbbf9a77fdec97731721bebf7c4c44f7c29b424b0065826173efc7ed101",
+      "license": "MIT"
+    },
+    {
+      "name": "certifi",
+      "version": "2026.10.23",
+      "url": "https://files.pythonhosted.org/packages/32/d1/a3652fe2c19134d0d15922177821d863cbd7e842d53a21bbe7e8e3a1b5ac/certifi-2026.10.23-py3-none-any.whl",
+      "sha256": "e9b54de76e530bb6cf0ccd036787103acb58fd42ba930ea8bf948ddbaa2f61d1",
+      "license": "MPL-2.0"
+    },
+    {
+      "name": "h11",
+      "version": "0.16.0",
+      "url": "https://files.pythonhosted.org/packages/04/4b/29cac41a4d98d144bf5f6d33995617b185d14b22401f75ca86f384e87ff1/h11-0.16.0-py3-none-any.whl",
+      "sha256": "63cf8bbe7522de3bf65932fda1d9c2772064ffb3dae62d55932da54b31cb6c86",
+      "license": "MIT"
+    },
+    {
+      "name": "h2",
+      "version": "4.4.1",
+      "url": "https://files.pythonhosted.org/packages/7e/22/e85faf23bd72a92d1921e37d674ca56eb298a3c8be31fdecef0ff2b3aaac/h2-4.4.1-py3-none-any.whl",
+      "sha256": "0e25f1462b23c9cb82d9eb02e28bc706dac2a68cb457c6a0d74d63c8a2a5d0e6",
+      "license": "MIT"
+    },
+    {
+      "name": "hpack",
+      "version": "4.2.0",
+      "url": "https://files.pythonhosted.org/packages/71/b4/4a9fcfb2aef6ba44d9073ecd301443aa00b3dac95de5619f2a7de7ec8a91/hpack-4.2.0-py3-none-any.whl",
+      "sha256": "858ac0b02280fa582b5080d68db0899c62a80375e0e5413a74970c5e518b6986",
+      "license": "MIT"
+    },
+    {
+      "name": "httpcore",
+      "version": "1.0.9",
+      "url": "https://files.pythonhosted.org/packages/7e/f5/f66802a942d491edb555dd61e3a9961140fd64c90bce1eafd741609d334d/httpcore-1.0.9-py3-none-any.whl",
+      "sha256": "2d400746a40668fc9dec9810239072b40b4484b640a8c38fd654a024c7a1bf55",
+      "license": "BSD-3-Clause"
+    },
+    {
+      "name": "httpx",
+      "version": "0.28.1",
+      "url": "https://files.pythonhosted.org/packages/2a/39/e50c7c3a983047577ee07d2a9e53faf5a69493943ec3f6a384bdc792deb2/httpx-0.28.1-py3-none-any.whl",
+      "sha256": "d909fcccc110f8c7faf814ca82a9a4d816bc5a6dbfea25d6591d6985b8ba59ad",
+      "license": "BSD-3-Clause"
+    },
+    {
+      "name": "hyperframe",
+      "version": "6.1.0",
+      "url": "https://files.pythonhosted.org/packages/48/30/47d0bf6072f7252e6521f3447ccfa40b421b6824517f82854703d0f5a98b/hyperframe-6.1.0-py3-none-any.whl",
+      "sha256": "b03380493a519fce58ea5af42e4a42317bf9bd425596f7a0835ffce80f1a42e5",
+      "license": "The MIT License (MIT)  Copyright (c) 2014 Cory Benfield  Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the \"Software\"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:  The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.  THE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE. "
+    },
+    {
+      "name": "idna",
+      "version": "3.20",
+      "url": "https://files.pythonhosted.org/packages/58/a2/bb081bab032533a855d44de1d56f8e8426114ff1ba5d1f07a438a0a654f8/idna-3.20-py3-none-any.whl",
+      "sha256": "ab7ae7122974553370f0bdb919e1a960b2cd1bc1ef0276416d896db81c14582c",
+      "license": "BSD-3-Clause"
+    },
+    {
+      "name": "python-socks",
+      "version": "3.1.1",
+      "url": "https://files.pythonhosted.org/packages/3b/23/2c2cef1b4313c55d1713201acd4ee2043fb2cf22e546ca9d36bf4317faea/python_socks-3.1.1-py3-none-any.whl",
+      "sha256": "327e0d6378702c73a7790bf732e9f01392f17b48c7348a50b5bd1f710c2df1be",
+      "license": "Apache-2.0"
+    },
+    {
+      "name": "socksio",
+      "version": "1.0.0",
+      "url": "https://files.pythonhosted.org/packages/37/c3/6eeb6034408dac0fa653d126c9204ade96b819c936e136c5e8a6897eee9c/socksio-1.0.0-py3-none-any.whl",
+      "sha256": "95dc1f15f9b34e8d7b16f06d74b8ccf48f609af32ab33c608d08761c5dcbb1f3",
+      "license": ""
+    },
+    {
+      "name": "typing_extensions",
+      "version": "4.16.0",
+      "url": "https://files.pythonhosted.org/packages/49/d3/b8441a820a491ddfc024b0b0cf0393375b75ea13866d9c66727e54c2fc80/typing_extensions-4.16.0-py3-none-any.whl",
+      "sha256": "481caa481374e813c1b176ada14e97f1f67a4539ce9cfeb3f350d78d6370c2e8",
+      "license": "PSF-2.0"
     }
-  ]
+  ],
+  "assets": [
+    {
+      "path": "ndgr_client/proto/dwango/nicolive/chat/data/atoms/akashic_pb2.py",
+      "url": "https://raw.githubusercontent.com/tsukumijima/NDGRClient/dab9bf7c915f41411d5986b521ce8fe937dde7f8/ndgr_client/proto/dwango/nicolive/chat/data/atoms/akashic_pb2.py",
+      "sha256": "2a41c0db3f66ddebd41f02ac2fae33b4069157853c8b9641b6a7ead86b043b19"
+    },
+    {
+      "path": "ndgr_client/proto/dwango/nicolive/chat/data/atoms/forwarded_pb2.py",
+      "url": "https://raw.githubusercontent.com/tsukumijima/NDGRClient/dab9bf7c915f41411d5986b521ce8fe937dde7f8/ndgr_client/proto/dwango/nicolive/chat/data/atoms/forwarded_pb2.py",
+      "sha256": "df849c12a72e4109b01fd38afbf86414926157221735bc81454dd36eea12679c"
+    },
+    {
+      "path": "ndgr_client/proto/dwango/nicolive/chat/data/atoms/ichibalauncher_pb2.py",
+      "url": "https://raw.githubusercontent.com/tsukumijima/NDGRClient/dab9bf7c915f41411d5986b521ce8fe937dde7f8/ndgr_client/proto/dwango/nicolive/chat/data/atoms/ichibalauncher_pb2.py",
+      "sha256": "72f57d6d43c38e52fb0171e7ea20abb6fdb4d8f7f0dc2bca938d380aad1b3e37"
+    },
+    {
+      "path": "ndgr_client/proto/dwango/nicolive/chat/data/atoms/moderator_pb2.py",
+      "url": "https://raw.githubusercontent.com/tsukumijima/NDGRClient/dab9bf7c915f41411d5986b521ce8fe937dde7f8/ndgr_client/proto/dwango/nicolive/chat/data/atoms/moderator_pb2.py",
+      "sha256": "da8fab810dcb79647f5a89f74a606a122aefc394054778f00e7a5535eb385ce2"
+    },
+    {
+      "path": "ndgr_client/proto/dwango/nicolive/chat/data/atoms/notifications_pb2.py",
+      "url": "https://raw.githubusercontent.com/tsukumijima/NDGRClient/dab9bf7c915f41411d5986b521ce8fe937dde7f8/ndgr_client/proto/dwango/nicolive/chat/data/atoms/notifications_pb2.py",
+      "sha256": "7398061ce58de51ceab3fcce24d1091a825a480c9193b8e3a8601e0cf1252a9a"
+    },
+    {
+      "path": "ndgr_client/proto/dwango/nicolive/chat/data/atoms/sensitive_pb2.py",
+      "url": "https://raw.githubusercontent.com/tsukumijima/NDGRClient/dab9bf7c915f41411d5986b521ce8fe937dde7f8/ndgr_client/proto/dwango/nicolive/chat/data/atoms/sensitive_pb2.py",
+      "sha256": "14f8398c229c096b26014dd24fa912c04b48e46d95fb59a14a88b54939b43372"
+    },
+    {
+      "path": "ndgr_client/proto/dwango/nicolive/chat/data/atoms/streamstate_pb2.py",
+      "url": "https://raw.githubusercontent.com/tsukumijima/NDGRClient/dab9bf7c915f41411d5986b521ce8fe937dde7f8/ndgr_client/proto/dwango/nicolive/chat/data/atoms/streamstate_pb2.py",
+      "sha256": "68222a4fe530c7f5d0910fad6bace98917f9355d3b6e77670a999617ca4fa154"
+    },
+    {
+      "path": "ndgr_client/proto/dwango/nicolive/chat/data/atoms_pb2.py",
+      "url": "https://raw.githubusercontent.com/tsukumijima/NDGRClient/dab9bf7c915f41411d5986b521ce8fe937dde7f8/ndgr_client/proto/dwango/nicolive/chat/data/atoms_pb2.py",
+      "sha256": "099d64b7d09db2aead541de08a947fb76d8ecad53f008f6090f02590b6951218"
+    },
+    {
+      "path": "ndgr_client/proto/dwango/nicolive/chat/data/message_pb2.py",
+      "url": "https://raw.githubusercontent.com/tsukumijima/NDGRClient/dab9bf7c915f41411d5986b521ce8fe937dde7f8/ndgr_client/proto/dwango/nicolive/chat/data/message_pb2.py",
+      "sha256": "bd5f1f6a323dc3a221e33a87d53946573aefeccbeff1589f36a787264b3195fb"
+    },
+    {
+      "path": "ndgr_client/proto/dwango/nicolive/chat/data/origin_pb2.py",
+      "url": "https://raw.githubusercontent.com/tsukumijima/NDGRClient/dab9bf7c915f41411d5986b521ce8fe937dde7f8/ndgr_client/proto/dwango/nicolive/chat/data/origin_pb2.py",
+      "sha256": "93f5c0df9f531b4598d8407b070b69902fd8eea22376a9010c5b05b80509a7f1"
+    },
+    {
+      "path": "ndgr_client/proto/dwango/nicolive/chat/data/state_pb2.py",
+      "url": "https://raw.githubusercontent.com/tsukumijima/NDGRClient/dab9bf7c915f41411d5986b521ce8fe937dde7f8/ndgr_client/proto/dwango/nicolive/chat/data/state_pb2.py",
+      "sha256": "78ef9915075f27d09643970652a3e4ecdcf99626742bbae9b1261a2c94f98bc9"
+    },
+    {
+      "path": "ndgr_client/proto/dwango/nicolive/chat/service/edge/payload_pb2.py",
+      "url": "https://raw.githubusercontent.com/tsukumijima/NDGRClient/dab9bf7c915f41411d5986b521ce8fe937dde7f8/ndgr_client/proto/dwango/nicolive/chat/service/edge/payload_pb2.py",
+      "sha256": "fd907e0d2717aaea3400f220500a0a4e08399248af097ab99464be74d36815f9"
+    },
+    {
+      "path": "ndgr_client/License.txt",
+      "url": "https://raw.githubusercontent.com/tsukumijima/NDGRClient/dab9bf7c915f41411d5986b521ce8fe937dde7f8/License.txt",
+      "sha256": "f7649d9da507f7c0cd8cce29af4c303b5e30443be8449451a3480f2447ae8d8a"
+    }
+  ],
+  "protocol_source": "https://github.com/tsukumijima/NDGRClient/tree/dab9bf7c915f41411d5986b521ce8fe937dde7f8"
 }

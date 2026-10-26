@@ -25,6 +25,7 @@ from .live.preferences import resolve_platform_mode
 from .live.probe import ProbeService
 from .live.wait import LiveWatchService, WatchJobStore
 from .live.session import RecordingStore, recover_interrupted
+from .live.danmaku.preferences import SOURCES as COMMENT_SOURCES
 from .state.app_state import AppState
 from .services.download_executor import DownloadExecutor
 from .services.download_archive import TaskArchiveSession
@@ -418,6 +419,7 @@ class AppContainer:
                     "catch_up_reason": capability.catch_up_reason,
                     "live_edge": capability.live_edge,
                     "wait": capability.wait,
+                    "comments": {"supported":name in COMMENT_SOURCES, "source":COMMENT_SOURCES.get(name, "")},
                 }
                 for name, capability in CAPABILITIES.items()
             }
@@ -609,6 +611,7 @@ class AppContainer:
                 network_diagnostics=network_diagnostics,
                 list_live_recordings=self._recordings.recent,
                 get_live_report=self._recordings.report,
+                export_live_comments=self._recordings.export_comments,
             )
             return HttpService(lambda: create_handler(deps), port=0)
 

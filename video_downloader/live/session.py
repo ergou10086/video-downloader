@@ -162,6 +162,10 @@ def recover_interrupted(root):
                       "scope": "recording_interval_only", "segment_completeness_verified": False,
                       "files": files, "exit_codes": data.get("exit_codes", []), "warnings": ["parts_retained"]}
             atomic_json(path.parent / "integrity-report.json", report)
+            for private in ("withny.private.yaml", "danmaku/request.json", "danmaku/cookies.private", "danmaku/stop"):
+                target = path.parent / private
+                if target.resolve().is_relative_to(path.parent.resolve()):
+                    target.unlink(missing_ok=True)
             data.update(state="finished", ended_at=time.time(), stop_reason="application_interrupted", conclusion="failed")
             atomic_json(path, data)
             recovered += 1
@@ -173,6 +177,21 @@ def recover_interrupted(root):
 class RecordingStore:
     def __init__(self, root):
         self.root = Path(root).resolve()
+        self._export_lock = threading.Lock()
+
+    def export_comments(self, job_id, values):
+        if not isinstance(job_id, str) or not re.fullmatch(r"[a-f0-9]{32}", job_id):
+            return {"error": "无效的录制任务 id"}
+        root = (self.root / job_id).resolve()
+        if root.parent != self.root:
+            return {"error": "无效的录制目录"}
+        if not self._export_lock.acquire(blocking=False):
+            return {"error": "正在导出弹幕，请稍后再试"}
+        try:
+            from .danmaku.reexport import export_saved
+            return export_saved(root, job_id, values)
+        finally:
+            self._export_lock.release()
 
     def report(self, job_id):
         if not isinstance(job_id, str) or not re.fullmatch(r"[a-f0-9]{32}", job_id):

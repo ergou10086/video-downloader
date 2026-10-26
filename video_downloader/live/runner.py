@@ -16,11 +16,15 @@ from pathlib import Path
 from . import process
 from .engines.bililive import BililiveEngine, EngineUnavailable, cookie_from_file, validate_install
 from .engines.ytdlp import YtDlpEngine
+from .engines.withnydl import WithnyEngine
+from .engines import EngineFeatures
 from .integrity import IntegrityChecker
 from .session import LiveSession, media_files, redact_command
 from .urls import classify_target
 from .catchup import BackfillJob, CatchUpEvidence, CatchUpPlanner, at_live_edge
 from .danmaku.service import process_comments
+from .danmaku.preferences import enabled as comments_enabled
+from .danmaku.capture import CommentCapture
 from .splice import reconcile
 
 
@@ -34,6 +38,9 @@ class LiveRunner:
         self.session = None
 
     def _engine(self, command, platform, url, config):
+        if platform == "Withny":
+            return WithnyEngine(command, self.session, config["_withny_config_path"],
+                                bool(config.get("LIVE_DANMAKU_ENABLED", 0)))
         if platform != "Bilibili" or config.get("LIVE_STREAM_METHOD", "auto") == "yt-dlp":
             return YtDlpEngine(command)
         try:
@@ -98,11 +105,14 @@ class LiveRunner:
         return lines, done, thread
 
     def run(self, command, *, url, platform, mode, config, cancel):
+        config = dict(config, LIVE_DANMAKU_ENABLED=int(comments_enabled(config, platform)))
         session = self.session = LiveSession(self.paths.download_dir / ".live-jobs", platform, mode, url)
         checker = IntegrityChecker(self.paths.executable("ffprobe", self.suffix), self.paths.executable("ffmpeg", self.suffix))
         reason, forced, warnings, webhook_complete = "error", False, [], True
         engine, proc, title = None, None, "直播录制"
+        features = EngineFeatures()
         backfill, catch_up_evidence = None, None
+        comments = None
         original_command = list(command)
         error_lines = []
         max_retries = int(config.get("LIVE_MAX_RETRIES", 2))
@@ -149,6 +159,19 @@ class LiveRunner:
                     self.log("[直播] 已验证本场 VOD；先录实时尾部，独立回填，结束后核对重叠", "info")
                 session.save()
             engine = self._engine(command, platform, url, config)
+            declared = getattr(engine, "features", None)
+            features = declared if isinstance(declared, EngineFeatures) else EngineFeatures()
+            if features.per_file_tracks:
+                expected = engine.expected_tracks
+            session.data["comment_settings"] = {key: config.get(key, default) for key, default in
+                {"LIVE_DANMAKU_ENABLED":0, "LIVE_DANMAKU_FORMATS":"srt,ass", "LIVE_DANMAKU_ANONYMIZE":0,
+                 "LIVE_DANMAKU_OFFSET_MS":0}.items()}
+            try:
+                comments = CommentCapture(session, command, config, force_kill=self.force_kill, url=url)
+                comments.start()
+            except Exception as exc:
+                session.data["comment_capture"] = {"status":"failed", "errors":[{"type":type(exc).__name__}]}
+                self.log("[弹幕] 采集启动失败，媒体继续录制", "warn")
             attempt, next_reason = 0, "initial"
             while not cancel.is_set():
                 directory, part = session.part(engine.name, [], next_reason)
@@ -166,7 +189,7 @@ class LiveRunner:
                     # CLI startup logging includes its raw arguments regardless of --flog.
                     env["BILILIVERECORDER_LOG_FILE_PATH"] = str(session.root / ".engine-logs" / "recorder.txt")
                     env["NO_PROXY"] = "127.0.0.1,localhost,::1"
-                proc = process.spawn(cmd, cwd=str(session.root), env=env)
+                proc = process.spawn(cmd, cwd=str(engine.cwd if features.original_working_directory else session.root), env=env)
                 if not self.publish_process(proc):
                     cancel.set()
                 if (not cancel.is_set() and backfill is None and catch_up_evidence
@@ -196,9 +219,23 @@ class LiveRunner:
                         stop_requested = stop_requested or "ended"
                     if now - last_check >= 1:
                         paths = media_files(directory)
+                        anchors = part.setdefault("media_anchors", {})
+                        discovered = False
+                        for path in paths if features.managed_outputs else ():
+                            if path.stat().st_size:
+                                key = str(path.with_suffix(""))
+                                if key not in anchors:
+                                    anchors[key] = time.time()
+                                    discovered = True
+                        if discovered:
+                            session.save()
                         size = sum(p.stat().st_size for p in paths if p.exists())
                         if size > last_size:
                             last_activity, warned = now, False
+                            if "media_started_at" not in part:
+                                part["media_started_at"] = time.time()
+                                part["anchor_source"] = "first_media_growth_estimate"
+                                session.save()
                             if timeout and deadline is None:
                                 deadline = now + timeout
                         last_size, last_check = size, now
@@ -279,9 +316,12 @@ class LiveRunner:
                     reason = "user"
                     break
                 if proc.returncode == 0 and not stop_requested:
-                    reason = "ended"
+                    reason = "crash" if engine.name == "withny-dl" else "ended"
                     break
                 # Startup-only BR failures may fall back; never append yt-dlp to a BR session with media.
+                if engine.name == "withny-dl":
+                    reason = "crash"
+                    break
                 if engine.name == "bililive-recorder":
                     engine.close()
                     if not has_media and attempt == 0 and not fatal_error:
@@ -326,6 +366,13 @@ class LiveRunner:
                 self.clear_process(proc)
             if engine:
                 engine.close()
+            if comments:
+                try:
+                    result = comments.finish()
+                    if result:
+                        session.data["comment_capture"] = result
+                except Exception as exc:
+                    session.data["comment_capture"] = {"status":"failed", "errors":[{"type":type(exc).__name__}]}
             try:
                 backfill_result = backfill.finish() if backfill else None
             except Exception as exc:
@@ -342,11 +389,20 @@ class LiveRunner:
                 except OSError:
                     warnings.append("engine_log_cleanup_failed")
             self.progress(-1, "正在验证直播文件并生成完整性报告...")
-            report = checker.report(media_files(session.media), reason=reason,
+            outputs = engine.output_files(session.media) if features.managed_outputs else media_files(session.media)
+            report = checker.report(outputs, reason=reason,
                                     exit_codes=session.data["exit_codes"], mode=mode,
                                     expected=expected, retries=len(session.data["retries"]),
                                     forced=forced, warnings=list(dict.fromkeys(warnings)),
                                     webhook_complete=webhook_complete)
+            if features.annotate_report:
+                engine.annotate(report)
+            for file in report["files"]:
+                anchor = next((p.get("media_anchors", {}).get(str(Path(file["path"]).with_suffix("")))
+                               for p in session.data["parts"]
+                               if str(Path(file["path"]).with_suffix("")) in p.get("media_anchors", {})), None)
+                if features.managed_outputs and anchor is not None and "anchor_utc" not in file:
+                    file.update(anchor_utc=anchor, anchor_source="first_media_growth_estimate")
             if backfill:
                 report["backfill"] = backfill_result
                 report["catch_up"] = catch_up_evidence.to_dict()
@@ -354,7 +410,7 @@ class LiveRunner:
                 if joined["status"] != "joined" and report["conclusion"] != "failed":
                     report["conclusion"] = "gaps"
                     report["warnings"].append("backfill_join_unverified_live_tail_retained")
-            else:
+            elif features.concatenate:
                 checker.concatenate(session, report)
             if catch_up_evidence:
                 report["catch_up"] = catch_up_evidence.to_dict()

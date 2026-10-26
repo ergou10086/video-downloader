@@ -67,6 +67,7 @@ class HttpHandlerDependencies:
     network_diagnostics: object = None
     list_live_recordings: object = None
     get_live_report: object = None
+    export_live_comments: object = None
 
 
 def create_handler(dependencies):
@@ -308,6 +309,16 @@ def create_handler(dependencies):
                     self._json({"error": "缺少等待任务 id"}, status=400)
                     return
                 self._json(dependencies.cancel_live_watch(job_id))
+            elif path == "/api/live/comments-export":
+                job_id = self._field(data, "job_id", str, "")
+                values = self._field(data, "settings", dict, {})
+                if job_id is None or values is None:
+                    return
+                if not dependencies.export_live_comments:
+                    self._json({"error": "弹幕导出不可用"}, status=503)
+                    return
+                result = dependencies.export_live_comments(job_id, values)
+                self._json(result, status=400 if "error" in result else 200)
             elif path == "/api/tasks/cancel":
                 task_id = self._field(data, "id", str, "")
                 if task_id is None:

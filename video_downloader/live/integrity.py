@@ -110,7 +110,7 @@ class IntegrityChecker:
 
     def report(self, paths, *, reason, exit_codes, mode, expected="av", retries=0, forced=False,
                warnings=(), webhook_complete=True):
-        files = [self.inspect(path, "" if expected == "separate" else expected) for path in paths]
+        files = [self.inspect(path, expected(path) if callable(expected) else "" if expected == "separate" else expected) for path in paths]
         usable = any(file["valid"] for file in files)
         issues = list(warnings)
         missing_pair = expected == "separate" and not {"audio", "video"}.issubset(

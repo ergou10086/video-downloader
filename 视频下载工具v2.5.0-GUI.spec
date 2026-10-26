@@ -1,6 +1,6 @@
 from pathlib import Path
 import sys
-from PyInstaller.utils.hooks import collect_submodules
+from PyInstaller.utils.hooks import collect_submodules, collect_data_files
 
 
 project_root = Path(SPECPATH)
@@ -14,10 +14,18 @@ datas = [
     (str(project_root / "NOTICE"), "licenses"),
     (str(project_root / "dependency" / "pysubs2.LICENSE"), "licenses"),
     (str(project_root / "dependency" / "defusedxml.LICENSE"), "licenses"),
+    (str(project_root / "dependency" / "NDGR-protocol.LICENSE"), "licenses"),
+    (str(project_root / "dependency" / "live-python.lock.json"), "licenses"),
     (str(resource_root / "templates"), "templates"),
     (str(resource_root / "static"), "static"),
     (str(plugin_root), "yt-dlp-plugins"),
 ]
+live_vendor = project_root / "dependency" / "live-python"
+for metadata in live_vendor.glob("*.dist-info"):
+    datas.append((str(metadata), "licenses/" + metadata.name))
+datas += collect_data_files("certifi")
+live_modules = ["pysubs2", "websocket", "python_socks", "httpx", "httpcore", "h2", "socksio",
+                "google.protobuf", "ndgr_client.proto", "ruamel.yaml", "anyio"]
 
 a = Analysis(
     [str(entry_script)],
@@ -25,7 +33,8 @@ a = Analysis(
     binaries=[],
     datas=datas,
     hiddenimports=["tkinter", "tkinter.filedialog", "yt_dlp", "yt_dlp.cookies", "yt_dlp.utils", "cramjam",
-                   *collect_submodules("pysubs2"), "defusedxml.ElementTree"],
+                   *(module for package in live_modules for module in collect_submodules(package)),
+                   "defusedxml.ElementTree", "certifi"],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],

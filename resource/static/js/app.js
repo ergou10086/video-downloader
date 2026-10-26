@@ -24,6 +24,7 @@ let networkResultId = '';
 let networkApplying = false;
 let networkEventVersion = 0;
 let livePlatformModes = {};
+let liveCommentPlatforms = {};
 let liveCapabilities = null;
 let liveNoticeResolver = null;
 let liveNoticeKind = "";
@@ -332,6 +333,9 @@ function applyConfig(s) {
   setSwitch('sw_live_danmaku', s.LIVE_DANMAKU_ENABLED);
   setSwitch('sw_live_danmaku_anon', s.LIVE_DANMAKU_ANONYMIZE);
   $('s_live_danmaku_formats').value = s.LIVE_DANMAKU_FORMATS || 'srt,ass';
+  $('s_live_danmaku_offset').value = s.LIVE_DANMAKU_OFFSET_MS || 0;
+  try { liveCommentPlatforms = JSON.parse(s.LIVE_DANMAKU_PLATFORMS || '{}'); } catch(e) { liveCommentPlatforms = {}; }
+  renderLiveCommentPlatforms();
   for(const [key, id] of Object.entries({LIVE_MAX_RETRIES:'s_live_retries', LIVE_WATCHDOG_SECONDS:'s_live_watchdog', LIVE_MIN_FREE_MB:'s_live_free_mb', LIVE_ESTIMATED_BITRATE_KBPS:'s_live_bitrate'})) {
     if(s[key] !== undefined) $(id).value = s[key];
   }
@@ -443,6 +447,20 @@ function parseLivePlatformModes(value) {
   } catch(e) { return {}; }
 }
 
+function renderLiveCommentPlatforms(preserve = false) {
+  const host = $('liveCommentPlatforms');
+  if(!host) return;
+  if(preserve) host.querySelectorAll('[data-live-comment-platform]').forEach(el => {
+    liveCommentPlatforms[el.dataset.liveCommentPlatform] = el.value;
+  });
+  const names = ['Bilibili','YouTube','Twitch','TwitCasting','NicoChannel','Niconico','Withny'];
+  host.innerHTML = names.map(name => `<label class="live-platform-row"><span class="lb">${name}</span>
+    <span class="sel"><select class="ctl" data-live-comment-platform="${name}" aria-label="${name} 弹幕默认">
+    <option value="inherit">跟随全局</option><option value="on">默认抓取</option><option value="off">默认不抓取</option>
+    </select></span></label>`).join('');
+  host.querySelectorAll('select').forEach(el => { el.value = liveCommentPlatforms[el.dataset.liveCommentPlatform] || 'inherit'; });
+}
+
 function renderLivePlatformModes() {
   const host = $('livePlatformModes');
   if(!host) return;
@@ -477,6 +495,7 @@ async function loadLiveCapabilities() {
     if(r && r.platforms) {
       liveCapabilities = r.platforms;
       renderLivePlatformModes();
+      renderLiveCommentPlatforms(true);
     }
   } catch(e) { /* 使用静态兜底 */ }
 }
@@ -558,6 +577,8 @@ function collectCfg() {
     LIVE_DANMAKU_ENABLED: isOn('sw_live_danmaku') ? 1 : 0,
     LIVE_DANMAKU_ANONYMIZE: isOn('sw_live_danmaku_anon') ? 1 : 0,
     LIVE_DANMAKU_FORMATS: $('s_live_danmaku_formats').value,
+    LIVE_DANMAKU_OFFSET_MS: Number($('s_live_danmaku_offset').value),
+    LIVE_DANMAKU_PLATFORMS: JSON.stringify(Object.fromEntries(Array.from(document.querySelectorAll('[data-live-comment-platform]')).filter(el => el.value !== 'inherit').map(el => [el.dataset.liveCommentPlatform, el.value]))),
     LIVE_MAX_RETRIES: Number($('s_live_retries').value),
     LIVE_WATCHDOG_SECONDS: Number($('s_live_watchdog').value),
     LIVE_MIN_FREE_MB: Number($('s_live_free_mb').value),
@@ -702,8 +723,10 @@ async function loadDeps() {
   const d = await api('/api/deps');
   const names = {'yt-dlp':'yt-dlp', ffmpeg:'ffmpeg', ffprobe:'ffprobe',
     fantiadl:'fantiadl', withny_dl:'withny-dl', nicochannel_plugin:'nicochannel 插件',
-    youtube_po_token:'YouTube PO Token Provider'};
-  const optional = {fantiadl:1, withny_dl:1, nicochannel_plugin:1, youtube_po_token:1};
+    youtube_po_token:'YouTube PO Token Provider', live_comment_export:'弹幕字幕导出',
+    live_comment_transport:'直播评论连接', live_comment_niconico:'Niconico 评论协议'};
+  const optional = {fantiadl:1, withny_dl:1, nicochannel_plugin:1, youtube_po_token:1,
+    live_comment_export:1, live_comment_transport:1, live_comment_niconico:1};
   $('depStatus').innerHTML = Object.entries(d).map(([k,v]) =>
     `<span class="dep${v?'':' miss'}">${icon(v?'check':'x','s14')}${names[k]||k}` +
     `<span class="st">${v ? '已就绪' : (optional[k] ? '可选 · 未安装' : '缺失')}</span></span>`
@@ -1933,10 +1956,21 @@ function renderLiveRecording(data) {
     const state = job.conclusion ? conclusions[job.conclusion] || job.conclusion : `录制中 · 分段 ${job.part || 1}`;
     const reason = {user:'已停止（已收尾）', timeout:'已到录制时限', crash:'进程崩溃', disk_full:'磁盘不足'}[job.stop_reason] || '';
     const reportLink = job.report ? `<p><a target="_blank" rel="noopener" href="/api/live/report?job_id=${encodeURIComponent(job.job_id)}&token=${encodeURIComponent(SESSION_TOKEN)}">查看完整性报告</a></p>` : '';
-    const commentLabels = {exported:'弹幕已导出', partial:'弹幕部分导出', failed:'弹幕导出失败，媒体保留', unavailable:'弹幕来源不可用'};
+    const commentLabels = {exported:'弹幕已导出', partial:'弹幕已保留；同步估算或采集缺口请查看报告', empty:'本次未收到可导出的弹幕', failed:'弹幕导出失败，媒体保留', unavailable:'弹幕来源不可用'};
     const comments = commentLabels[job.comments?.status] || '';
-    return `<div class="notice"><b>${escHtml(job.engine || '直播')} ${job.degraded ? '· 已降级' : ''}</b><p>${escHtml(reason ? reason + ' · ' + state : state)}</p>${job.reason ? `<p>${escHtml(job.reason)}</p>` : ''}${comments ? `<p>${escHtml(comments)}</p>` : ''}<small class="mono">${escHtml(job.report || job.report_dir || '')}</small>${reportLink}</div>`;
+    const exportButton = job.conclusion && job.comments?.status && job.comments.status !== 'disabled' ? `<button class="btn sm" data-comment-export="${escHtml(job.job_id)}">按当前格式和偏移重新导出弹幕</button>` : '';
+    return `<div class="notice"><b>${escHtml(job.engine || '直播')} ${job.degraded ? '· 已降级' : ''}</b><p>${escHtml(reason ? reason + ' · ' + state : state)}</p>${job.reason ? `<p>${escHtml(job.reason)}</p>` : ''}${comments ? `<p>${escHtml(comments)}</p>` : ''}<small class="mono">${escHtml(job.report || job.report_dir || '')}</small>${reportLink}${exportButton}</div>`;
   }).join('');
+  $('liveRecordingList').querySelectorAll('[data-comment-export]').forEach(button => button.addEventListener('click', async () => {
+    button.disabled = true;
+    try {
+      const result = await api('/api/live/comments-export', {method:'POST', body:JSON.stringify({job_id:button.dataset.commentExport, settings:{LIVE_DANMAKU_FORMATS:$('s_live_danmaku_formats').value, LIVE_DANMAKU_OFFSET_MS:Number($('s_live_danmaku_offset').value)}})});
+      if(result.error) { showToast(result.error, 'error'); return; }
+      renderLiveRecording({job_id:button.dataset.commentExport, comments:result.comments});
+      showToast('弹幕重新导出完成', 'success');
+    } catch(e) { showToast('弹幕导出失败：' + e.message, 'error'); }
+    finally { button.disabled = false; }
+  }));
 }
 
 function platformHtml(name) {

@@ -74,7 +74,10 @@ class ToolServiceTests(unittest.TestCase):
             (tool_dir / "yt-dlp.exe").touch()
             (tool_dir / "ffmpeg.exe").touch()
             service = create_service(tool_dir)
-            self.assertEqual(service.check_deps(), {
+            status = service.check_deps()
+            for key in ('live_comment_export', 'live_comment_transport', 'live_comment_niconico'):
+                self.assertIsInstance(status.pop(key), bool)
+            self.assertEqual(status, {
                 "yt-dlp": True,
                 "ffmpeg": True,
                 "ffprobe": False,

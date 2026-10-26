@@ -97,6 +97,7 @@ class DownloadExecutor:
         self._archive_choice_lock = threading.Lock()
         self._archive_choice = None
         self._live_runner = None
+        self._withny_live_active = False
         self._live_config = None
         self._effective_live_mode = None
         self._live_finished = threading.Event()
@@ -644,6 +645,7 @@ class DownloadExecutor:
         self._update_progress(-1, "正在启动 Withny 直播监控...")
         self._log(f"[Withny 直播] 已加载配置: {config_path.name}", "info")
         command = [str(executable), "watch", "--config", str(config_path), "--pprof.listen-address", "127.0.0.1:0"]
+        self._withny_live_active = True
         try:
             threading.Thread(
                 target=self._run_withny_live,
@@ -651,6 +653,7 @@ class DownloadExecutor:
                 daemon=True,
             ).start()
         except Exception as exc:
+            self._withny_live_active = False
             self._download_manager.finish(handle)
             self._broadcast_download_state()
             self._start_idle_timer()
@@ -658,50 +661,13 @@ class DownloadExecutor:
         return {"ok": True}
 
     def _run_withny_live(self, handle, command, working_dir):
-        self._app_state.download_thread_context.task_id = handle.generation
-        stats = self._app_state.batch_stats
-        proc = None
+        self._withny_live_active = True
+        self._live_config = dict(self._app_state.config_snapshot(), _withny_config_path=command[command.index("--config") + 1])
+        self._effective_live_mode = "live_edge"
         try:
-            proc = self._spawn(command, cwd=working_dir)
-            if not self._download_manager.publish_process(handle, proc):
-                self.kill_process_tree(proc)
-                return
-            self._broadcast_download_state()
-            line_q, read_done = self._start_reader(proc)
-            self._update_progress(-1, "Withny 直播监控运行中")
-            while not read_done.is_set() or not line_q.empty():
-                if handle.cancel_event.is_set():
-                    break
-                try:
-                    line = line_q.get(timeout=0.5).strip()
-                except queue.Empty:
-                    continue
-                if not line:
-                    continue
-                cleaned = self._sanitize_withny_live_line(line)
-                if cleaned:
-                    level = "error" if any(word in cleaned.lower() for word in ("error", "panic", "fatal")) else "info"
-                    self._log(f"[withny-dl] {cleaned[:500]}", level)
-                    if "download" in cleaned.lower() or "stream" in cleaned.lower():
-                        self._update_progress(-1, "Withny 直播录制中")
-            self._close_process(proc)
-            rc = proc.returncode if proc.returncode is not None else -1
-            if handle.cancel_event.is_set():
-                self._log("[Withny 直播] 监控和录制已停止", "warn")
-                self._update_progress(0, "已停止", "", "")
-            else:
-                stats["fail"] = 1
-                self._app_state.publish({"type": "stats", "data": dict(stats)})
-                self._log(f"[Withny 直播] 进程意外退出，退出码: {rc}", "error")
-                self._update_progress(0, f"失败 (退出码 {rc})", "", "")
-        except Exception as exc:
-            stats["fail"] = 1
-            self._app_state.publish({"type": "stats", "data": dict(stats)})
-            self._log(f"[Withny 直播] 异常: {self._sanitize_withny_live_line(str(exc))}", "error")
-            self._update_progress(0, "异常终止", "", "")
-            self.kill_process_tree(proc)
+            self._run_live(handle, command, "withny://configured-channels", "Withny")
         finally:
-            self._finish(handle, proc)
+            self._withny_live_active = False
 
     @staticmethod
     def _sanitize_withny_live_line(line):
@@ -1947,7 +1913,7 @@ class DownloadExecutor:
                 self._password_value = None
                 self._password_event.set()
         self._update_progress(0, "正在停止...", "", "")
-        if self._live_runner is not None:
+        if self._live_runner is not None or self._withny_live_active:
             # The worker retains its slot through Ctrl+C, file closure and ffprobe.
             # Never release it early or another task can collide with finalization.
             self._broadcast_download_state()
