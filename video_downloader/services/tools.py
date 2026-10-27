@@ -1,6 +1,6 @@
+import base64
 import json
 import os
-import re
 import subprocess
 import threading
 from pathlib import Path
@@ -88,51 +88,33 @@ class ToolService:
         return deps
 
     def pick_withny_archive(self):
-        root = None
         try:
-            import tkinter as tk
-            from tkinter import filedialog
-
-            root = tk.Tk()
-            root.withdraw()
-            root.attributes("-topmost", True)
-            har_path = filedialog.askopenfilename(
+            har_path = self._pick_windows_file(
                 initialdir=str(self._tool_dir),
                 title="选择包含内容的 Withny HAR 文件",
+                filter="HAR 文件 (*.har)|*.har|所有文件 (*.*)|*.*",
                 filetypes=[("HAR 文件", "*.har"), ("所有文件", "*.*")],
             )
             if not har_path:
                 return {"ok": True, "cancelled": True}
-            output_path = filedialog.asksaveasfilename(
+            output_path = self._save_windows_file(
                 initialdir=str(self._download_dir / "Withny"),
                 title="保存 Withny 历史存档",
-                defaultextension=".mp4",
-                filetypes=[("MP4 视频", "*.mp4"), ("MKV 视频", "*.mkv"), ("TS 视频", "*.ts")],
+                default_ext="mp4",
+                filter="MP4 视频 (*.mp4)|*.mp4|MKV 视频 (*.mkv)|*.mkv|TS 视频 (*.ts)|*.ts",
             )
             if not output_path:
                 return {"ok": True, "cancelled": True}
             return {"ok": True, "har_path": har_path, "output_path": output_path}
         except Exception as exc:
             return {"error": f"打开文件选择失败: {exc}"}
-        finally:
-            if root is not None:
-                try:
-                    root.destroy()
-                except Exception:
-                    pass
 
     def pick_withny_live_config(self):
-        root = None
         try:
-            import tkinter as tk
-            from tkinter import filedialog
-
-            root = tk.Tk()
-            root.withdraw()
-            root.attributes("-topmost", True)
-            config_path = filedialog.askopenfilename(
+            config_path = self._pick_windows_file(
                 initialdir=str(self._tool_dir),
                 title="选择 withny-dl 直播录制配置",
+                filter="YAML 配置 (*.yaml;*.yml)|*.yaml;*.yml|所有文件 (*.*)|*.*",
                 filetypes=[("YAML 配置", "*.yaml *.yml"), ("所有文件", "*.*")],
             )
             if not config_path:
@@ -140,6 +122,87 @@ class ToolService:
             return {"ok": True, "config_path": config_path}
         except Exception as exc:
             return {"error": f"打开文件选择失败: {exc}"}
+
+    @staticmethod
+    def _powershell_literal(value):
+        return "'" + str(value).replace("'", "''") + "'"
+
+    def _run_windows_file_dialog(self, dialog_type, initialdir, title, filter_text, default_ext=""):
+        script = f"""
+Add-Type -AssemblyName System.Windows.Forms
+$dialog = New-Object System.Windows.Forms.{dialog_type}
+$dialog.Title = {self._powershell_literal(title)}
+$dialog.Filter = {self._powershell_literal(filter_text)}
+$dialog.InitialDirectory = {self._powershell_literal(initialdir)}
+"""
+        if default_ext:
+            script += f"$dialog.DefaultExt = {self._powershell_literal(default_ext)}\n$dialog.AddExtension = $true\n"
+        script += """
+if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
+    [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes([string]$dialog.FileName))
+}
+$dialog.Dispose()
+"""
+        result = subprocess.run(
+            ["powershell", "-NoProfile", "-STA", "-Command", script],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=300,
+        )
+        if result.returncode != 0:
+            detail = (result.stderr or result.stdout or "PowerShell 文件对话框启动失败").strip()
+            raise RuntimeError(detail)
+        encoded_path = (result.stdout or "").strip().splitlines()
+        if not encoded_path:
+            return ""
+        return base64.b64decode(encoded_path[-1]).decode("utf-8")
+
+    def _pick_windows_file(self, initialdir, title, filter, filetypes):
+        root = None
+        try:
+            import tkinter as tk
+            from tkinter import filedialog
+
+            root = tk.Tk()
+            root.withdraw()
+            root.attributes("-topmost", True)
+            return filedialog.askopenfilename(
+                initialdir=initialdir,
+                title=title,
+                filetypes=filetypes,
+            )
+        except Exception:
+            return self._run_windows_file_dialog(
+                "OpenFileDialog", initialdir, title, filter
+            )
+        finally:
+            if root is not None:
+                try:
+                    root.destroy()
+                except Exception:
+                    pass
+
+    def _save_windows_file(self, initialdir, title, default_ext, filter):
+        root = None
+        try:
+            import tkinter as tk
+            from tkinter import filedialog
+
+            root = tk.Tk()
+            root.withdraw()
+            root.attributes("-topmost", True)
+            return filedialog.asksaveasfilename(
+                initialdir=initialdir,
+                title=title,
+                defaultextension="." + default_ext,
+                filetypes=[("视频文件", "*.mp4 *.mkv *.ts")],
+            )
+        except Exception:
+            return self._run_windows_file_dialog(
+                "SaveFileDialog", initialdir, title, filter, default_ext
+            )
         finally:
             if root is not None:
                 try:
@@ -922,32 +985,29 @@ class ToolService:
             self._log("[Cookie模板] cookies.txt 已存在，跳过生成", "warn")
             return {"ok": True, "existed": True}
 
-        content = """# =====================================================
-# Netscape HTTP Cookie File
-# 请使用浏览器扩展「Get cookies.txt LOCALLY」导出Cookie
+        content = """# Netscape HTTP Cookie File
+# =====================================================
+# 这是空白格式模板，不含真实登录 Cookie。
+# 请在已登录的浏览器中使用「Get cookies.txt LOCALLY」等扩展，
+# 导出 Netscape 格式 Cookie 后，用导出的文件替换本文件。
 # =====================================================
 #
 # 使用说明：
-# 1. 请勿手动编辑此文件内容，格式错误会导致Cookie失效
-# 2. 推荐使用浏览器扩展「Get cookies.txt LOCALLY」导出
-# 3. 导出时选择对应平台域名，导出后直接替换本文件
-# 4. 文件必须保持 Netscape 格式，编码为 UTF-8 无BOM
+# 1. 第一行必须保留 Netscape 格式标识，不要翻译或在它前面添加文字。
+# 2. 文件使用 UTF-8 无 BOM 编码；说明文字均以 # 开头，作为注释。
+# 3. 每条 Cookie 包含 7 个字段，字段之间必须使用实际 TAB 制表符。
+#    字段顺序：域名、是否包含子域、路径、是否仅 HTTPS、过期时间、名称、值。
 #
-# 安全提示：
-# 1. Cookie包含账号登录凭证，请勿分享给他人
-# 2. 平台登出、修改密码后Cookie会自动失效
-# 3. Fantia仅支持文件模式Cookie，浏览器提取模式无效
-# 4. 建议每月重新导出一次，保证凭证有效性
+# 安全提示：Cookie 可能包含账号登录凭证，请勿分享或提交到公开仓库。
+# Fantia 需要使用 Cookie 文件模式，不能使用浏览器提取模式。
 #
-# =====================================================
-
-# 下面是示例格式（请替换为实际导出的内容）：
-# .youtube.com	TRUE	/	TRUE	1735689600	LOGIN_INFO	xxxxxxxxxxxxxxxxxxxx
-# .twitch.tv	TRUE	/	TRUE	1735689600	auth-token	xxxxxxxxxxxxxxxxxxxx
+# 以下仅为注释形式的格式示例，不是有效登录凭证；请使用实际导出的内容：
+# .youtube.com	TRUE	/	TRUE	0	LOGIN_INFO	xxxxxxxxxxxxxxxxxxxx
+# .twitch.tv	TRUE	/	TRUE	0	auth-token	xxxxxxxxxxxxxxxxxxxx
 """
         try:
             cookie_file.write_text(content, encoding="utf-8")
-            self._log("[Cookie模板] 已生成 cookies.txt 模板文件", "success")
+            self._log("[Cookie模板] 已生成空白 Netscape 格式模板；登录 Cookie 请从浏览器导出后替换", "success")
             return {"ok": True}
         except Exception as exc:
             self._log(f"[Cookie模板] 生成失败: {exc}", "error")

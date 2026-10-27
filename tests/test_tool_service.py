@@ -1,5 +1,6 @@
 import tempfile
 import unittest
+from http.cookiejar import MozillaCookieJar
 from pathlib import Path
 from unittest.mock import patch
 
@@ -113,6 +114,25 @@ class ToolServiceTests(unittest.TestCase):
             self.assertEqual(result, {"ok": True, "count": 2})
             self.assertTrue(kept.exists())
             self.assertFalse((nested / "video.part").exists())
+
+    def test_cookie_template_is_loadable_netscape_file_without_login_cookies(self):
+        with tempfile.TemporaryDirectory() as directory:
+            tool_dir = Path(directory)
+            result = create_service(tool_dir).gen_cookie_template()
+            self.assertEqual(result, {"ok": True})
+            cookie_file = tool_dir / "cookies.txt"
+            raw = cookie_file.read_bytes()
+            self.assertFalse(raw.startswith(b"\xef\xbb\xbf"))
+            lines = raw.decode("utf-8").splitlines()
+            self.assertEqual(lines[0], "# Netscape HTTP Cookie File")
+            self.assertIn("# 使用说明：", lines)
+            self.assertIn("# 这是空白格式模板，不含真实登录 Cookie。", lines)
+            self.assertTrue(all(not line.strip() or line.startswith("#") for line in lines))
+            jar = MozillaCookieJar(str(cookie_file))
+            # Read UTF-8 explicitly rather than the Windows locale's default GBK.
+            with cookie_file.open(encoding="utf-8") as file:
+                jar._really_load(file, str(cookie_file), True, True)
+            self.assertEqual(len(jar), 0)
 
     def test_templates_do_not_overwrite_existing_files(self):
         with tempfile.TemporaryDirectory() as directory:

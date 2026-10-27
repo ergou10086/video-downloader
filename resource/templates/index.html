@@ -347,6 +347,9 @@
               <div class="row"><span class="lb">YouTube PO Token</span><span class="sw" id="sw_youtube_po_token" onclick="toggleSwitch(this)"><i></i></span><span class="hint">下载前自动启动本地 BgUtils Provider，缓解部分 403</span></div>
               <div class="row"><span class="lb">Niconico 点播弹幕</span><span class="sw" id="sw_nicocmt" onclick="toggleSwitch(this)"><i></i></span><span class="hint">直播弹幕使用上方的逐平台设置</span></div>
               <div class="row"><span class="lb">Niconico 重编码</span><span class="sw" id="sw_nicorec" onclick="toggleSwitch(this)"><i></i></span><span class="hint">兼容性优先，速度较慢</span></div>
+              <div class="sh" style="margin-top:12px"><b>TwitCasting</b><span class="rule"></span></div>
+              <div class="row"><span class="lb">记住密码</span><span class="sw" id="sw_tc_remember" role="switch" aria-label="记住 TwitCasting 密码" aria-checked="false" tabindex="0" onclick="toggleSwitch(this);onTcPasswordChange()" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();this.click()}"><i></i></span><span class="hint">默认关闭；开启后在本次运行内按链接复用成功使用的密码</span></div>
+              <div class="row"><span class="lb">保存密码到 XLSX</span><span class="sw" id="sw_tc_xlsx" role="switch" aria-label="保存 TwitCasting 密码到 XLSX" aria-checked="false" tabindex="0" onclick="if(this.getAttribute('aria-disabled')!=='true') toggleSwitch(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();this.click()}"><i></i></span><span class="hint">默认关闭；需开启记住密码，保存到根目录 twitcasting_passwords.xlsx，明文保存并在下次启动时读取</span></div>
             </section>
 
             <section class="settings-section" id="set-tasks">
@@ -551,7 +554,7 @@
             <p><b>直播模式：</b>在「设置 → 直播设置」选择全局模式，并可分别设置支持追开播的平台默认方式。开始直播任务前会检查状态：未开播可加入蹲开播；已开播会显示开播时间和已开播时长，并让你确认录制方式；追开播不可用时会提示原因并降级为从当前时刻。</p>
             <p><b>Bilibili：</b>粘贴 <span class="code">live.bilibili.com/房间号</span>，默认从当前时刻录制；普通观看侧无 DVR，不支持追开播。</p>
             <p><b>Twitch：</b>粘贴频道 URL 录制当前直播；仅当本场有可访问的增长中 VOD 时才可能追开播。<span class="code">/videos/</span> 链接是回放。</p>
-            <p><b>TwitCasting：</b>主播页默认从当前时刻录制；<span class="code">/movie/ID</span> 下载单条，<span class="code">/show</span> 拉取历史列表。密码保护内容会弹窗要求输入密码。</p>
+            <p><b>TwitCasting：</b>主播页默认从当前时刻录制；<span class="code">/movie/ID</span> 下载单条，<span class="code">/show</span> 拉取历史列表。密码保护内容会弹窗要求输入密码；在平台专项设置中可选择记住密码或保存到 XLSX，两项默认关闭。</p>
             <p>录制期间需保持工具运行；当前版本停止为硬停止，尚未实现优雅收尾。</p>
           </div>
 
@@ -634,6 +637,7 @@
                 <div class="specrow"><span class="k">v2.4.0 字幕</span><span>ZheYi101 <a href="https://github.com/ZheYi101" target="_blank" rel="noopener noreferrer">@ZheYi101</a> — 字幕下载；猫猫葉汐A_spy — 修复与合并适配</span></div>
                 <div class="specrow"><span class="k">v2.4.0 更新</span><span>ErgouTree <a href="https://github.com/ergou10086" target="_blank" rel="noopener noreferrer">@ergou10086</a> — 其他更新与修复</span></div>
                 <div class="specrow"><span class="k">v2.5.0 WebUI</span><span>DarkKandaoMaster <a href="https://github.com/DarkKandaoMaster" target="_blank" rel="noopener noreferrer">@DarkKandaoMaster</a> — 视觉与交互体系重构</span></div>
+                <div class="specrow"><span class="k">v2.6.0 上游修复</span><span>猫猫葉汐A_spy <a href="https://github.com/maomaoyexi" target="_blank" rel="noopener noreferrer">@maomaoyexi</a> — Cookie 模板、TwitCasting 密码表、HLS 路径及恢复、文件对话框回退与相关测试</span></div>
                 <div class="specrow"><span class="k">v2.5.0 功能</span><span>ErgouTree <a href="https://github.com/ergou10086" target="_blank" rel="noopener noreferrer">@ergou10086</a> — 设置控件、TwitCasting、Provider 与目录收拢</span></div>
               </div>
             </div>

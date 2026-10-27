@@ -1,6 +1,7 @@
 YT-DLP 多平台视频下载工具 常见问题答疑合集
-适配版本：v2.5.0 WebUI 源码运行版 | 覆盖平台：YouTube / Bilibili / Twitch / Niconico / Fantia / TwitCasting / Twitter
-界面方式：浏览器WebUI（运行 视频下载工具v2.5.0-GUI.py）
+适配版本：v2.6.0 WebUI 源码运行版 | 覆盖平台：YouTube / Bilibili / Twitch / Niconico / NicoChannel / Fantia / TwitCasting / Twitter/X
+界面方式：浏览器WebUI（运行 视频下载工具v2.6.0-GUI.py）
+直播录制模式：在「设置 → 直播设置」选择自动、追开播、从当前时刻或蹲开播；默认自动，按平台能力核验后执行。
 =====================================
 一、启动与运行类
 =====================================
@@ -24,7 +25,7 @@ YT-DLP 多平台视频下载工具 常见问题答疑合集
 1、确认dependency/yt-dlp.exe、dependency/ffmpeg.exe、dependency/ffprobe.exe存在
 2、检查杀毒软件是否隔离了程序文件，添加信任即可
 3、确认video_downloader文件夹与Python主程序同目录
-4、在命令行中运行「python 视频下载工具v2.5.0-GUI.py」查看具体报错信息
+4、在命令行中运行「python 视频下载工具v2.6.0-GUI.py」查看具体报错信息
 
 问题4：如何彻底关闭工具？
 解决：
@@ -204,7 +205,7 @@ TwitCasting专项：提示m3u8 HTTP 400或Initialization fragment错误
 5、点击停止会取消当前链接并阻止剩余链接继续启动
 
 问题27：直播链接无法录制？
-答：YouTube使用/live或/live/形式链接；Twitch使用主播频道页；Niconico使用live.nicovideo.jp或live2.nicovideo.jp链接。确认直播可访问，必要时配置Cookie并更新yt-dlp核心
+答：先确认直播仍在进行且账号有权限，再检查链接入口：YouTube 使用 /live 或 /live/；Bilibili 使用 live.bilibili.com/房间号；Twitch 使用主播频道页；Niconico 使用 live.nicovideo.jp、live2.nicovideo.jp 或 /watch/lv...；NicoChannel 使用 nicochannel.jp/频道/live/...；TwitCasting 使用主播页；Twitter/X Spaces 使用 x.com/i/spaces/...。选择「追开播」时，如果平台没有 DVR/Timeshift，程序会自动改为从当前分片录制。必要时配置 Cookie、Firefox 登录令牌或更新 yt-dlp 核心。已结束直播只有平台保留回放时才能下载。
 
 问题28：配置预设怎么用？
 答：
@@ -215,7 +216,7 @@ TwitCasting专项：提示m3u8 HTTP 400或Initialization fragment错误
 5、预设集成在设置页面顶部，不再有独立标签页
 
 问题29：临时文件会自动清理吗？
-答：可以在工具箱中点击「清理临时文件」手动清理；.part/.ytdl临时文件用于断点续传，下载完成后自动重命名
+答：可以在工具箱中点击「清理临时文件」手动清理；.part 文件用于断点续传，.ytdl 文件保存恢复信息，确认下载完成后自动删除，未完成时保留
 
 问题30：如何更新yt-dlp核心？
 答：进入工具箱，点击「更新yt-dlp核心」按钮，一键自动更新到最新版
@@ -242,13 +243,26 @@ TwitCasting专项：提示m3u8 HTTP 400或Initialization fragment错误
 - 文件名包含主播名、录制时间、直播ID等信息
 
 问题35：YouTube直播支持吗？
-答：支持。v1.9.5会识别YouTube的/live或/live/形式链接，按直播模式从开头录制，并显示录制时长、大小、分片或速度信息
+答：支持。程序会识别YouTube的/live或/live/形式链接，并按本分支的自动、条件追开播、从当前时刻或蹲开播模式执行；录制过程中显示录制时长、大小、分片或速度信息
 
-问题36：下载封面会生成什么文件？
+问题：TwitCasting 录播密码会记住吗？
+答：默认不保存。设置 → 平台专项 → TwitCasting 的“记住密码”用于本次运行内按链接复用；同时开启“保存密码到 XLSX”后，才读写根目录 twitcasting_passwords.xlsx 并迁移旧表。两项均默认关闭，密码表为明文文件。关闭不删除已存在的表格。失效密码会在对应任务内重新询问。
+
+问题36：各平台直播录制文件保存在哪里？
+答：文件按平台和主播自动分类，通常位于 download/<平台>/<主播或频道>/直播/。Niconico 的直播目录可能直接使用 download/Niconico/直播/；Twitter/X Spaces 通常保存到 download/Twitter/直播/。Withny 由 withny-dl 配置决定输出位置。
+
+问题37：下载封面会生成什么文件？
 答：开启「下载封面」后会写出并转换为JPG；合并输出、非WebM且未启用分离音频时还会尝试嵌入媒体文件，其他模式为避免后处理冲突不会嵌图
+也可在工具箱使用「下载视频封面」，输入多行链接仅保存JPG图片，沿用当前视频输出目录和命名规则，不写入下载归档。Fantia、Withny及未识别平台暂不支持此工具。
 
-问题37：一键更新为什么提示缺少SHA-256或来源不可信？
+问题38：一键更新为什么提示缺少SHA-256或来源不可信？
 答：v1.9.5的安全更新要求可信HTTPS来源、最大512MB、有效SHA-256，并核对下载大小和Windows EXE格式；任一校验不通过都会拒绝替换。源码运行版请手动替换.py文件和video_downloader文件夹
+
+问题39：提示已下载时，如何选择重新下载？
+答：命中归档后会弹窗询问「重新下载」或「跳过」，20秒未选择默认跳过。跳过单独计数，不算下载成功。选择重下只清理本次命中的归档记录，并按当前模板覆盖同名视频和配套音频，不生成编号副本；其他归档记录保留。若更改输出目录、模板或格式，新文件按新设置保存；归档本身不能证明旧文件仍然完整。
+
+问题40：YouTube PO Token 首次启动看起来没有下载，可以停止吗？
+答：Provider 在后台准备，日志每5秒报告等待进度，最多等待60秒，健康检查通过后才开始下载。准备期间可点击「停止」。启动失败会保留Deno错误并释放任务；请按日志补齐依赖后重试。程序不会在线安装Provider依赖，也不会等待控制台交互确认。
 
 =====================================
 八、最佳稳定配置（推荐所有人用）
@@ -260,5 +274,5 @@ Cookie模式：cookies.txt文件模式（全平台通用，最稳定）
 编码：兼容优先（H.264，所有设备可直接播放）
 代理：根据网络环境正确配置
 WAV转MP3：320kbps，保留源文件（确认质量后再手动删除）
-运行方式：所有依赖exe放入主程序旁的dependency目录，运行「python 视频下载工具v2.5.0-GUI.py」启动
+运行方式：所有依赖exe放入主程序旁的dependency目录，运行「python 视频下载工具v2.6.0-GUI.py」启动
 关闭方式：使用右上角「✕ 退出」按钮彻底关闭

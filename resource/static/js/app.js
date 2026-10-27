@@ -361,6 +361,9 @@ function applyConfig(s) {
   setSwitch('sw_strict', s.STRICT_FILENAME);
   setSwitch('sw_nicocmt', s.NICO_COMMENTS);
   setSwitch('sw_nicorec', s.NICO_RECODE);
+  setSwitch('sw_tc_remember', s.TC_REMEMBER_PASSWORD);
+  setSwitch('sw_tc_xlsx', s.TC_SAVE_PASSWORD_XLSX);
+  onTcPasswordChange();
   setSwitch('sw_youtube_po_token', s.YOUTUBE_PO_TOKEN_ENABLED);
   $('s_ytdlp_default_args').value = s.YTDLP_DEFAULT_ARGS || '';
   setSwitch('sw_log', s.ENABLE_LOG);
@@ -599,6 +602,8 @@ function collectCfg() {
     STRICT_FILENAME: isOn('sw_strict')?1:0,
     NICO_COMMENTS: isOn('sw_nicocmt')?1:0,
     NICO_RECODE: isOn('sw_nicorec')?1:0,
+    TC_REMEMBER_PASSWORD: isOn('sw_tc_remember')?1:0,
+    TC_SAVE_PASSWORD_XLSX: isOn('sw_tc_remember') && isOn('sw_tc_xlsx')?1:0,
     YOUTUBE_PO_TOKEN_ENABLED: isOn('sw_youtube_po_token')?1:0,
     YTDLP_DEFAULT_ARGS: $('s_ytdlp_default_args').value.trim(),
     ENABLE_LOG: isOn('sw_log')?1:0,
@@ -785,11 +790,13 @@ async function startDl() {
   autoGrowUrlInput();
   // 自动识别 Bilibili 链接（无需手动切换平台按钮）
   const isBiliUrl = isBilibiliUrl(url);
+  const isNicoChannelLiveUrl = isNicoChannelLive(url);
+  if(isNicoChannelLiveUrl && currentPlatform !== 'NicoChannel') selectPlatform('NicoChannel');
   if(isBiliUrl && currentPlatform !== 'Bilibili') selectPlatform('Bilibili');
   // 先保存设置
   try { await saveSettingsNoAlert(); } catch(e) { showToast('设置保存失败: ' + e.message, 'error'); return; }
   // Bilibili 多P选择策略（基于 URL 检测，而非平台按钮状态）
-  if(isBiliUrl && $('s_bili_policy').value === 'select' && !isBilibiliLive(url)) {
+  if(isBiliUrl && $('s_bili_policy').value === 'select' && !isBilibiliLive(url) && !isNicoChannelLiveUrl) {
     try {
       setStatus('正在获取分P列表…', 'live');
       const pl = await api('/api/bili-playlist', {method:'POST', body:JSON.stringify({url})});
@@ -887,6 +894,16 @@ function isBilibiliUrl(url) {
  * @param {string} url - 待检测链接。
  * @returns {boolean} 是否为 Bilibili 直播链接。
  */
+function isNicoChannelLive(url) {
+  try {
+    const parsed = new URL(url);
+    const host = parsed.hostname.toLowerCase();
+    const segments = parsed.pathname.split('/').filter(Boolean);
+    return (host === 'nicochannel.jp' || host.endsWith('.nicochannel.jp')) &&
+      segments.length === 3 && segments[1].toLowerCase() === 'live' && /^sm\w+$/i.test(segments[2]);
+  } catch(e) { return false; }
+}
+
 function isBilibiliLive(url) {
   try { return new URL(url).hostname.includes('live.bilibili.com'); } catch(e) { return false; }
 }
@@ -2245,6 +2262,15 @@ document.addEventListener('keydown', e => {
     chooseArchiveRedownload(false);
   }
 });
+
+function onTcPasswordChange() {
+  const enabled = isOn('sw_tc_remember');
+  const control = $('sw_tc_xlsx');
+  if(!enabled) setSwitch('sw_tc_xlsx', 0);
+  control.setAttribute('aria-disabled', enabled ? 'false' : 'true');
+  control.tabIndex = enabled ? 0 : -1;
+  control.style.opacity = enabled ? '' : '0.45';
+}
 
 // ========== TwitCasting 密码 ==========
 function showTcPasswordPrompt(isRetry) {

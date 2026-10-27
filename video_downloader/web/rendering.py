@@ -12,7 +12,6 @@ SESSION_TOKEN_PLACEHOLDER = "__SESSION_TOKEN__"
 # 项目根目录，用于定位模板和静态文件（rendering.py 在 web/ 子目录，需要上两级到项目根）
 _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 _RESOURCE_DIR = os.path.join(_PROJECT_ROOT, "resource")
-_TEMPLATE_DIR = os.path.join(_RESOURCE_DIR, "templates")
 _STATIC_DIR = os.path.join(_RESOURCE_DIR, "static")
 
 # 确保标准 MIME 类型（Windows 上 mimetypes 可能不完整）

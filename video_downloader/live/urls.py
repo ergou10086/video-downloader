@@ -10,6 +10,7 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from enum import Enum
 from urllib.parse import parse_qs, urlparse
@@ -118,13 +119,17 @@ def classify_target(url: str, platform: str | None = None) -> LiveTarget:
             if len(segments) >= 2 and segments[0] == "watch" and segments[1].startswith("lv"):
                 return LiveTarget(raw_url, platform_name, TargetKind.EVENT, segments[1])
             return LiveTarget(raw_url, platform_name, TargetKind.UNKNOWN, reason="未识别的 Niconico 直播路径")
-        if host in {"www.nicovideo.jp", "nicovideo.jp"} and segments[:1] == ["watch"]:
+        if (host in {"www.nicovideo.jp", "nicovideo.jp", "m.nicovideo.jp"}
+                and len(segments) == 2 and segments[0] == "watch"
+                and re.fullmatch(r"lv\d+", segments[1])):
+            return LiveTarget(raw_url, platform_name, TargetKind.EVENT, segments[1])
+        if host in {"www.nicovideo.jp", "nicovideo.jp", "m.nicovideo.jp"} and segments[:1] == ["watch"]:
             return LiveTarget(raw_url, platform_name, TargetKind.ARCHIVE, segments[1] if len(segments) > 1 else "")
         return LiveTarget(raw_url, platform_name, TargetKind.UNKNOWN, reason="未识别的 Niconico 路径")
 
     if platform_name == "NicoChannel":
         segments = _segments(lowered)
-        if len(segments) >= 3 and segments[1] == "live" and segments[2].startswith("sm"):
+        if len(segments) == 3 and segments[1] == "live" and re.fullmatch(r"sm\w+", segments[2]):
             return LiveTarget(raw_url, platform_name, TargetKind.EVENT, segments[2])
         if len(segments) >= 2 and segments[1] == "lives":
             return LiveTarget(raw_url, platform_name, TargetKind.LIST, segments[0])

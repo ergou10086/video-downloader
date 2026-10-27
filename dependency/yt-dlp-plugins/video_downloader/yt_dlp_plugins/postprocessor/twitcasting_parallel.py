@@ -234,6 +234,15 @@ class TwitCastingParallelHlsPP(PostProcessor):
         # runs, while the immutable VOD id + selected format remain a stable cache key.
         return output.parent / f'.tc-hls-{video_id}-{format_id}'
 
+    @staticmethod
+    def _local_playlist_url(path):
+        """Keep native spaces and Unicode in the filename passed to FFmpeg.
+
+        Preserve the fork's working file: URLs on every platform while sharing
+        the upstream helper and its Windows path regression coverage.
+        """
+        return 'file:' + Path(path).resolve().as_posix()
+
     def _download_asset(self, url, destination, headers, limiter, retries, stopped):
         partial = destination.with_suffix(destination.suffix + '.part')
         last_error = None
@@ -409,10 +418,7 @@ class TwitCastingParallelHlsPP(PostProcessor):
         with open(partial_playlist, 'w', encoding='utf-8', newline='\n') as output:
             output.write(local_manifest)
         os.replace(partial_playlist, playlist_path)
-        # FFmpeg's file protocol does not URL-decode %20 (or UTF-8 escapes).
-        # Pass the native absolute filename after file:, preserving spaces and
-        # non-ASCII characters. yt-dlp passes this argument directly to FFmpeg.
-        format_info['url'] = 'file:' + playlist_path.resolve().as_posix()
+        format_info['url'] = self._local_playlist_url(playlist_path)
         format_info['protocol'] = 'm3u8'
         format_info.pop('hls_media_playlist_data', None)
         self.to_screen('[TwitCastingParallel] 并发分片准备完成，正在由 FFmpeg 本地封装')

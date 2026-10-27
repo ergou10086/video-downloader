@@ -64,6 +64,9 @@ class DownloadExecutor:
         pick_withny_live_config=None,
         ensure_po_token_provider=None,
         on_finished=None,
+        get_twitcasting_password=None,
+        save_twitcasting_password=None,
+        forget_twitcasting_password=None,
     ):
         self._tool_dir = tool_dir
         self._paths = AppPaths(tool_dir)
@@ -82,6 +85,10 @@ class DownloadExecutor:
         self._pick_withny_live_config = pick_withny_live_config
         self._ensure_po_token_provider = ensure_po_token_provider
         self._on_finished = on_finished
+        self._get_twitcasting_password_cb = get_twitcasting_password
+        self._save_twitcasting_password_cb = save_twitcasting_password
+        self._forget_twitcasting_password_cb = forget_twitcasting_password
+        self._tc_config = None
         self._finish_lock = threading.Lock()
         self._finished_generations = set()
         self._password_attempts = 0
@@ -318,6 +325,90 @@ class DownloadExecutor:
                 "warn",
             )
 
+    @staticmethod
+    def _command_video_password(cmd):
+        """返回命令中传给 TwitCasting 的密码；不存在或为空时返回 None。"""
+        if not cmd:
+            return None
+        try:
+            index = cmd.index("--video-password") + 1
+        except (ValueError, IndexError):
+            return None
+        if index >= len(cmd):
+            return None
+        value = str(cmd[index])
+        return value or None
+
+    @staticmethod
+    def _is_twitcasting_parallel_plugin_error(line):
+        """识别插件未注册导致的 yt-dlp KeyError。"""
+        lowered = str(line or "").lower()
+        return "keyerror" in lowered and "twitcastingparallelhlspp" in lowered
+
+    def _password_policy(self, config=None):
+        config = config if config is not None else self._tc_config
+        if config is None:
+            config = self._app_state.config_snapshot()
+        config = config if isinstance(config, dict) else {}
+        remember = str(config.get("TC_REMEMBER_PASSWORD", 0)) == "1"
+        return remember, remember and str(config.get("TC_SAVE_PASSWORD_XLSX", 0)) == "1"
+
+    def _saved_twitcasting_password(self, url, platform, config):
+        remember, persist = self._password_policy(config)
+        if platform == "TwitCasting" and remember and self._get_twitcasting_password_cb:
+            return self._get_twitcasting_password_cb(url, persist=persist)
+        return None
+
+    def _remember_twitcasting_password(self, url, platform, cmd, config=None):
+        remember, persist = self._password_policy(config)
+        password = self._command_video_password(cmd)
+        if platform == "TwitCasting" and remember and password and self._save_twitcasting_password_cb:
+            self._save_twitcasting_password_cb(url, password, persist=persist)
+
+    def _forget_twitcasting_password(self, url, platform, config=None):
+        remember, persist = self._password_policy(config)
+        if platform == "TwitCasting" and remember and self._forget_twitcasting_password_cb:
+            self._forget_twitcasting_password_cb(url, persist=persist)
+
+    @staticmethod
+    def _has_twitcasting_parallel(cmd):
+        return any(str(value).startswith("TwitCastingParallelHls:") for value in (cmd or []))
+
+    @classmethod
+    def _without_twitcasting_parallel(cls, cmd):
+        if cmd is None:
+            return None
+        result, index = [], 0
+        while index < len(cmd):
+            if cmd[index] == "--enable-file-urls":
+                index += 1
+                continue
+            if (cmd[index] == "--use-postprocessor" and index + 1 < len(cmd)
+                    and str(cmd[index + 1]).startswith("TwitCastingParallelHls:")):
+                index += 2
+                continue
+            result.append(cmd[index])
+            index += 1
+        # The fork uses the plugin on its first native-HLS attempt. Removing it
+        # must explicitly select FFmpeg, without re-registering the failed plugin.
+        if not any(value == "--downloader" and result[i + 1] == "m3u8:ffmpeg"
+                   for i, value in enumerate(result[:-1])):
+            result = cls._replace_pair_options(result, {"--downloader"}, ["--downloader", "m3u8:ffmpeg"])
+        args = "ffmpeg_i:-http_persistent 1 -http_multiple 1"
+        if args not in result:
+            result += ["--downloader-args", args]
+        return result
+
+    @staticmethod
+    def _remove_ytdl_sidecar(output_path):
+        if not output_path or not Path(output_path).is_file():
+            return False
+        try:
+            Path(str(output_path) + ".ytdl").unlink()
+        except OSError:
+            return False
+        return True
+
     def _with_ffmpeg_downloader(self, cmd):
         """为单条下载补齐 TwitCasting 并发预取与 FFmpeg 兜底参数（幂等）。
 
@@ -408,6 +499,11 @@ class DownloadExecutor:
             config_snapshot = dict(config_snapshot, TC_PASSWORD=tc_password)
         detected = detect_platform(url)
         effective_platform = detected if detected else config_snapshot["PLATFORM"]
+        if not tc_password:
+            tc_password = self._saved_twitcasting_password(url, effective_platform, config_snapshot)
+            if tc_password:
+                config_snapshot = dict(config_snapshot, TC_PASSWORD=tc_password)
+        self._tc_config = config_snapshot
         if detected:
             self._log(f"[自动识别] 检测到{detected}链接", "info")
         else:
@@ -491,6 +587,7 @@ class DownloadExecutor:
             cmd += ["--verbose"]
         if self._download_manager.is_cancelled(handle):
             return
+        self._tc_config = config_snapshot
         self._live_config = dict(config_snapshot, _custom_live_args=custom_args or "")
         self._effective_live_mode = live_mode
         self._update_progress(0, "正在连接直播..." if is_live_download else "正在下载...")
@@ -1061,6 +1158,7 @@ class DownloadExecutor:
             tc_m3u8_400 = False
             tc_access_error = False
             tc_cookie_error = False
+            parallel_plugin_error = False
             live_timeout = (int(self._app_state.config_snapshot().get("LIVE_DOWNLOAD_TIMEOUT", 0)) * 60
                             if is_live_download and effective_platform == "Niconico" else 0)
             deadline = time.monotonic() + live_timeout if live_timeout else None
@@ -1102,7 +1200,8 @@ class DownloadExecutor:
                     live_start_time = time.time()
                     self._update_progress(-1, "直播录制中...", stage=current_stage)
 
-                is_error = "ERROR" in line
+                parallel_plugin_error = parallel_plugin_error or self._is_twitcasting_parallel_plugin_error(line)
+                is_error = "ERROR" in line or parallel_plugin_error
                 is_warning = "WARNING" in line
                 # 密码保护期：yt-dlp 提示需要 --video-password 时，标记以便结束后弹窗索取密码。
                 # 仅 TwitCasting 使用 --video-password，限定平台避免其他平台的假阳性。
@@ -1250,12 +1349,26 @@ class DownloadExecutor:
                         self._update_progress(0, "已停止", "", "", stage="subtitle")
                         update_stats()
                         return
+                if output_path and os.path.isfile(output_path):
+                    self._remember_twitcasting_password(url, effective_platform, cmd)
+                    self._remove_ytdl_sidecar(output_path)
                 stats["ok"] = 1
                 self._log("[完成] 下载成功！", "success")
                 self._update_progress(1, "下载完成", "", "")
                 self._add_history(url, video_title, effective_platform, "success", output_path)
                 update_stats()
             else:
+                if (parallel_plugin_error and effective_platform == "TwitCasting"
+                        and self._has_twitcasting_parallel(cmd)):
+                    self._log("[TwitCasting] 并发插件不可用，改用 FFmpeg 重试一次", "warn")
+                    self._run_single(
+                        handle, self._without_twitcasting_parallel(cmd), url, effective_platform,
+                        is_live_download, audio_mode, audio_fmt, verbose,
+                        self._without_twitcasting_parallel(subtitle_cmd), tc_direct_tried,
+                        tc_firefox_tried, archive_retry=archive_retry)
+                    return
+                if password_required or password_retry:
+                    self._forget_twitcasting_password(url, effective_platform)
                 recovery = self._twitcasting_recovery(
                     cmd,
                     m3u8_400=tc_m3u8_400,
@@ -1402,6 +1515,7 @@ class DownloadExecutor:
                 password_retry = any("format is not available" in line.lower() for line in lines)
                 if not (password_required or password_retry):
                     break
+                self._forget_twitcasting_password(url, platform, self._live_config)
                 if self._on_finished is None:
                     self._emit_event("password_required", {"url": url, "platform": platform,
                                                           "reason": "retry" if password_retry else "missing"})
@@ -1417,6 +1531,9 @@ class DownloadExecutor:
                       "timeout": "已到录制时限（已收尾）", "gaps": "录制有缺口，请查看完整性报告",
                       "earliest": "已录制平台最早可用内容，请查看报告", "fail": "直播录制失败，请查看报告"}
             status = result["status"]
+            if status == "success" and result.get("output") and Path(result["output"]).is_file():
+                self._remember_twitcasting_password(url, platform, cmd, self._live_config)
+                self._remove_ytdl_sidecar(result["output"])
             self._update_progress(1 if status == "success" else 0, labels[status], "", "")
             self._log(f"[直播] {labels[status]}；报告：{result['report']}", "success" if status == "success" else "warn")
             stats = self._app_state.batch_stats
@@ -1540,7 +1657,8 @@ class DownloadExecutor:
                 bili_parts_for_url = (bili_parts_map or {}).get(url)
 
                 # 密码重试循环（最多 2 次额外尝试）
-                tc_password = last_tc_password if effective_platform == "TwitCasting" else None
+                tc_password = (self._saved_twitcasting_password(url, effective_platform, config_snapshot)
+                               or last_tc_password) if effective_platform == "TwitCasting" else None
                 if tc_password:
                     self._log(f"[{effective_platform}] 自动尝试上一个已输入的密码", "info")
                 max_password_attempts = 3  # 初始 + 2 次重试
@@ -1548,6 +1666,7 @@ class DownloadExecutor:
                 url_done = False
                 # TwitCasting fMP4 多初始化片段时切换到 FFmpeg 下载 m3u8 的标记。
                 use_ffmpeg_for_hls = False
+                parallel_plugin_tried = False
                 tc_direct_tried = False
                 tc_firefox_tried = False
                 archive_retry = False
@@ -1564,6 +1683,7 @@ class DownloadExecutor:
                     tc_m3u8_400 = False
                     tc_access_error = False
                     tc_cookie_error = False
+                    parallel_plugin_error = False
                     archived_ids = set()
                     try:
                         cmd_config = dict(config_snapshot)
@@ -1611,6 +1731,9 @@ class DownloadExecutor:
                                 direct_tried=tc_direct_tried,
                                 firefox_tried=tc_firefox_tried,
                             )
+                        if parallel_plugin_tried:
+                            cmd = self._without_twitcasting_parallel(cmd)
+                            subtitle_cmd = self._without_twitcasting_parallel(subtitle_cmd)
                         if is_live_for_url:
                             self._live_config = dict(cmd_config, _custom_live_args=custom_args or "")
                             self._effective_live_mode = live_mode_for_url
@@ -1666,7 +1789,8 @@ class DownloadExecutor:
                             if archived_id:
                                 archived_ids.add(archived_id)
                             # === 日志输出（保持用户可见） ===
-                            is_error = "ERROR" in line
+                            parallel_plugin_error = parallel_plugin_error or self._is_twitcasting_parallel_plugin_error(line)
+                            is_error = "ERROR" in line or parallel_plugin_error
                             if is_error:
                                 self._log(f"  {line}", "error")
                                 if "--video-password" in line and effective_platform == "TwitCasting":
@@ -1801,11 +1925,19 @@ class DownloadExecutor:
                                     stopped = True
                                     self._log(f"[{index}/{len(urls)}] ✗ 已取消", "warn")
                                     break
+                            if output_path and os.path.isfile(output_path):
+                                self._remember_twitcasting_password(url, effective_platform, cmd, config_snapshot)
+                                self._remove_ytdl_sidecar(output_path)
                             stats["ok"] += 1
                             self._log(f"[{index}/{len(urls)}] ✓ 完成", "success")
                             self._add_history(url, "", effective_platform, "success", output_path)
                             url_done = True
                         else:
+                            if (parallel_plugin_error and effective_platform == "TwitCasting"
+                                    and not parallel_plugin_tried and self._has_twitcasting_parallel(cmd)):
+                                parallel_plugin_tried = True
+                                self._log("[TwitCasting] 并发插件不可用，改用 FFmpeg 重试一次", "warn")
+                                continue
                             recovery = self._twitcasting_recovery(
                                 cmd,
                                 m3u8_400=tc_m3u8_400,
@@ -1828,6 +1960,7 @@ class DownloadExecutor:
                                 continue
                             # TwitCasting 密码保护：阻塞等待密码后重试
                             if (password_required or password_retry) and effective_platform == "TwitCasting":
+                                self._forget_twitcasting_password(url, effective_platform, config_snapshot)
                                 pw_attempt += 1
                                 if pw_attempt < max_password_attempts:
                                     reused_password_failed = bool(tc_password)

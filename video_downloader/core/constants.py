@@ -1,9 +1,9 @@
-VERSION = "v2.5.0 WebUI"
-VERSION_NUM = 20500
+VERSION = "v2.6.0 WebUI"
+VERSION_NUM = 20600
 
 GITHUB_OWNER = "maomaoyexi"
 GITHUB_REPO = "video-downloader"
-EXE_NAME = "视频下载工具v2.5.0-GUI.exe"
+EXE_NAME = "视频下载工具v2.6.0-GUI.exe"
 UPDATE_HOSTS = {
     "github.com",
     "api.github.com",
@@ -45,6 +45,8 @@ DEFAULT_CONFIG = {
     "STRICT_FILENAME": 0,
     "NICO_COMMENTS": 0,
     "NICO_RECODE": 0,
+    "TC_REMEMBER_PASSWORD": 0,
+    "TC_SAVE_PASSWORD_XLSX": 0,
     "LIVE_STREAM_METHOD": "auto",
     "LIVE_MODE": "auto",
     "LIVE_PLATFORM_MODES": "{}",

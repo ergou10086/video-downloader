@@ -152,15 +152,29 @@ class OnePoll:
 
 
 def test_nicochannel_token_history_contract_auth_and_schema():
-    t=Mock();t.json.side_effect=[{'data':{'video_page':{'video_comment_setting':{'comment_group_id':'g'}}}},
-        {'data':{'access_token':'secret'}},[{'id':'1','message':'good','sent_at':'2026-10-26T00:00:01Z'},{}]]
+    t=Mock()
+    video={'data':{'video_page':{'video_comment_setting':{'comment_group_id':'g'}}}}
+    def response(url, **kwargs):
+        if url.endswith('/site/settings.json'):
+            return {'api_base_url':'https://nfc-api.nicochannel.jp/fc','fanclub_site_id':1}
+        if url.endswith('/content_providers/channel_domain'):
+            return {'data':{'content_providers':{'id':1}}}
+        if url.endswith('/comments_user_token'):
+            return {'data':{'access_token':'secret'}}
+        if url.endswith('/messages.history'):
+            return [{'id':'1','message':'good','sent_at':'2026-10-26T00:00:01Z'},{}]
+        if url.endswith('/video_pages/sm1'):
+            return video
+        raise AssertionError(url)
+    t.json.side_effect=response
     output=[];stats={'rejected_count':0}
     nicochannel.collect({'url':'https://nicochannel.jp/ch/live/sm1','command':['x','--username','jwt_token','--password','secret']},
                         t,OnePoll(),output.append,stats)
     assert len(output)==1 and stats['rejected_count']==1
     assert t.json.call_args.kwargs['params']=={'sort_direction':'desc','limit':120}
-    assert t.json.call_args_list[0].kwargs['headers']['Authorization']=='Bearer secret'
-    t.json.side_effect=[{'data':{'video_page':{}}}]
+    page_call=next(c for c in t.json.call_args_list if c.args[0].endswith('/video_pages/sm1'))
+    assert page_call.kwargs['headers']['Authorization']=='Bearer secret'
+    video['data']['video_page']={}
     with pytest.raises(ValueError,match='disabled'):nicochannel.collect({'url':'https://nicochannel.jp/c/live/sm1','command':['x']},t,OnePoll(),output.append,{})
 
 
@@ -327,7 +341,7 @@ def test_ndgr_watch_handshake_forward_and_backward_streams():
         if len(output)>=2:received.set()
     @contextlib.contextmanager
     def stream(uri):
-        if uri.endswith('/view'):
+        if uri.split('?',1)[0].endswith('/view'):
             def chunks():
                 yield b''.join(framed(e) for e in (back,entry,previous,next_))
                 assert received.wait(3)

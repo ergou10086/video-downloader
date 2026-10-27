@@ -68,6 +68,8 @@ _ERROR_REASONS = {
     "NICO_COMMENTS": "Niconico弹幕仅支持 0 或 1",
     "NICO_RECODE": "Niconico重编码仅支持 0 或 1",
     "TC_PASSWORD": "TwitCasting密码长度不能超过 200 字符",
+    "TC_REMEMBER_PASSWORD": "TwitCasting 记住密码仅支持 0 或 1",
+    "TC_SAVE_PASSWORD_XLSX": "TwitCasting 保存密码到 XLSX 仅支持 0 或 1",
     "ENABLE_LOG": "日志开关仅支持 0 或 1",
     "DEL_WAV_AFTER_CONVERT": "删除WAV仅支持 0 或 1",
     "YOUTUBE_PO_TOKEN_ENABLED": "YouTube PO Token 开关仅支持 0 或 1",
@@ -85,6 +87,15 @@ def _err(key):
 def validate_config(values, base=None):
     result = dict(DEFAULT_CONFIG if base is None else base)
     errors = []
+    # Import the upstream name once; the live domain remains the only executor.
+    values = dict(values)
+    if "LIVE_RECORD_MODE" in values and "LIVE_MODE" not in values:
+        legacy = {"from_start": "catch_up", "current": "live_edge", "wait": "wait"}
+        mode = str(values["LIVE_RECORD_MODE"]).strip().lower()
+        if mode in legacy:
+            values["LIVE_MODE"] = legacy[mode]
+        else:
+            errors.append("LIVE_RECORD_MODE：直播录制策略无效")
     proxy_enabled = values.get("PROXY_ENABLED", result["PROXY_ENABLED"])
     try:
         proxy_enabled = int(proxy_enabled) == 1
@@ -128,7 +139,7 @@ def validate_config(values, base=None):
         "MERGE_MODE", "PROXY_ENABLED", "USE_COOKIES", "EMBED_META",
         "DOWNLOAD_THUMB", "DOWNLOAD_SUBTITLES", "WIN_FILENAMES", "STRICT_FILENAME",
         "NICO_COMMENTS", "NICO_RECODE", "ENABLE_LOG", "DEL_WAV_AFTER_CONVERT",
-        "YOUTUBE_PO_TOKEN_ENABLED",
+        "YOUTUBE_PO_TOKEN_ENABLED", "TC_REMEMBER_PASSWORD", "TC_SAVE_PASSWORD_XLSX",
         "TASK_MIXED_PARALLEL",
         "LIVE_DANMAKU_ENABLED", "LIVE_DANMAKU_ANONYMIZE",
     }
