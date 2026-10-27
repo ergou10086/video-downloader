@@ -35,12 +35,10 @@
 
 ## 🚀 快速开始
 
-1. 从 [Releases](https://github.com/maomaoyexi/video-downloader/releases) 下载最新版本（两个文件都要下载）：
-   - `video-downloader-v2.6.0-GUI.exe` - 主程序
-   - `video-downloader-v2.6.0-dependencies.zip` - 通用依赖包（包含下载工具和帮助文档）
-2. 新建一个文件夹（如「视频下载工具」），将 `video-downloader-v2.6.0-GUI.exe` 放入其中
-3. 解压依赖包，将其中的 `dependency` 文件夹完整放到主程序同一目录
-4. 双击 `video-downloader-v2.6.0-GUI.exe` 运行，自动打开浏览器界面
+1. 安装 Python 3，并确保 `python` 命令可用。
+2. 保持 `视频下载工具v2.6.0-GUI.py`、`video_downloader/`、`resource/` 和 `dependency/` 位于同一目录。
+3. 确认 `dependency/` 中的下载工具已准备好。
+4. 使用下方源码启动命令运行，程序会自动打开浏览器界面。
 
 > 💡 **提示**：依赖包的 `dependency/` 包含 yt-dlp.exe、ffmpeg.exe、ffprobe.exe、deno.exe、fantiadl.exe、withny-dl-windows-amd64.exe 和 `yt-dlp-plugins` 目录。NicoChannel 还需要单独准备 `nicochannel.zip` 并放入 `dependency/`。首次运行会自动生成 `download/`、归档及日志目录。
 
