@@ -42,8 +42,6 @@
 
 > 💡 **提示**：依赖包的 `dependency/` 包含 yt-dlp.exe、ffmpeg.exe、ffprobe.exe、deno.exe、fantiadl.exe、withny-dl-windows-amd64.exe 和 `yt-dlp-plugins` 目录。NicoChannel 还需要单独准备 `nicochannel.zip` 并放入 `dependency/`。首次运行会自动生成 `download/`、归档及日志目录。
 
-
-
 ### 源码运行版
 
 保持 `视频下载工具v2.6.0-GUI.py`、`video_downloader/` 与 `dependency/` 位于同一目录，安装 Python 3 后运行：
@@ -280,10 +278,6 @@ v2.6.0 的完整更新内容和升级说明请查看：
 - v2.5.0 设置控件、TwitCasting 下载与进度、BgUtils Provider 及目录收拢：[ErgouTree（GitHub：@ergou10086）](https://github.com/ergou10086)
 - v2.6.0 上游修复：[@maomaoyexi](https://github.com/maomaoyexi) 的 Cookie 模板、TwitCasting 密码表、HLS 路径和恢复、文件对话框回退与相关测试，按本分支直播架构整合。
 
-## 直播录制 P2/P3
-
-直播录制新增 P2/P3：优雅停止、会话与完整性报告、磁盘/超时/看门狗，以及外置 BililiveRecorder 引擎。安装、设置限制、验证范围与一手资料见 [直播录制 P2/P3 说明](temp/plan/live_record/step/直播录制-P2-P3.md)。完整性报告通过前不会显示录制成功；第三方许可见 [NOTICE](NOTICE)。
-
 ## 致谢
 
 - [yt-dlp](https://github.com/yt-dlp/yt-dlp) - 强大的视频下载引擎
@@ -292,14 +286,3 @@ v2.6.0 的完整更新内容和升级说明请查看：
 ---
 
 **如果这个工具对您有帮助，欢迎给个Star ⭐**
-
-
-### v2.6.0 上游兼容合并
-
-保留本分支的任务队列、直播模式、持久化等待、按平台追播核验和弹幕能力。
-上游的旧配置 LIVE_RECORD_MODE 在导入时映射到 LIVE_MODE，不启动第二套等待器。
-设置 → 平台专项 → TwitCasting 增加两个默认关闭的选项：
-“记住密码”仅在本次运行内按链接记忆；再开启“保存密码到 XLSX”后，成功下载使用的密码
-才写入根目录 twitcasting_passwords.xlsx，并允许下次启动读取。密码表以明文保存。
-两个开关均关闭时，不自动读取、写入或迁移密码表；任务内原有密码输入和批次复用保持可用。
-继续支持原生 HLS、并发预取和 FFmpeg 封装；插件加载失败时受控转为 FFmpeg，配套字幕同步恢复。
