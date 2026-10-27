@@ -187,6 +187,21 @@ class TwitCastingParallelHlsPP(PostProcessor):
         # runs, while the immutable VOD id + selected format remain a stable cache key.
         return output.parent / f'.tc-hls-{video_id}-{format_id}'
 
+    @staticmethod
+    def _local_playlist_url(path):
+        """Return a local playlist URL that FFmpeg can open on this platform.
+
+        ``Path.as_uri()`` percent-encodes non-ASCII Windows path components.
+        FFmpeg's Windows file protocol does not reliably decode those paths and
+        either reports ``No such file`` or an illegal byte sequence.  The
+        ``file:E:/...`` form keeps the native Unicode path while remaining a
+        file URL accepted by yt-dlp's FFmpeg downloader.
+        """
+        resolved = Path(path).resolve()
+        if os.name == 'nt':
+            return f'file:{resolved.as_posix()}'
+        return resolved.as_uri()
+
     def _download_asset(self, url, destination, headers, limiter, retries):
         if destination.is_file() and destination.stat().st_size > 0:
             return destination.stat().st_size, True
@@ -294,7 +309,7 @@ class TwitCastingParallelHlsPP(PostProcessor):
         with open(partial_playlist, 'w', encoding='utf-8', newline='\n') as output:
             output.write(local_manifest)
         os.replace(partial_playlist, playlist_path)
-        format_info['url'] = playlist_path.resolve().as_uri()
+        format_info['url'] = self._local_playlist_url(playlist_path)
         format_info['protocol'] = 'm3u8'
         self.to_screen('[TwitCastingParallel] 并发分片准备完成，正在由 FFmpeg 本地封装')
         return str(cache_dir)

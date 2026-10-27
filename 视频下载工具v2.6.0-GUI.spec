@@ -2,7 +2,7 @@ from pathlib import Path
 
 
 project_root = Path(SPECPATH)
-entry_script = project_root / "视频下载工具v2.5.0-GUI.py"
+entry_script = project_root / "视频下载工具v2.6.0-GUI.py"
 resource_root = project_root / "resource"
 plugin_root = project_root / "dependency" / "yt-dlp-plugins"
 packaging_deps = project_root / "build" / "packaging-deps"
@@ -18,7 +18,7 @@ a = Analysis(
     pathex=[str(project_root), str(packaging_deps)],
     binaries=[],
     datas=datas,
-    hiddenimports=["tkinter", "tkinter.filedialog", "yt_dlp", "yt_dlp.cookies", "yt_dlp.utils", "cramjam"],
+    hiddenimports=["yt_dlp", "yt_dlp.cookies", "yt_dlp.utils", "cramjam"],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
@@ -34,7 +34,7 @@ exe = EXE(
     a.binaries,
     a.datas,
     [],
-    name="视频下载工具v2.5.0-GUI",
+    name="视频下载工具v2.6.0-GUI",
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,

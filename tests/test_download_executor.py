@@ -121,6 +121,71 @@ class PlaylistProcess:
 
 
 class DownloadExecutorTests(unittest.TestCase):
+    def test_remove_ytdl_sidecar_only_removes_matching_completed_output_state(self):
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "video.mp4"
+            sidecar = Path(str(output) + ".ytdl")
+            sidecar.write_text('{"downloader": {}}', encoding="utf-8")
+
+            self.assertTrue(DownloadExecutor._remove_ytdl_sidecar(str(output)))
+            self.assertFalse(sidecar.exists())
+            self.assertFalse(DownloadExecutor._remove_ytdl_sidecar(str(output)))
+
+    def test_remove_ytdl_sidecar_preserves_state_when_output_is_not_known(self):
+        with tempfile.TemporaryDirectory() as directory:
+            sidecar = Path(directory) / "video.mp4.ytdl"
+            sidecar.write_text('{"downloader": {}}', encoding="utf-8")
+
+            self.assertFalse(DownloadExecutor._remove_ytdl_sidecar(""))
+            self.assertTrue(sidecar.exists())
+
+    def test_without_twitcasting_parallel_keeps_ffmpeg_fallback(self):
+        command = [
+            "yt-dlp",
+            "--enable-file-urls",
+            "--use-postprocessor", "TwitCastingParallelHls:when=before_dl",
+            "--use-postprocessor", "TwitCastingParallelHls:when=post_process;cleanup=true",
+            "--downloader", "m3u8:ffmpeg",
+            "url",
+        ]
+        result = DownloadExecutor._without_twitcasting_parallel(command)
+        self.assertNotIn("--enable-file-urls", result)
+        self.assertNotIn("TwitCastingParallelHls:when=before_dl", result)
+        self.assertNotIn("TwitCastingParallelHls:when=post_process;cleanup=true", result)
+        self.assertEqual(result[result.index("--downloader") + 1], "m3u8:ffmpeg")
+
+    def test_twitcasting_plugin_keyerror_retries_without_plugin(self):
+        with tempfile.TemporaryDirectory() as directory:
+            executor, _ = create_executor(Path(directory))
+            handle = executor._download_manager.begin("single")
+            executor._app_state.batch_stats.update({"ok": 0, "fail": 0, "total": 1, "current": 1})
+            process = Mock(returncode=1)
+            process.stdout = None
+            process.poll.return_value = 1
+            executor._spawn = Mock(return_value=process)
+            lines = Queue()
+            lines.put("KeyError: 'TwitCastingParallelHlsPP'")
+            done = threading.Event()
+            done.set()
+            executor._start_reader = Mock(return_value=(lines, done))
+            executor._close_process = Mock()
+            executor._finish = Mock()
+            command = [
+                "yt-dlp",
+                "--enable-file-urls",
+                "--use-postprocessor", "TwitCastingParallelHls:when=before_dl",
+                "--downloader", "m3u8:ffmpeg",
+                "url",
+            ]
+            with patch.object(executor, "_run_single") as retry:
+                DownloadExecutor._run_single(
+                    executor, handle, command, "url", "TwitCasting", False,
+                )
+            retry_cmd = retry.call_args.args[1]
+            self.assertNotIn("--enable-file-urls", retry_cmd)
+            self.assertNotIn("--use-postprocessor", retry_cmd)
+            self.assertEqual(retry.call_args.kwargs["tc_parallel_tried"], True)
+
     def test_start_withny_archive_returns_cancelled_selection(self):
         with tempfile.TemporaryDirectory() as directory:
             executor, callbacks = create_executor(Path(directory))
@@ -247,6 +312,183 @@ class DownloadExecutorTests(unittest.TestCase):
                 include_subtitles=False,
             )
 
+    def test_nicochannel_live_flag_is_passed_to_command_builder(self):
+        with tempfile.TemporaryDirectory() as directory:
+            tool_dir = Path(directory)
+            for name in ["yt-dlp.exe", "ffmpeg.exe", "ffprobe.exe"]:
+                (tool_dir / name).touch()
+            executor, callbacks = create_executor(tool_dir)
+            executor._run_single = Mock()
+            with patch("video_downloader.services.download_executor.threading.Thread", DirectThread):
+                result = executor.start_download("https://nicochannel.jp/example/live/sm123")
+            self.assertEqual(result, {"ok": True})
+            self.assertTrue(callbacks["build_command"].call_args.kwargs["is_live"])
+            self.assertEqual(
+                callbacks["build_command"].call_args.kwargs["platform_override"],
+                "NicoChannel",
+            )
+
+    def test_wait_for_live_retries_unknown_until_live(self):
+        with tempfile.TemporaryDirectory() as directory:
+            executor, _ = create_executor(Path(directory))
+            handle = executor._download_manager.begin("single")
+            self.assertIsNotNone(handle)
+            executor._probe_live_status = Mock(side_effect=["unknown", "is_live"])
+            handle.cancel_event.wait = Mock(return_value=False)
+            try:
+                result = executor._wait_for_live(
+                    handle,
+                    "https://www.twitch.tv/channel",
+                    "Twitch",
+                    {"LIVE_WATCH_INTERVAL": 5},
+                )
+            finally:
+                executor._download_manager.finish(handle)
+            self.assertTrue(result)
+            self.assertEqual(executor._probe_live_status.call_count, 2)
+            handle.cancel_event.wait.assert_called_once_with(5)
+
+    def test_wait_for_live_returns_when_probe_reports_live(self):
+        with tempfile.TemporaryDirectory() as directory:
+            executor, _ = create_executor(Path(directory))
+            handle = executor._download_manager.begin("single")
+            self.assertIsNotNone(handle)
+            executor._probe_live_status = Mock(return_value="is_live")
+            handle.cancel_event.wait = Mock(return_value=False)
+            try:
+                result = executor._wait_for_live(
+                    handle,
+                    "https://www.twitch.tv/channel",
+                    "Twitch",
+                    {"LIVE_WATCH_INTERVAL": 5},
+                )
+            finally:
+                executor._download_manager.finish(handle)
+            self.assertTrue(result)
+            executor._probe_live_status.assert_called_once()
+            handle.cancel_event.wait.assert_not_called()
+
+    def test_wait_for_live_stops_when_cancelled_during_wait(self):
+        with tempfile.TemporaryDirectory() as directory:
+            executor, _ = create_executor(Path(directory))
+            handle = executor._download_manager.begin("single")
+            self.assertIsNotNone(handle)
+            executor._probe_live_status = Mock(return_value="unknown")
+
+            def cancel_and_wake(interval):
+                handle.cancel_event.set()
+                return True
+
+            handle.cancel_event.wait = Mock(side_effect=cancel_and_wake)
+            try:
+                result = executor._wait_for_live(
+                    handle,
+                    "https://www.twitch.tv/channel",
+                    "Twitch",
+                    {"LIVE_WATCH_INTERVAL": 5},
+                )
+            finally:
+                executor._download_manager.finish(handle)
+            self.assertFalse(result)
+            executor._probe_live_status.assert_called_once()
+            handle.cancel_event.wait.assert_called_once_with(5)
+
+    def test_probe_live_status_kills_process_when_cancelled(self):
+        with tempfile.TemporaryDirectory() as directory:
+            executor, _ = create_executor(Path(directory))
+            process = FakeProcess()
+            executor._spawn = Mock(return_value=process)
+            executor.kill_process_tree = Mock()
+            cancel_event = threading.Event()
+            cancel_event.set()
+
+            result = executor._probe_live_status(
+                "https://www.twitch.tv/channel",
+                {"USE_COOKIES": 0, "PROXY_ENABLED": 0},
+                cancel_event,
+            )
+
+            self.assertEqual(result, "cancelled")
+            executor._spawn.assert_called_once()
+            executor.kill_process_tree.assert_called_once_with(process)
+
+    def test_live_probe_reuses_auth_options_without_recording_options(self):
+        with tempfile.TemporaryDirectory() as directory:
+            executor, _ = create_executor(Path(directory))
+            url = "https://www.youtube.com/live/example"
+            source = [
+                "yt-dlp",
+                "--plugin-dirs", "dependency",
+                "--proxy", "http://127.0.0.1:7890",
+                "--cookies", "cookies.txt",
+                "--extractor-args", "youtube:player_client=default",
+                "--username", "jwt_token",
+                "--password", "jwt-value",
+                "--video-password", "twitcasting-password",
+                "--live-from-start",
+                "-o", "out/%(title)s.%(ext)s",
+                "--download-archive", "archive.txt",
+                "--postprocessor-args", "Merger+ffmpeg_o:-c:v copy",
+                url,
+                "--verbose",
+            ]
+
+            probe = executor._live_probe_command(
+                url,
+                {"PLATFORM": "YouTube"},
+                platform="YouTube",
+                source_command=source,
+            )
+
+        self.assertIn(("--plugin-dirs", "dependency"), list(zip(probe, probe[1:])))
+        self.assertIn(("--proxy", "http://127.0.0.1:7890"), list(zip(probe, probe[1:])))
+        self.assertIn(("--cookies", "cookies.txt"), list(zip(probe, probe[1:])))
+        self.assertIn(("--extractor-args", "youtube:player_client=default"), list(zip(probe, probe[1:])))
+        self.assertIn(("--username", "jwt_token"), list(zip(probe, probe[1:])))
+        self.assertIn(("--password", "jwt-value"), list(zip(probe, probe[1:])))
+        self.assertIn(("--video-password", "twitcasting-password"), list(zip(probe, probe[1:])))
+        self.assertNotIn("--live-from-start", probe)
+        self.assertNotIn("-o", probe)
+        self.assertNotIn("--download-archive", probe)
+        self.assertNotIn("--postprocessor-args", probe)
+        self.assertEqual(probe[-1], url)
+        self.assertIn("--dump-single-json", probe)
+        self.assertIn("--skip-download", probe)
+
+    def test_live_probe_builds_from_callback_for_batch_auth(self):
+        with tempfile.TemporaryDirectory() as directory:
+            executor, callbacks = create_executor(Path(directory))
+            url = "https://www.youtube.com/live/example"
+            callbacks["build_command"].return_value = [
+                "yt-dlp",
+                "--extractor-args", "youtubepot-bgutilhttp:base_url=http://127.0.0.1:4416",
+                url,
+            ]
+            config = {"PLATFORM": "YouTube"}
+
+            probe = executor._live_probe_command(
+                url,
+                config,
+                platform="YouTube",
+                custom_args="--sleep-requests 1",
+                po_token_base_url="http://127.0.0.1:4416",
+            )
+
+        callbacks["build_command"].assert_called_once_with(
+            url,
+            is_live=True,
+            platform_override="YouTube",
+            config_override=config,
+            include_subtitles=False,
+            custom_args="--sleep-requests 1",
+            po_token_base_url="http://127.0.0.1:4416",
+        )
+        self.assertIn(
+            "youtubepot-bgutilhttp:base_url=http://127.0.0.1:4416",
+            probe,
+        )
+        self.assertEqual(probe[-1], url)
+
     def test_non_live_url_text_does_not_enable_live_mode(self):
         with tempfile.TemporaryDirectory() as directory:
             tool_dir = Path(directory)
@@ -306,119 +548,6 @@ class DownloadExecutorTests(unittest.TestCase):
                 executor.start_download("https://www.twitch.tv/videos/123")
             callbacks["ensure_po_token_provider"].assert_not_called()
 
-    def test_po_provider_start_error_is_logged_and_releases_youtube_task(self):
-        with tempfile.TemporaryDirectory() as directory:
-            tool_dir = Path(directory)
-            for name in ["yt-dlp.exe", "ffmpeg.exe", "ffprobe.exe"]:
-                (tool_dir / name).touch()
-            executor, callbacks = create_executor(tool_dir)
-            config = executor._app_state.config_snapshot()
-            config["YOUTUBE_PO_TOKEN_ENABLED"] = 1
-            executor._app_state.config_snapshot = Mock(return_value=config)
-            callbacks["ensure_po_token_provider"].return_value = {"error": "provider unavailable"}
-            with patch("video_downloader.services.download_executor.threading.Thread", DirectThread):
-                result = executor.start_download("https://youtube.com/watch?v=abc")
-            self.assertEqual(result, {"ok": True})
-            self.assertFalse(executor._download_manager.snapshot()["running"])
-            callbacks["build_command"].assert_not_called()
-            callbacks["log"].assert_called_with("[准备失败] provider unavailable", "error")
-            self.assertEqual(executor._app_state.batch_stats["fail"], 1)
-
-    def test_provider_preparation_returns_promptly_and_can_be_stopped_for_single_and_batch(self):
-        for batch in (False, True):
-            with self.subTest(batch=batch), tempfile.TemporaryDirectory() as directory:
-                tool_dir = Path(directory)
-                for name in ("yt-dlp.exe", "ffmpeg.exe", "ffprobe.exe"):
-                    (tool_dir / name).touch()
-                executor, callbacks = create_executor(tool_dir)
-                config = dict(executor._app_state.config_snapshot(), YOUTUBE_PO_TOKEN_ENABLED=1)
-                executor._app_state.config_snapshot = Mock(return_value=config)
-                entered = threading.Event()
-                release = threading.Event()
-                workers = []
-                real_thread = threading.Thread
-
-                def capture_worker(*args, **kwargs):
-                    worker = real_thread(*args, **kwargs)
-                    workers.append(worker)
-                    return worker
-
-                def slow_provider(cancel_event):
-                    entered.set()
-                    release.wait(3)
-                    return {"ok": True, "base_url": "http://[::1]:4416"}
-
-                callbacks["ensure_po_token_provider"].side_effect = slow_provider
-                executor._run_single = Mock()
-                executor._run_batch = Mock()
-                start = (lambda: executor.batch_download(["https://youtube.com/watch?v=abc"])) if batch else (
-                    lambda: executor.start_download("https://youtube.com/watch?v=abc")
-                )
-                with patch("video_downloader.services.download_executor.threading.Thread", side_effect=capture_worker):
-                    try:
-                        self.assertTrue(start()["ok"])
-                        self.assertTrue(entered.wait(2))
-                        self.assertTrue(executor._download_manager.snapshot()["running"])
-                        self.assertFalse(release.is_set())
-                        self.assertEqual(start(), {"error": "已有下载任务在运行"})
-                        self.assertEqual(callbacks["ensure_po_token_provider"].call_count, 1)
-                        self.assertTrue(executor.stop_download()["stopped"])
-                        self.assertTrue(callbacks["ensure_po_token_provider"].call_args.kwargs["cancel_event"].is_set())
-                        # A new task can finish before the old provider callback returns.
-                        self.assertTrue(executor.start_download("https://www.twitch.tv/videos/123")["ok"])
-                        workers[-1].join(timeout=2)
-                        self.assertFalse(workers[-1].is_alive())
-                        stats = dict(executor._app_state.batch_stats)
-                    finally:
-                        release.set()
-                        for worker in workers:
-                            worker.join(timeout=3)
-                self.assertTrue(all(not worker.is_alive() for worker in workers))
-                self.assertEqual(executor._run_single.call_count, 1)
-                executor._run_batch.assert_not_called()
-                self.assertEqual(executor._app_state.batch_stats, stats)
-                self.assertFalse(executor._download_manager.snapshot()["running"])
-
-    def test_provider_exception_is_visible_and_releases_batch_task(self):
-        with tempfile.TemporaryDirectory() as directory:
-            tool_dir = Path(directory)
-            for name in ("yt-dlp.exe", "ffmpeg.exe", "ffprobe.exe"):
-                (tool_dir / name).touch()
-            executor, callbacks = create_executor(tool_dir)
-            config = dict(executor._app_state.config_snapshot(), YOUTUBE_PO_TOKEN_ENABLED=1)
-            executor._app_state.config_snapshot = Mock(return_value=config)
-            callbacks["ensure_po_token_provider"].side_effect = RuntimeError("cold start failed")
-            with patch("video_downloader.services.download_executor.threading.Thread", DirectThread):
-                self.assertTrue(executor.batch_download(["https://youtube.com/watch?v=abc"])["ok"])
-            callbacks["log"].assert_called_with("[准备失败] cold start failed", "error")
-            callbacks["build_command"].assert_not_called()
-            self.assertFalse(executor._download_manager.snapshot()["running"])
-            self.assertEqual(executor._app_state.batch_stats["fail"], 1)
-
-    def test_provider_url_is_forwarded_to_video_and_subtitles_in_mixed_batch(self):
-        with tempfile.TemporaryDirectory() as directory:
-            tool_dir = Path(directory)
-            for name in ("yt-dlp.exe", "ffmpeg.exe", "ffprobe.exe"):
-                (tool_dir / name).touch()
-            executor, callbacks = create_executor(tool_dir)
-            config = dict(executor._app_state.config_snapshot(), YOUTUBE_PO_TOKEN_ENABLED=1, DOWNLOAD_SUBTITLES=1)
-            executor._app_state.config_snapshot = Mock(return_value=config)
-            callbacks["ensure_po_token_provider"].return_value = {"ok": True, "base_url": "http://[::1]:4416"}
-            executor._spawn = Mock(side_effect=[CompletedProcess(), CompletedProcess()])
-            done = threading.Event()
-            done.set()
-            executor._start_reader = Mock(return_value=(Queue(), done))
-            executor._run_subtitle_sidecar = Mock(return_value=True)
-            with patch("video_downloader.services.download_executor.threading.Thread", DirectThread):
-                executor.batch_download(["https://youtube.com/watch?v=abc", "https://www.twitch.tv/videos/123"])
-            self.assertEqual(callbacks["ensure_po_token_provider"].call_count, 1)
-            youtube_calls = [call for call in callbacks["build_command"].call_args_list if call.kwargs["platform_override"] == "YouTube"]
-            twitch_calls = [call for call in callbacks["build_command"].call_args_list if call.kwargs["platform_override"] == "Twitch"]
-            self.assertEqual(len(youtube_calls), 2)
-            self.assertEqual(len(twitch_calls), 2)
-            self.assertTrue(all(call.kwargs["po_token_base_url"] == "http://[::1]:4416" for call in youtube_calls))
-            self.assertTrue(all("po_token_base_url" not in call.kwargs for call in twitch_calls))
-            self.assertEqual(executor._app_state.batch_stats["ok"], 2)
 
     def test_twitcasting_retry_keeps_subtitle_command(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -463,6 +592,130 @@ class DownloadExecutorTests(unittest.TestCase):
                 "TwitCastingParallelHls:when=before_dl",
                 retry_cmd,
             )
+
+    def test_live_from_start_error_retries_single_from_current_fragment(self):
+        with tempfile.TemporaryDirectory() as directory:
+            executor, _ = create_executor(Path(directory))
+            handle = executor._download_manager.begin("single")
+            executor._app_state.batch_stats.update({"ok": 0, "fail": 0, "total": 1, "current": 1})
+            process = Mock(returncode=1)
+            process.stdout = None
+            process.poll.return_value = 1
+            executor._spawn = Mock(return_value=process)
+            lines = Queue()
+            lines.put(
+                "ERROR: [BiliLive] 1963655121: --live-from-start is passed, "
+                "but there are no formats that can be downloaded from the start. "
+                "If you want to download from the current time, use --no-live-from-start"
+            )
+            done = threading.Event()
+            done.set()
+            executor._start_reader = Mock(return_value=(lines, done))
+            executor._close_process = Mock()
+            executor._finish = Mock()
+            command = ["yt-dlp", "--live-from-start", "url"]
+            subtitle_command = ["yt-dlp", "--skip-download", "--live-from-start", "url"]
+            with patch.object(executor, "_run_single") as retry:
+                DownloadExecutor._run_single(
+                    executor,
+                    handle,
+                    command,
+                    "url",
+                    "Bilibili",
+                    True,
+                    subtitle_cmd=subtitle_command,
+                )
+            self.assertNotIn("--live-from-start", retry.call_args.args[1])
+            self.assertNotIn("--live-from-start", retry.call_args.args[8])
+            self.assertIn("当前分片", " ".join(call.args[0] for call in executor._log.call_args_list))
+
+    def test_live_from_start_error_retries_batch_from_current_fragment(self):
+        with tempfile.TemporaryDirectory() as directory:
+            executor, callbacks = create_executor(Path(directory))
+            executor._build_command.side_effect = lambda url, **kwargs: [
+                "yt-dlp", "--live-from-start", url,
+            ]
+            first_process = CompletedProcess(1)
+            second_process = CompletedProcess(0)
+            executor._spawn = Mock(side_effect=[first_process, second_process])
+            first_lines = Queue()
+            first_lines.put(
+                "ERROR: [BiliLive] 1963655121: --live-from-start is passed, "
+                "but there are no formats that can be downloaded from the start"
+            )
+            first_done = threading.Event()
+            first_done.set()
+            second_done = threading.Event()
+            second_done.set()
+            executor._start_reader = Mock(side_effect=[
+                (first_lines, first_done),
+                (Queue(), second_done),
+            ])
+            executor._close_process = Mock()
+            handle = executor._download_manager.begin("batch")
+            stats = {"ok": 0, "fail": 0, "total": 1, "current": 0}
+            DownloadExecutor._run_batch(
+                executor,
+                handle,
+                ["https://live.bilibili.com/1963655121"],
+                executor._app_state.config_snapshot(),
+                stats,
+            )
+            self.assertEqual(stats, {"ok": 1, "fail": 0, "total": 1, "current": 1})
+            self.assertEqual(callbacks["build_command"].call_count, 2)
+            current_command = executor.get_current_ytdlp_command()
+            self.assertNotIn("--live-from-start", current_command["command"])
+
+    def test_batch_twitcasting_plugin_keyerror_falls_back_to_serial_ffmpeg(self):
+        with tempfile.TemporaryDirectory() as directory:
+            executor, _ = create_executor(Path(directory))
+
+            def build(url, **kwargs):
+                command = ["yt-dlp", url]
+                if kwargs.get("use_ffmpeg_for_hls"):
+                    command[1:1] = [
+                        "--enable-file-urls",
+                        "--use-postprocessor", "TwitCastingParallelHls:when=before_dl",
+                        "--downloader", "m3u8:ffmpeg",
+                    ]
+                return command
+
+            executor._build_command.side_effect = build
+            first_process = CompletedProcess(1)
+            second_process = CompletedProcess(1)
+            third_process = CompletedProcess(0)
+            executor._spawn = Mock(side_effect=[first_process, second_process, third_process])
+            first_lines = Queue()
+            first_lines.put("ERROR: Initialization fragment found after media fragments")
+            first_done = threading.Event()
+            first_done.set()
+            second_lines = Queue()
+            second_lines.put("KeyError: 'TwitCastingParallelHlsPP'")
+            second_done = threading.Event()
+            second_done.set()
+            third_done = threading.Event()
+            third_done.set()
+            executor._start_reader = Mock(side_effect=[
+                (first_lines, first_done),
+                (second_lines, second_done),
+                (Queue(), third_done),
+            ])
+            executor._close_process = Mock()
+            handle = executor._download_manager.begin("batch")
+            stats = {"ok": 0, "fail": 0, "total": 1, "current": 0}
+            DownloadExecutor._run_batch(
+                executor,
+                handle,
+                ["https://twitcasting.tv/user/movie/1"],
+                executor._app_state.config_snapshot(),
+                stats,
+            )
+            self.assertEqual(stats["ok"], 1)
+            self.assertEqual(executor._spawn.call_count, 3)
+            fallback_command = executor._spawn.call_args_list[2].args[0]
+            self.assertNotIn("--enable-file-urls", fallback_command)
+            self.assertNotIn("--use-postprocessor", fallback_command)
+            self.assertIn("m3u8:ffmpeg", fallback_command)
 
     def test_twitcasting_m3u8_400_retries_direct_before_firefox(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -923,6 +1176,120 @@ class DownloadExecutorTests(unittest.TestCase):
             process.kill.assert_called_once_with()
             process.stdout.close.assert_called_once_with()
 
+
+    def test_po_provider_start_error_is_logged_and_releases_youtube_task(self):
+        with tempfile.TemporaryDirectory() as directory:
+            tool_dir = Path(directory)
+            for name in ["yt-dlp.exe", "ffmpeg.exe", "ffprobe.exe"]:
+                (tool_dir / name).touch()
+            executor, callbacks = create_executor(tool_dir)
+            config = executor._app_state.config_snapshot()
+            config["YOUTUBE_PO_TOKEN_ENABLED"] = 1
+            executor._app_state.config_snapshot = Mock(return_value=config)
+            callbacks["ensure_po_token_provider"].return_value = {"error": "provider unavailable"}
+            with patch("video_downloader.services.download_executor.threading.Thread", DirectThread):
+                result = executor.start_download("https://youtube.com/watch?v=abc")
+            self.assertEqual(result, {"ok": True})
+            self.assertFalse(executor._download_manager.snapshot()["running"])
+            callbacks["build_command"].assert_not_called()
+            callbacks["log"].assert_called_with("[准备失败] provider unavailable", "error")
+            self.assertEqual(executor._app_state.batch_stats["fail"], 1)
+
+    def test_provider_preparation_returns_promptly_and_can_be_stopped_for_single_and_batch(self):
+        for batch in (False, True):
+            with self.subTest(batch=batch), tempfile.TemporaryDirectory() as directory:
+                tool_dir = Path(directory)
+                for name in ("yt-dlp.exe", "ffmpeg.exe", "ffprobe.exe"):
+                    (tool_dir / name).touch()
+                executor, callbacks = create_executor(tool_dir)
+                config = dict(executor._app_state.config_snapshot(), YOUTUBE_PO_TOKEN_ENABLED=1)
+                executor._app_state.config_snapshot = Mock(return_value=config)
+                entered = threading.Event()
+                release = threading.Event()
+                workers = []
+                real_thread = threading.Thread
+
+                def capture_worker(*args, **kwargs):
+                    worker = real_thread(*args, **kwargs)
+                    workers.append(worker)
+                    return worker
+
+                def slow_provider(cancel_event):
+                    entered.set()
+                    release.wait(3)
+                    return {"ok": True, "base_url": "http://[::1]:4416"}
+
+                callbacks["ensure_po_token_provider"].side_effect = slow_provider
+                executor._run_single = Mock()
+                executor._run_batch = Mock()
+                start = (lambda: executor.batch_download(["https://youtube.com/watch?v=abc"])) if batch else (
+                    lambda: executor.start_download("https://youtube.com/watch?v=abc")
+                )
+                with patch("video_downloader.services.download_executor.threading.Thread", side_effect=capture_worker):
+                    try:
+                        self.assertTrue(start()["ok"])
+                        self.assertTrue(entered.wait(2))
+                        self.assertTrue(executor._download_manager.snapshot()["running"])
+                        self.assertFalse(release.is_set())
+                        self.assertEqual(start(), {"error": "已有下载任务在运行"})
+                        self.assertEqual(callbacks["ensure_po_token_provider"].call_count, 1)
+                        self.assertTrue(executor.stop_download()["stopped"])
+                        self.assertTrue(callbacks["ensure_po_token_provider"].call_args.kwargs["cancel_event"].is_set())
+                        # A new task can finish before the old provider callback returns.
+                        self.assertTrue(executor.start_download("https://www.twitch.tv/videos/123")["ok"])
+                        workers[-1].join(timeout=2)
+                        self.assertFalse(workers[-1].is_alive())
+                        stats = dict(executor._app_state.batch_stats)
+                    finally:
+                        release.set()
+                        for worker in workers:
+                            worker.join(timeout=3)
+                self.assertTrue(all(not worker.is_alive() for worker in workers))
+                self.assertEqual(executor._run_single.call_count, 1)
+                executor._run_batch.assert_not_called()
+                self.assertEqual(executor._app_state.batch_stats, stats)
+                self.assertFalse(executor._download_manager.snapshot()["running"])
+
+    def test_provider_exception_is_visible_and_releases_batch_task(self):
+        with tempfile.TemporaryDirectory() as directory:
+            tool_dir = Path(directory)
+            for name in ("yt-dlp.exe", "ffmpeg.exe", "ffprobe.exe"):
+                (tool_dir / name).touch()
+            executor, callbacks = create_executor(tool_dir)
+            config = dict(executor._app_state.config_snapshot(), YOUTUBE_PO_TOKEN_ENABLED=1)
+            executor._app_state.config_snapshot = Mock(return_value=config)
+            callbacks["ensure_po_token_provider"].side_effect = RuntimeError("cold start failed")
+            with patch("video_downloader.services.download_executor.threading.Thread", DirectThread):
+                self.assertTrue(executor.batch_download(["https://youtube.com/watch?v=abc"])["ok"])
+            callbacks["log"].assert_called_with("[准备失败] cold start failed", "error")
+            callbacks["build_command"].assert_not_called()
+            self.assertFalse(executor._download_manager.snapshot()["running"])
+            self.assertEqual(executor._app_state.batch_stats["fail"], 1)
+
+    def test_provider_url_is_forwarded_to_video_and_subtitles_in_mixed_batch(self):
+        with tempfile.TemporaryDirectory() as directory:
+            tool_dir = Path(directory)
+            for name in ("yt-dlp.exe", "ffmpeg.exe", "ffprobe.exe"):
+                (tool_dir / name).touch()
+            executor, callbacks = create_executor(tool_dir)
+            config = dict(executor._app_state.config_snapshot(), YOUTUBE_PO_TOKEN_ENABLED=1, DOWNLOAD_SUBTITLES=1)
+            executor._app_state.config_snapshot = Mock(return_value=config)
+            callbacks["ensure_po_token_provider"].return_value = {"ok": True, "base_url": "http://[::1]:4416"}
+            executor._spawn = Mock(side_effect=[CompletedProcess(), CompletedProcess()])
+            done = threading.Event()
+            done.set()
+            executor._start_reader = Mock(return_value=(Queue(), done))
+            executor._run_subtitle_sidecar = Mock(return_value=True)
+            with patch("video_downloader.services.download_executor.threading.Thread", DirectThread):
+                executor.batch_download(["https://youtube.com/watch?v=abc", "https://www.twitch.tv/videos/123"])
+            self.assertEqual(callbacks["ensure_po_token_provider"].call_count, 1)
+            youtube_calls = [call for call in callbacks["build_command"].call_args_list if call.kwargs["platform_override"] == "YouTube"]
+            twitch_calls = [call for call in callbacks["build_command"].call_args_list if call.kwargs["platform_override"] == "Twitch"]
+            self.assertEqual(len(youtube_calls), 2)
+            self.assertEqual(len(twitch_calls), 2)
+            self.assertTrue(all(call.kwargs["po_token_base_url"] == "http://[::1]:4416" for call in youtube_calls))
+            self.assertTrue(all("po_token_base_url" not in call.kwargs for call in twitch_calls))
+            self.assertEqual(executor._app_state.batch_stats["ok"], 2)
 
 if __name__ == "__main__":
     unittest.main()

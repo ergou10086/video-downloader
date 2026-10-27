@@ -3,6 +3,7 @@ import io
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 
 YTDLP_AVAILABLE = importlib.util.find_spec("yt_dlp") is not None
@@ -52,6 +53,7 @@ class TwitCastingParallelPluginTests(unittest.TestCase):
         spec = importlib.util.spec_from_file_location("twitcasting_parallel_test", PLUGIN_PATH)
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
+        cls.plugin_module = module
         cls.plugin_class = module.TwitCastingParallelHlsPP
 
     def test_single_map_playlist_is_left_for_normal_downloader(self):
@@ -88,6 +90,14 @@ media.1.mp4
         self.assertIn('URI="init-0002.mp4"', rewritten)
         self.assertIn("media-000001.mp4", rewritten)
         self.assertIn("media-000002.mp4", rewritten)
+
+    def test_windows_local_playlist_url_keeps_unicode_path_unescaped(self):
+        path = Path("E:/视频下载工具/.tc-hls-video/local.m3u8")
+        with mock.patch.object(self.plugin_module.Path, "resolve", return_value=path), \
+                mock.patch.object(self.plugin_module.os, "name", "nt"):
+            url = self.plugin_class._local_playlist_url(path)
+        self.assertEqual(url, "file:E:/视频下载工具/.tc-hls-video/local.m3u8")
+        self.assertNotIn("%", url)
 
     def test_prepare_downloads_assets_and_cleanup_removes_only_own_cache(self):
         manifest_url = "https://cdn.example/path/media.m3u8"

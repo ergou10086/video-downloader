@@ -48,7 +48,11 @@ def detect_platform(url):
 
 
 def is_live_url(url, platform=None):
-    """检测是否为直播链接（YouTube /live, Twitch 频道, Niconico 直播子域名, TwitCasting 主播页）。"""
+    """检测 URL 是否指向直播入口。
+
+    这里只根据 URL 形状做保守判断；最终的开播状态仍由 yt-dlp 提取器
+    决定。这样频道页、预告页和已结束直播不会被误认为正在录制。
+    """
     try:
         parsed = urlparse(url)
         host = (parsed.hostname or "").lower()
@@ -66,7 +70,14 @@ def is_live_url(url, platform=None):
         segments = [segment for segment in path.split("/") if segment]
         return len(segments) == 1 and segments[0] not in {"videos", "clips", "directory"}
     if platform_name == "Niconico":
-        return host in {"live.nicovideo.jp", "live2.nicovideo.jp"}
+        # 官方直播入口既有 live.nicovideo.jp，也有带 lv 编号的普通观看页。
+        # 普通视频使用 sm/so 编号，因此按 ID 前缀区分可避免 VOD 误判。
+        if host in {"live.nicovideo.jp", "live2.nicovideo.jp"}:
+            return True
+        return (
+            host in {"nicovideo.jp", "www.nicovideo.jp", "m.nicovideo.jp"}
+            and re.search(r"/watch/lv\d+", path) is not None
+        )
     if platform_name == "Bilibili":
         return host == "live.bilibili.com" or host.endswith(".live.bilibili.com")
     if platform_name == "TwitCasting":
@@ -80,6 +91,15 @@ def is_live_url(url, platform=None):
         return host in {"x.com", "twitter.com", "www.x.com", "www.twitter.com"} and (
             path.startswith("/i/spaces/")
         )
+    if platform_name == "NicoChannel":
+        # nicochannel.jp/<channel>/live/sm... 是直播详情页；同一路径下的
+        # /video/ 页面是录播，不能仅凭 sm 编号判定为直播。
+        segments = [segment for segment in path.split("/") if segment]
+        return (
+            host == "nicochannel.jp" or host.endswith(".nicochannel.jp")
+        ) and len(segments) == 3 and segments[1] == "live" and re.fullmatch(
+            r"sm\w+", segments[2]
+        ) is not None
     return False
 
 

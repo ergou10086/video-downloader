@@ -1,9 +1,9 @@
-VERSION = "v2.5.0 WebUI"
-VERSION_NUM = 20500
+VERSION = "v2.6.0 WebUI"
+VERSION_NUM = 20600
 
 GITHUB_OWNER = "maomaoyexi"
 GITHUB_REPO = "video-downloader"
-EXE_NAME = "视频下载工具v2.5.0-GUI.exe"
+EXE_NAME = "视频下载工具v2.6.0-GUI.exe"
 UPDATE_HOSTS = {
     "github.com",
     "api.github.com",
@@ -46,6 +46,11 @@ DEFAULT_CONFIG = {
     "NICO_COMMENTS": 0,
     "NICO_RECODE": 0,
     "LIVE_STREAM_METHOD": "yt-dlp",
+    # 直播录制策略：wait=蹲开播，from_start=追开播，current=加入时开录。
+    # 默认值保持历史行为，避免升级后正在使用的链接改变录制起点。
+    "LIVE_RECORD_MODE": "from_start",
+    # 蹲开播模式的状态探测间隔（秒）。
+    "LIVE_WATCH_INTERVAL": 30,
     "LIVE_DOWNLOAD_TIMEOUT": 0,
     "ENABLE_LOG": 1,
     "MP3_BITRATE": 320,
@@ -56,23 +61,18 @@ DEFAULT_CONFIG = {
 }
 
 RESOLUTION_OPTIONS = ["best", "2160", "1440", "1080", "720", "480", "360"]
-RESOLUTION_LABELS = ["无限制", "4K (2160p)", "2K (1440p)", "1080P", "720P", "480P", "360P"]
 CODEC_OPTIONS = ["best", "h264", "av1", "vp9"]
-CODEC_LABELS = ["极致画质", "兼容优先(H.264)", "AV1优先", "VP9优先"]
 AUDIO_OPTIONS = ["best", "192", "128"]
-AUDIO_LABELS = ["最高音质", "均衡(192k)", "最小体积(128k)"]
 FORMAT_OPTIONS = ["mp4", "mkv", "webm"]
 AUDIO_MODE_OPTIONS = ["0", "1", "2", "3"]
-AUDIO_MODE_LABELS = ["不单独处理音频", "分离音画输出", "同时输出音频", "只输出音频"]
 AUDIO_FORMAT_OPTIONS = ["m4a", "mp3", "wav"]
 HWACCEL_OPTIONS = ["cpu", "h264_nvenc", "h264_qsv", "h264_amf"]
-HWACCEL_LABELS = ["CPU软编码", "N卡 NVENC", "Intel QSV", "AMD AMF"]
 BROWSER_OPTIONS = ["chrome", "edge", "firefox", "brave", "opera"]
 PROXY_TYPE_OPTIONS = ["http", "socks5"]
 MP3_BITRATE_OPTIONS = [128, 192, 256, 320]
 BILI_POLICY_OPTIONS = ["all", "select"]
 LIVE_STREAM_METHOD_OPTIONS = ["yt-dlp"]
-LIVE_STREAM_METHOD_LABELS = ["yt-dlp (默认)"]
+LIVE_RECORD_MODE_OPTIONS = ["wait", "from_start", "current"]
 SUBTITLE_TYPE_OPTIONS = ["all", "manual", "auto"]
 
 PLATFORM_INFO = [

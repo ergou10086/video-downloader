@@ -255,6 +255,9 @@ class AppContainer:
             pick_withny_archive=tool_service.pick_withny_archive,
             pick_withny_live_config=tool_service.pick_withny_live_config,
             ensure_po_token_provider=po_token_provider.ensure_running,
+            get_twitcasting_password=storage.get_twitcasting_password,
+            save_twitcasting_password=storage.save_twitcasting_password,
+            forget_twitcasting_password=storage.forget_twitcasting_password,
         )
 
         def start_download(url: str, bili_parts: str | None = None,

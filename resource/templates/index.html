@@ -49,13 +49,10 @@
   <symbol id="i-play" viewBox="0 0 24 24"><path d="M8.4 5.6L18 12l-9.6 6.4z"></path></symbol>
   <symbol id="i-save" viewBox="0 0 24 24"><path d="M5 5.5h11.2L19 8.3v10.2H5z"></path><path d="M8.4 5.5v4.4h6.8V5.5"></path><path d="M8.4 18.5v-4.6h7.2v4.6"></path></symbol>
   <symbol id="i-bookmark" viewBox="0 0 24 24"><path d="M6.8 4.5h10.4v15.2L12 16.2l-5.2 3.5z"></path></symbol>
-  <symbol id="i-film" viewBox="0 0 24 24"><rect x="3.5" y="5" width="17" height="14" rx="1.5"></rect><path d="M8 5v14M16 5v14M3.5 12h17"></path></symbol>
   <symbol id="i-globe" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"></circle><path d="M3.6 12h16.8"></path><path d="M12 3.5c2.2 2.4 3.3 5.3 3.3 8.5s-1.1 6.1-3.3 8.5c-2.2-2.4-3.3-5.3-3.3-8.5S9.8 5.9 12 3.5z"></path></symbol>
-  <symbol id="i-cpu" viewBox="0 0 24 24"><rect x="7.2" y="7.2" width="9.6" height="9.6" rx="1.4"></rect><path d="M4.4 10h2.8M4.4 14h2.8M16.8 10h2.8M16.8 14h2.8M10 4.4v2.8M14 4.4v2.8M10 16.8v2.8M14 16.8v2.8"></path></symbol>
   <symbol id="i-arrow-up" viewBox="0 0 24 24"><path d="M12 19.5V5"></path><path d="M6 11l6-6 6 6"></path></symbol>
   <symbol id="i-lock" viewBox="0 0 24 24"><rect x="5.5" y="10.6" width="13" height="9" rx="1.5"></rect><path d="M8.6 10.6V8.2a3.4 3.4 0 0 1 6.8 0v2.4"></path></symbol>
   <symbol id="i-inbox" viewBox="0 0 24 24"><path d="M3.5 13.2l2.8-8.4h11.4l2.8 8.4v6H3.5v-6z"></path><path d="M3.5 13.2H9a1 1 0 0 1 1 1 1 1 0 0 0 1 1h2a1 1 0 0 0 1-1 1 1 0 0 1 1-1h5.5"></path></symbol>
-  <symbol id="i-external" viewBox="0 0 24 24"><path d="M14 4.5h5.5V10"></path><path d="M19.5 4.5l-8.2 8.2"></path><path d="M18 13.6v5.9H4.5V6h5.9"></path></symbol>
   <symbol id="i-alert" viewBox="0 0 24 24"><path d="M12 4.4l8.4 15.2H3.6z"></path><path d="M12 10v4"></path><path d="M12 16.6h0"></path></symbol>
   <symbol id="i-rocket" viewBox="0 0 24 24"><path d="M13.4 4.6c3.6-.7 6 1.7 5.3 5.3-.6 3.2-3.4 6-6.4 7.4l-3-.3-2.9-2.9-.3-3c1.4-3 4.1-5.9 7.3-6.5z"></path><circle cx="14.4" cy="9.6" r="1.6"></circle><path d="M8.4 15.6L5 19"></path></symbol>
   <symbol id="i-tv" viewBox="0 0 24 24"><rect x="3.5" y="7" width="17" height="12" rx="1.6"></rect><path d="M8.4 3.6L12 7l3.6-3.4"></path></symbol>
@@ -149,9 +146,16 @@
             <b>Withny 提示：</b>历史存档选浏览器导出的「包含内容」HAR，直播录制选 withny-dl 的 YAML 配置。凭据可能含登录信息，请勿分享。<a href="#" onclick="setActivePage('help');return false;">查看教程 →</a>
           </div>
 
-          <div class="row task-args-row">
-            <span class="lb">本次 yt-dlp 参数</span>
-            <input type="text" class="ctl mono" id="task_ytdlp_args" maxlength="4000" autocomplete="off" spellcheck="false" placeholder='仅用于本次单条或批量任务，例如：--sleep-requests 1' style="flex:1">
+          <div class="task-options-row">
+            <div class="task-option-actions">
+              <button class="btn sm" id="btnTaskYtdlpArgs" onclick="showTaskYtdlpArgs()" type="button" aria-haspopup="dialog" aria-controls="taskYtdlpArgsOverlay">
+                <svg class="ico s14"><use href="#i-terminal"></use></svg><span>本次 yt-dlp 参数</span><span class="task-args-indicator" id="taskYtdlpArgsIndicator" hidden aria-hidden="true"></span>
+              </button>
+              <button class="btn sm" id="btnLiveRecordSettings" onclick="showLiveRecordSettings()" type="button" aria-haspopup="dialog" aria-controls="liveRecordOverlay">
+                <svg class="ico s14"><use href="#i-radio"></use></svg><span>直播录制设置</span>
+              </button>
+            </div>
+            <span class="dim" id="liveRecordSummary">追开播 · 起点优先</span>
           </div>
 
           <div class="compose">
@@ -163,6 +167,56 @@
                 <button class="btn dgr" id="btnStop" onclick="stopDl()" disabled><svg class="ico s14"><use href="#i-square"></use></svg>停止</button>
                 <button class="btn pri" id="btnStart" onclick="startDl()"><svg class="ico s14"><use href="#i-plus"></use></svg><span id="btnStartLabel">开始下载</span></button>
               </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ====== 本次 yt-dlp 参数 ====== -->
+        <div class="scrim" id="taskYtdlpArgsOverlay" onclick="if(event.target===this) hideTaskYtdlpArgs()">
+          <div class="dlg task-args-dlg" role="dialog" aria-modal="true" aria-labelledby="taskYtdlpArgsDialogTitle">
+            <div class="dhead">
+              <svg class="ico s18"><use href="#i-terminal"></use></svg><b id="taskYtdlpArgsDialogTitle">本次 yt-dlp 参数</b>
+              <button class="btn sm gh" onclick="hideTaskYtdlpArgs()" type="button" aria-label="关闭"><svg class="ico s14"><use href="#i-x"></use></svg></button>
+            </div>
+            <div class="dbody">
+              <label class="lb" for="task_ytdlp_args">附加参数</label>
+              <textarea class="ctl mono" id="task_ytdlp_args" maxlength="4000" rows="3" autocomplete="off" spellcheck="false" placeholder='例如：--sleep-requests 1' oninput="updateTaskYtdlpArgsUI()" aria-describedby="taskYtdlpArgsHint"></textarea>
+              <p class="hint" id="taskYtdlpArgsHint">仅用于下一次单条或批量下载，任务启动后自动清空。每次下载都要使用的参数，请在下载设置中填写「默认 yt-dlp 参数」。</p>
+            </div>
+            <div class="dfoot">
+              <button class="btn" onclick="hideTaskYtdlpArgs()" type="button">完成</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- ====== 直播录制设置 ====== -->
+        <div class="scrim" id="liveRecordOverlay" onclick="if(event.target===this) hideLiveRecordSettings()">
+          <div class="dlg live-record-dlg" role="dialog" aria-modal="true" aria-labelledby="liveRecordDialogTitle">
+            <div class="dhead">
+              <svg class="ico s18"><use href="#i-radio"></use></svg><b id="liveRecordDialogTitle">直播录制设置</b>
+              <button class="btn sm gh" onclick="hideLiveRecordSettings()" type="button" aria-label="关闭"><svg class="ico s14"><use href="#i-x"></use></svg></button>
+            </div>
+            <div class="dbody">
+              <div class="row">
+                <label class="lb" for="s_live_record_mode">录制模式</label>
+                <span class="sel">
+                  <select class="ctl" id="s_live_record_mode" onchange="onLiveRecordModeChange()">
+                    <option value="wait">蹲开播（等待频道开播）</option>
+                    <option value="from_start" selected>追开播（从开播处录制）</option>
+                    <option value="current">加入时开录（从当前时刻）</option>
+                  </select>
+                  <svg class="ico s14 cv"><use href="#i-chevron"></use></svg>
+                </span>
+              </div>
+              <div class="row">
+                <label class="lb" for="s_live_watch_interval">检测间隔</label>
+                <input type="number" class="ctl mono" id="s_live_watch_interval" min="5" max="600" step="1" value="30" style="width:88px;flex:none" oninput="updateLiveRecordModeUI()">
+                <span class="dim">秒（5–600，仅蹲开播使用）</span>
+              </div>
+              <p class="hint live-record-hint" id="liveRecordModeHint">追开播会尝试回溯直播起点；能否回溯取决于平台是否提供 DVR。</p>
+            </div>
+            <div class="dfoot">
+              <button class="btn" onclick="hideLiveRecordSettings()" type="button">完成</button>
             </div>
           </div>
         </div>
@@ -252,6 +306,7 @@
               <div class="sh"><b>网络与代理</b><span class="rule"></span></div>
               <div class="row"><span class="lb">并发线程数</span><input type="range" id="s_threads" min="1" max="8" value="4"><span class="rval" id="thr_val">4</span></div>
               <div class="row"><span class="lb">下载限速</span><input type="range" id="s_speed" min="0" max="50" value="0"><span class="rval" id="spd_val">不限</span></div>
+              <div class="sub-hint speed-limit-warning">推荐限速：5–10 MB/s。高速或大批量下载可能导致 IP 或账号被限制或封禁，相关后果由使用者自行承担。</div>
               <div class="row"><span class="lb">启用代理</span><span class="sw" id="sw_proxy" onclick="toggleSwitch(this)"><i></i></span></div>
               <div class="row"><span class="lb">代理类型</span><span class="sel" style="max-width:150px"><select class="ctl" id="s_proxytype"><option value="http">HTTP</option><option value="socks5">SOCKS5</option></select><svg class="ico s14 cv"><use href="#i-chevron"></use></svg></span></div>
               <div class="row"><span class="lb">代理地址</span><input type="text" class="ctl mono" id="s_proxyaddr" value="127.0.0.1" style="flex:1"><span class="dim">:</span><input type="text" class="ctl mono" id="s_proxyport" value="7890" style="width:88px;flex:none"></div>
@@ -273,6 +328,7 @@
               <div class="row"><span class="lb">硬件加速</span><span class="sel"><select class="ctl" id="s_hwaccel"></select><svg class="ico s14 cv"><use href="#i-chevron"></use></svg></span></div>
               <div class="row"><span class="lb">音频输出格式</span><span class="sel"><select class="ctl" id="s_audiofmt"></select><svg class="ico s14 cv"><use href="#i-chevron"></use></svg></span></div>
               <div class="row"><span class="lb">直播下载方式</span><span class="sel"><select class="ctl" id="s_live_stream_method"><option value="yt-dlp">yt-dlp（默认）</option></select><svg class="ico s14 cv"><use href="#i-chevron"></use></svg></span></div>
+              <div class="hint">蹲开播会持续等待未开播的频道；追开播依赖平台回溯/DVR；加入时开录立即从当前可获取位置开始。</div>
               <div class="row"><span class="lb">嵌入元数据</span><span class="sw on" id="sw_meta" onclick="toggleSwitch(this)"><i></i></span></div>
               <div class="row"><span class="lb">下载封面</span><span class="sw on" id="sw_thumb" onclick="toggleSwitch(this)"><i></i></span></div>
             </div>
@@ -312,7 +368,7 @@
         <div class="tiles">
           <button class="tile" onclick="startBatch()"><svg class="ico s20"><use href="#i-list"></use></svg><span class="nm">TXT 混合批量下载</span></button>
           <button class="tile" onclick="toolAction('gen-template')"><svg class="ico s20"><use href="#i-file-text"></use></svg><span class="nm">生成批量下载模板</span></button>
-          <button class="tile" onclick="toolAction('gen-cookie-template')"><svg class="ico s20"><use href="#i-cookie"></use></svg><span class="nm">生成 Cookie 模板</span></button>
+          <button class="tile" onclick="toolAction('gen-cookie-template')" title="创建不含登录凭证的空白 Netscape 模板；已有 cookies.txt 不覆盖"><svg class="ico s20"><use href="#i-cookie"></use></svg><span class="nm">生成 Cookie 模板</span></button>
           <button class="tile" data-panel="subtitleDownloadDialog" onclick="showSubtitleDownloader()"><svg class="ico s20"><use href="#i-file-text"></use></svg><span class="nm">单独下载字幕</span></button>
           <button class="tile" data-panel="coverDownloadDialog" onclick="showCoverDownloader()"><svg class="ico s20"><use href="#i-image"></use></svg><span class="nm">下载视频封面</span></button>
           <button class="tile" onclick="toolAction('update-ytdlp')"><svg class="ico s20"><use href="#i-refresh"></use></svg><span class="nm">更新 yt-dlp</span></button>
@@ -468,9 +524,11 @@
             <h3><svg class="ico s14"><use href="#i-cookie"></use></svg>Cookie 配置</h3>
             <p>Fantia 必须登录；YouTube / Twitch 的年龄限制与会员内容也需要。两种方式二选一：</p>
             <ol>
-              <li><b>cookies.txt 文件</b> — 用浏览器扩展导出，改名放到工具目录。</li>
+              <li><b>cookies.txt 文件</b> — 从已登录浏览器导出 Netscape 格式，改名放到工具目录。</li>
               <li><b>浏览器提取（推荐）</b> — 在设置里选已登录的浏览器，每次下载前自动取最新 Cookie。</li>
             </ol>
+            <p>「生成 Cookie 模板」只创建空白模板，不含登录凭证；已有 <span class="code">cookies.txt</span> 不会覆盖或自动转换。真实 Cookie 需从已登录浏览器导出。</p>
+            <p>文件首行应为 <span class="code"># Netscape HTTP Cookie File</span>；每条 Cookie 的 7 个字段须用实际 TAB 分隔，不能使用空格或字面量 <span class="code">\t</span>。导出“当前站点”不会自动包含其他平台的 Cookie。</p>
           </div>
 
           <div class="dsec">
@@ -482,10 +540,14 @@
 
           <div class="dsec">
             <h3><svg class="ico s14"><use href="#i-radio"></use></svg>直播录制</h3>
-            <p><b>Bilibili：</b>粘贴 <span class="code">live.bilibili.com/房间号</span>，支持断流重连。</p>
-            <p><b>Twitch：</b>粘贴频道 URL 从当前进度开始录；<span class="code">/videos/</span> 链接则是下载回放。</p>
-            <p><b>TwitCasting：</b>粘贴主播页录直播，<span class="code">/movie/ID</span> 下载单条，<span class="code">/show</span> 拉取历史列表。密码保护内容会弹窗要求输入密码。</p>
-            <p>录制期间需保持工具运行，点「停止」即结束。</p>
+            <p><b>YouTube：</b>粘贴 <span class="code">youtube.com/live/...</span> 或 <span class="code">youtube.com/live</span> 入口；需要登录的直播请启用 Cookie，已结束的直播按回放下载。</p>
+            <p><b>Bilibili：</b>粘贴 <span class="code">live.bilibili.com/房间号</span>，会按直播流录制并支持断流重连；直播链接不参与视频分P选择。</p>
+            <p><b>Twitch：</b>粘贴主播频道页（<span class="code">twitch.tv/主播名</span>）等待开播并录制；<span class="code">/videos/</span> 和 <span class="code">/clips/</span> 是回放/剪辑。</p>
+            <p><b>Niconico：</b>粘贴 <span class="code">live.nicovideo.jp/watch/lv...</span> 或 <span class="code">live2.nicovideo.jp</span> 入口；直播按分片持续录制，Timeshift/已结束内容按可用回放下载。</p>
+            <p><b>NicoChannel：</b>粘贴频道的 <span class="code">nicochannel.jp/频道/live/...</span> 入口；需要安装 NicoChannel 插件并在 Firefox 登录提取 JWT，会员直播仍受账号权限限制。</p>
+            <p><b>TwitCasting：</b>粘贴主播页录直播；<span class="code">/movie/ID</span> 下载单条，<span class="code">/show</span> 或 <span class="code">/archive</span> 拉取历史列表。密码保护或会员限定内容会弹窗要求输入密码。</p>
+            <p><b>Twitter / X Spaces：</b>粘贴 <span class="code">x.com/i/spaces/...</span> 或 <span class="code">twitter.com/i/spaces/...</span>；Spaces 以音频流录制，通常需要登录 Cookie，已结束 Space 取决于平台是否保留回放。</p>
+            <p>直播链接会自动识别并显示 LIVE 状态；在下载任务页提交链接前可选择「蹲开播」「追开播」或「加入时开录」，并设置蹲开播检测间隔。录制期间需保持工具运行，点「停止」即结束。各平台的登录、地区、会员和插件限制仍由平台及 yt-dlp 决定。</p>
           </div>
 
           <div class="dsec">
@@ -568,6 +630,8 @@
                 <div class="specrow"><span class="k">v2.4.0 更新</span><span>ErgouTree <a href="https://github.com/ergou10086" target="_blank" rel="noopener noreferrer">@ergou10086</a> — 其他更新与修复</span></div>
                 <div class="specrow"><span class="k">v2.5.0 WebUI</span><span>DarkKandaoMaster <a href="https://github.com/DarkKandaoMaster" target="_blank" rel="noopener noreferrer">@DarkKandaoMaster</a> — 视觉与交互体系重构</span></div>
                 <div class="specrow"><span class="k">v2.5.0 功能</span><span>ErgouTree <a href="https://github.com/ergou10086" target="_blank" rel="noopener noreferrer">@ergou10086</a> — 设置控件、TwitCasting、Provider 与目录收拢</span></div>
+                <div class="specrow"><span class="k">v2.6.0 功能与文档</span><span>猫猫葉汐A_spy <a href="https://github.com/maomaoyexi" target="_blank" rel="noopener noreferrer">@maomaoyexi</a> — 各平台直播、「本次 yt-dlp 参数」和「直播录制设置」按钮及相关功能、Cookie 模板、TwitCasting 密码表与 HLS 回退、.ytdl 清理、测试与文档</span></div>
+                <div class="specrow"><span class="k">v2.6.0 PR #15</span><span>ErgouTree <a href="https://github.com/ergou10086" target="_blank" rel="noopener noreferrer">@ergou10086</a> — 下载归档选择、独立批量封面、PO Token Provider 启动改进</span></div>
               </div>
             </div>
           </div>

@@ -52,6 +52,25 @@ class ConfigValidationTests(unittest.TestCase):
         self.assertTrue(any("YOUTUBE_PO_TOKEN_ENABLED" in error for error in errors))
         self.assertEqual(validated["YOUTUBE_PO_TOKEN_ENABLED"], 0)
 
+    def test_live_record_mode_accepts_all_three_modes(self):
+        for mode in ("wait", "from_start", "current"):
+            validated, errors = validate_config({"LIVE_RECORD_MODE": mode})
+            self.assertEqual(errors, [], mode)
+            self.assertEqual(validated["LIVE_RECORD_MODE"], mode)
+
+    def test_live_record_mode_rejects_unknown_value(self):
+        validated, errors = validate_config({"LIVE_RECORD_MODE": "invalid"})
+        self.assertTrue(any("LIVE_RECORD_MODE" in error for error in errors))
+        self.assertEqual(validated["LIVE_RECORD_MODE"], "from_start")
+
+    def test_live_watch_interval_stays_within_configured_range(self):
+        validated, errors = validate_config({"LIVE_WATCH_INTERVAL": 45})
+        self.assertEqual(errors, [])
+        self.assertEqual(validated["LIVE_WATCH_INTERVAL"], 45)
+        validated, errors = validate_config({"LIVE_WATCH_INTERVAL": 4})
+        self.assertTrue(any("LIVE_WATCH_INTERVAL" in error for error in errors))
+        self.assertEqual(validated["LIVE_WATCH_INTERVAL"], 30)
+
     def test_default_ytdlp_args_allow_up_to_4000_characters(self):
         value = "x" * 4000
         validated, errors = validate_config({"YTDLP_DEFAULT_ARGS": value})

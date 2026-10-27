@@ -9,9 +9,9 @@ import sys
 from pathlib import Path
 
 from .core.command import build_ytdlp_cmd
-from .core.constants import DEFAULT_CONFIG, VERSION, PLATFORM_INFO
+from .core.constants import DEFAULT_CONFIG, VERSION
 from .core.paths import AppPaths
-from .core.platform import clean_url, detect_platform
+from .core.platform import clean_url, detect_platform, is_live_url
 
 
 def _print_help():
@@ -123,7 +123,14 @@ def _cmd_download(url):
         print(f"警告: 找不到 {ffmpeg.name}，部分功能可能不可用")
 
     try:
-        cmd = build_ytdlp_cmd(url, config, tool_dir, exe_suffix)
+        cmd = build_ytdlp_cmd(
+            url,
+            config,
+            tool_dir,
+            exe_suffix,
+            is_live=is_live_url(url, platform),
+            platform_override=platform,
+        )
     except Exception as exc:
         print(f"错误: 命令构建失败 - {exc}")
         return 1

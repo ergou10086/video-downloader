@@ -75,9 +75,51 @@ class WebPageTests(unittest.TestCase):
         self.assertIn('id="coverDownloadDialog"', html)
         self.assertIn('id="btnCoverDownload"', html)
         self.assertIn('data-panel="coverDownloadDialog"', html)
+        self.assertIn('id="archiveChoiceOverlay"', html)
+        self.assertIn('id="btnArchiveRedownload"', html)
+        self.assertIn('id="btnArchiveSkip"', html)
+        self.assertIn('id="statSkip"', html)
         self.assertIn('id="task_ytdlp_args"', html)
         self.assertIn('id="s_ytdlp_default_args"', html)
         self.assertIn('id="sw_youtube_po_token"', html)
+        self.assertIn('id="s_live_record_mode"', html)
+        self.assertIn('id="s_live_watch_interval"', html)
+        self.assertIn('id="btnLiveRecordSettings"', html)
+        self.assertIn('id="liveRecordOverlay"', html)
+        self.assertIn('id="btnTaskYtdlpArgs"', html)
+        self.assertIn('id="taskYtdlpArgsOverlay"', html)
+        self.assertIn('onclick="showTaskYtdlpArgs()"', html)
+        self.assertIn('onclick="showLiveRecordSettings()"', html)
+        self.assertIn('value="wait"', html)
+        self.assertIn('value="from_start"', html)
+        self.assertIn('value="current"', html)
+        self.assertIn('蹲开播', html)
+        self.assertIn('追开播', html)
+        self.assertIn('加入时开录', html)
+
+        # 直播录制模式属于提交任务时的选项，控件应位于下载任务页，
+        # 避免为了修改录制行为再切换到下载设置页。
+        download_html = html.split('<div class="page active" id="page-download">', 1)[1].split(
+            '<div class="page" id="page-history">', 1
+        )[0]
+        settings_html = html.split('<div class="page" id="page-settings">', 1)[1].split(
+            '<div class="page" id="page-tools">', 1
+        )[0]
+        self.assertIn('id="s_live_record_mode"', download_html)
+        self.assertIn('id="s_live_watch_interval"', download_html)
+        self.assertNotIn('id="s_live_record_mode"', settings_html)
+        self.assertNotIn('id="s_live_watch_interval"', settings_html)
+
+        # 两个任务选项共用一排按钮，参数输入只在对应的小窗口中显示。
+        task_actions_html = download_html.split('<div class="task-option-actions">', 1)[1].split('</div>', 1)[0]
+        self.assertIn('id="btnLiveRecordSettings"', task_actions_html)
+        self.assertIn('id="btnTaskYtdlpArgs"', task_actions_html)
+        self.assertNotIn('id="task_ytdlp_args"', task_actions_html)
+        args_dialog_html = download_html.split('id="taskYtdlpArgsOverlay"', 1)[1].split('<!-- ====== 直播录制设置', 1)[0]
+        self.assertIn('class="dlg task-args-dlg"', args_dialog_html)
+        self.assertIn('role="dialog" aria-modal="true"', args_dialog_html)
+        self.assertIn('id="task_ytdlp_args"', args_dialog_html)
+        self.assertEqual(1, html.count('id="task_ytdlp_args"'))
 
     def test_reset_config_uses_post(self):
         _skip_if_frozen()
@@ -88,6 +130,23 @@ class WebPageTests(unittest.TestCase):
         # reset-config 使用 POST 在 JS 中
         self.assertIn("api('/api/reset-config', {method:'POST'})", js)
         self.assertIn("api('/api/start-withny-live'", js)
+
+    def test_live_record_mode_is_loaded_and_saved(self):
+        """直播三种录制模式必须经过下载任务页的配置读写。"""
+        _skip_if_frozen()
+        base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        with open(os.path.join(base, "resource", "static", "js", "app.js"), "r", encoding="utf-8") as f:
+            js = f.read()
+        apply_js = js[js.index("function applyConfig"):js.index("/** 根据值设置开关")]
+        collect_js = js[js.index("function collectCfg"):js.index("/** 保存当前设置")]
+        self.assertIn("s.LIVE_RECORD_MODE", apply_js)
+        self.assertIn("LIVE_RECORD_MODE: $('s_live_record_mode').value", collect_js)
+        self.assertIn("s.LIVE_WATCH_INTERVAL", apply_js)
+        self.assertIn("LIVE_WATCH_INTERVAL: parseInt($('s_live_watch_interval').value, 10)", collect_js)
+        self.assertIn("function onLiveRecordModeChange()", js)
+        self.assertIn("function showLiveRecordSettings()", js)
+        self.assertIn("function hideLiveRecordSettings()", js)
+        self.assertIn("function updateLiveRecordModeUI()", js)
 
     def test_settings_javascript_only_references_existing_form_controls(self):
         """设置加载/保存不能读取模板中不存在的控件。"""
@@ -139,10 +198,28 @@ class WebPageTests(unittest.TestCase):
         self.assertIn("/api/current-command", js)
         self.assertIn("/api/download-subtitles", js)
         self.assertIn("/api/download-covers", js)
+        self.assertIn("/api/archive-choice", js)
         self.assertIn("[LEGACY_ALL_SUBTITLE_LANGS, '全部字幕']", js)
         self.assertIn("[DEFAULT_SUBTITLE_LANGS, '中文（默认）']", js)
         self.assertIn('{name:"Withny",color:"#22C55E"}', js)
         self.assertIn("/api/do-update", js)
+
+    def test_archive_choice_and_task_state_survive_sse_reconnect(self):
+        """PR task-state additions must coexist with the live controls and modal args."""
+        _skip_if_frozen()
+        base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        with open(os.path.join(base, "resource", "static", "js", "app.js"), "r", encoding="utf-8") as f:
+            js = f.read()
+        self.assertIn("downloadGeneration = readyData.generation", js)
+        self.assertIn("if(readyData.archive_prompt) showArchiveChoice(readyData.archive_prompt);", js)
+        self.assertIn("evt.type === 'archive_choice_required'", js)
+        self.assertIn("evt.type === 'archive_choice_closed'", js)
+        self.assertIn("data.generation !== downloadGeneration", js)
+        self.assertIn("ok + fail + skipped", js)
+        self.assertIn("updateTaskYtdlpArgsUI();", js)
+        start_handlers = js[js.index("async function doStartDl("):js.index("async function stopDl(")]
+        self.assertNotIn("markStarted(", start_handlers)
+        self.assertIn("clearStartedTaskArgs(taskArgs);", start_handlers)
 
     def test_bilibili_part_title_uses_safe_dom_properties(self):
         _skip_if_frozen()

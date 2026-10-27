@@ -133,25 +133,6 @@ class HttpServiceTests(unittest.TestCase):
         self.assertEqual(json.loads(body)["command"], "yt-dlp https://example.com")
         self.assertEqual(headers["Cache-Control"], "no-store")
 
-    def test_archive_choice_route_preserves_explicit_skip_and_redownload(self):
-        for redownload in (False, True):
-            status, body, _ = self.request("/api/archive-choice", method="POST", payload={
-                "request_id": "choice-1", "redownload": redownload,
-            })
-            self.assertEqual(status, 200)
-            self.assertEqual(json.loads(body), {"request_id": "choice-1", "redownload": redownload})
-
-    def test_archive_choice_requires_boolean_decision_and_request_id(self):
-        for payload in ({"request_id": "id", "redownload": "false"}, {"request_id": "id", "redownload": 1}, {"redownload": True}):
-            with self.assertRaises(HTTPError) as error:
-                self.request("/api/archive-choice", method="POST", payload=payload)
-            self.assertEqual(error.exception.code, 400)
-
-    def test_archive_choice_rejects_unauthenticated_requests(self):
-        with self.assertRaises(HTTPError) as error:
-            self.request("/api/archive-choice", method="POST", token=False, payload={"request_id": "id", "redownload": True})
-        self.assertEqual(error.exception.code, 403)
-
     def test_expected_browser_disconnect_does_not_print_traceback(self):
         stderr = io.StringIO()
         try:
@@ -230,20 +211,6 @@ class HttpServiceTests(unittest.TestCase):
     def test_download_subtitles_route_rejects_non_string_urls(self):
         with self.assertRaises(HTTPError) as raised:
             self.request("/api/download-subtitles", method="POST", payload={"urls": [123]})
-        self.assertEqual(raised.exception.code, 400)
-
-    def test_download_covers_route_uses_injected_dependency(self):
-        status, body, _ = self.request("/api/download-covers", method="POST", payload={
-            "urls": ["https://youtube.com/watch?v=abc"],
-        })
-        self.assertEqual(status, 200)
-        self.assertEqual(json.loads(body), {
-            "args": [["https://youtube.com/watch?v=abc"]]
-        })
-
-    def test_download_covers_route_rejects_non_string_urls(self):
-        with self.assertRaises(HTTPError) as raised:
-            self.request("/api/download-covers", method="POST", payload={"urls": [123]})
         self.assertEqual(raised.exception.code, 400)
 
     def test_withny_archive_route_uses_injected_dependency(self):
@@ -365,6 +332,39 @@ class HttpServiceTests(unittest.TestCase):
             time.sleep(0.01)
         self.assertFalse(self.dependencies.app_state.has_sse_clients())
 
+
+    def test_archive_choice_route_preserves_explicit_skip_and_redownload(self):
+        for redownload in (False, True):
+            status, body, _ = self.request("/api/archive-choice", method="POST", payload={
+                "request_id": "choice-1", "redownload": redownload,
+            })
+            self.assertEqual(status, 200)
+            self.assertEqual(json.loads(body), {"request_id": "choice-1", "redownload": redownload})
+
+    def test_archive_choice_requires_boolean_decision_and_request_id(self):
+        for payload in ({"request_id": "id", "redownload": "false"}, {"request_id": "id", "redownload": 1}, {"redownload": True}):
+            with self.assertRaises(HTTPError) as error:
+                self.request("/api/archive-choice", method="POST", payload=payload)
+            self.assertEqual(error.exception.code, 400)
+
+    def test_archive_choice_rejects_unauthenticated_requests(self):
+        with self.assertRaises(HTTPError) as error:
+            self.request("/api/archive-choice", method="POST", token=False, payload={"request_id": "id", "redownload": True})
+        self.assertEqual(error.exception.code, 403)
+
+    def test_download_covers_route_uses_injected_dependency(self):
+        status, body, _ = self.request("/api/download-covers", method="POST", payload={
+            "urls": ["https://youtube.com/watch?v=abc"],
+        })
+        self.assertEqual(status, 200)
+        self.assertEqual(json.loads(body), {
+            "args": [["https://youtube.com/watch?v=abc"]]
+        })
+
+    def test_download_covers_route_rejects_non_string_urls(self):
+        with self.assertRaises(HTTPError) as raised:
+            self.request("/api/download-covers", method="POST", payload={"urls": [123]})
+        self.assertEqual(raised.exception.code, 400)
 
 if __name__ == "__main__":
     unittest.main()

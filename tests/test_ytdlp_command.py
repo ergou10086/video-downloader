@@ -584,6 +584,76 @@ class YtdlpCommandTests(unittest.TestCase):
             "NicoChannel",
         )
 
+    def test_live_record_mode_controls_start_position(self):
+        with tempfile.TemporaryDirectory() as directory:
+            for mode, expects_from_start in (("from_start", True), ("wait", False), ("current", False)):
+                config = dict(DEFAULT_CONFIG, LIVE_RECORD_MODE=mode)
+                cmd = build_ytdlp_cmd(
+                    "https://youtube.com/live/abc",
+                    config,
+                    Path(directory),
+                    is_live=True,
+                    platform_override="YouTube",
+                )
+                self.assertEqual("--live-from-start" in cmd, expects_from_start, mode)
+
+    def test_bilibili_live_command_uses_live_template(self):
+        with tempfile.TemporaryDirectory() as directory:
+            cmd = build_ytdlp_cmd(
+                "https://live.bilibili.com/12345",
+                DEFAULT_CONFIG,
+                Path(directory),
+                is_live=True,
+                platform_override="Bilibili",
+            )
+        self.assertIn("--live-from-start", cmd)
+        output = cmd[cmd.index("-o") + 1]
+        self.assertIn("Bilibili", output)
+        self.assertIn("直播", output)
+
+    def test_twitter_space_command_uses_live_template(self):
+        with tempfile.TemporaryDirectory() as directory:
+            cmd = build_ytdlp_cmd(
+                "https://x.com/i/spaces/1AbCdEf",
+                DEFAULT_CONFIG,
+                Path(directory),
+                is_live=True,
+                platform_override="Twitter",
+            )
+        self.assertIn("--live-from-start", cmd)
+        output = cmd[cmd.index("-o") + 1]
+        self.assertIn("Twitter", output)
+        self.assertIn("直播", output)
+
+    def test_niconico_watch_lv_command_uses_live_path_without_live_from_start(self):
+        with tempfile.TemporaryDirectory() as directory:
+            cmd = build_ytdlp_cmd(
+                "https://www.nicovideo.jp/watch/lv123",
+                DEFAULT_CONFIG,
+                Path(directory),
+                is_live=True,
+                platform_override="Niconico",
+            )
+        self.assertNotIn("--live-from-start", cmd)
+        output = cmd[cmd.index("-o") + 1]
+        self.assertIn("Niconico", output)
+        self.assertIn("直播", output)
+
+    def test_nicochannel_live_command_uses_live_template(self):
+        with tempfile.TemporaryDirectory() as directory:
+            cmd = build_ytdlp_cmd(
+                "https://nicochannel.jp/example/live/sm123",
+                DEFAULT_CONFIG,
+                Path(directory),
+                is_live=True,
+                platform_override="NicoChannel",
+            )
+        self.assertIn("--live-from-start", cmd)
+        output = cmd[cmd.index("-o") + 1]
+        self.assertIn("NicoChannel", output)
+        self.assertIn("直播", output)
+
+
 
 if __name__ == "__main__":
     unittest.main()

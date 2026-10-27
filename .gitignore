@@ -4,6 +4,8 @@ presets.json
 cookies.txt
 urls.txt
 download_history.json
+twitcasting_passwords.csv
+twitcasting_passwords.xlsx
 *.har
 withny-live-config.yaml
 withny-live-config.yml
@@ -85,5 +87,7 @@ package-lock.json
 package.json
 .ai/
 .playwright-mcp/
+.merge-backups/
+.merge-work/
 
 bgutil-ytdlp-pot-provider

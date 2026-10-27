@@ -294,6 +294,9 @@ function applyConfig(s) {
   onBrowserChanged();
   $('s_hwaccel').value = s.HWACCEL;
   if(s.LIVE_STREAM_METHOD !== undefined) $('s_live_stream_method').value = s.LIVE_STREAM_METHOD;
+  if(s.LIVE_RECORD_MODE !== undefined) $('s_live_record_mode').value = s.LIVE_RECORD_MODE;
+  if(s.LIVE_WATCH_INTERVAL !== undefined) $('s_live_watch_interval').value = s.LIVE_WATCH_INTERVAL;
+  onLiveRecordModeChange();
   setSwitch('sw_meta', s.EMBED_META);
   setSwitch('sw_thumb', s.DOWNLOAD_THUMB);
   setSwitch('sw_subtitles', s.DOWNLOAD_SUBTITLES);
@@ -327,6 +330,70 @@ function onAudioModeChange() {
   const mode = $('s_audiomode').value;
   // 模式 0（不处理音频）和模式 1（分离音画）不需要音频输出格式选择
   $('s_audiofmt').disabled = (mode === '0' || mode === '1');
+}
+
+const LIVE_RECORD_MODE_LABELS = {
+  wait: '蹲开播',
+  from_start: '追开播',
+  current: '加入时开录',
+};
+
+function updateLiveRecordModeUI() {
+  const mode = $('s_live_record_mode');
+  const interval = $('s_live_watch_interval');
+  if(!mode || !interval) return;
+  const label = LIVE_RECORD_MODE_LABELS[mode.value] || LIVE_RECORD_MODE_LABELS.from_start;
+  const summary = $('liveRecordSummary');
+  if(summary) {
+    const seconds = parseInt(interval.value, 10);
+    summary.textContent = mode.value === 'wait' && Number.isFinite(seconds)
+      ? `${label} · 每${seconds}秒检测`
+      : label;
+  }
+  const hint = $('liveRecordModeHint');
+  if(hint) {
+    hint.textContent = mode.value === 'wait'
+      ? '蹲开播会持续检测未开播频道，检测到开播后自动开始录制。'
+      : mode.value === 'current'
+        ? '加入时开录不追溯历史分片，从提交链接时可获取的位置开始录制。'
+        : '追开播会尝试回溯直播起点；能否回溯取决于平台是否提供 DVR。';
+  }
+}
+
+/** 只有蹲开播模式会使用轮询间隔，其他模式保留设置但置灰。 */
+function onLiveRecordModeChange() {
+  const mode = $('s_live_record_mode');
+  const interval = $('s_live_watch_interval');
+  if(mode && interval) interval.disabled = mode.value !== 'wait';
+  updateLiveRecordModeUI();
+}
+
+function showLiveRecordSettings() {
+  onLiveRecordModeChange();
+  $('liveRecordOverlay').classList.add('show');
+  setTimeout(() => $('s_live_record_mode').focus(), 0);
+}
+
+function hideLiveRecordSettings() {
+  $('liveRecordOverlay').classList.remove('show');
+}
+
+function updateTaskYtdlpArgsUI() {
+  const hasArgs = !!$('task_ytdlp_args').value.trim();
+  $('taskYtdlpArgsIndicator').hidden = !hasArgs;
+  $('btnTaskYtdlpArgs').title = hasArgs ? '已设置，仅用于下一次下载' : '设置仅用于下一次下载的 yt-dlp 参数';
+}
+
+function showTaskYtdlpArgs() {
+  updateTaskYtdlpArgsUI();
+  $('taskYtdlpArgsOverlay').classList.add('show');
+  setTimeout(() => $('task_ytdlp_args').focus(), 0);
+}
+
+function hideTaskYtdlpArgs() {
+  updateTaskYtdlpArgsUI();
+  $('taskYtdlpArgsOverlay').classList.remove('show');
+  $('btnTaskYtdlpArgs').focus();
 }
 
 function applySubtitleLanguageValue(scope, value) {
@@ -403,6 +470,8 @@ function collectCfg() {
     BROWSER_PROFILE: $('s_profile').value,
     HWACCEL: $('s_hwaccel').value,
     LIVE_STREAM_METHOD: $('s_live_stream_method').value,
+    LIVE_RECORD_MODE: $('s_live_record_mode').value,
+    LIVE_WATCH_INTERVAL: parseInt($('s_live_watch_interval').value, 10),
     EMBED_META: isOn('sw_meta')?1:0,
     DOWNLOAD_THUMB: isOn('sw_thumb')?1:0,
     DOWNLOAD_SUBTITLES: isOn('sw_subtitles')?1:0,
@@ -499,11 +568,14 @@ async function startDl() {
   autoGrowUrlInput();
   // 自动识别 Bilibili 链接（无需手动切换平台按钮）
   const isBiliUrl = isBilibiliUrl(url);
+  const isNicoChannelLiveUrl = isNicoChannelLive(url);
   if(isBiliUrl && currentPlatform !== 'Bilibili') selectPlatform('Bilibili');
+  // NicoChannel 直播不是 Bilibili 分P任务：明确切换平台，避免沿用上一次平台的提示。
+  if(isNicoChannelLiveUrl && currentPlatform !== 'NicoChannel') selectPlatform('NicoChannel');
   // 先保存设置
   try { await saveSettingsNoAlert(); } catch(e) { showToast('设置保存失败: ' + e.message, 'error'); return; }
   // Bilibili 多P选择策略（基于 URL 检测，而非平台按钮状态）
-  if(isBiliUrl && $('s_bili_policy').value === 'select' && !isBilibiliLive(url)) {
+  if(isBiliUrl && $('s_bili_policy').value === 'select' && !isBilibiliLive(url) && !isNicoChannelLiveUrl) {
     try {
       setStatus('正在获取分P列表…', 'live');
       const pl = await api('/api/bili-playlist', {method:'POST', body:JSON.stringify({url})});
@@ -595,6 +667,20 @@ function isBilibiliLive(url) {
   try { return new URL(url).hostname.includes('live.bilibili.com'); } catch(e) { return false; }
 }
 
+/**
+ * 判断是否为 NicoChannel 直播详情链接。
+ * NicoChannel 的 /live/ 路径不应触发 Bilibili 分P检测。
+ */
+function isNicoChannelLive(url) {
+  try {
+    const parsed = new URL(url);
+    const host = parsed.hostname.toLowerCase();
+    const segments = parsed.pathname.split('/').filter(Boolean);
+    return (host === 'nicochannel.jp' || host.endsWith('.nicochannel.jp')) &&
+      segments.length === 3 && segments[1].toLowerCase() === 'live' && /^sm\w+$/i.test(segments[2]);
+  } catch(e) { return false; }
+}
+
 /** 任务启动后统一重置按钮与统计。 */
 function markStarted(total) {
   download_running = true;
@@ -608,7 +694,10 @@ function markStarted(total) {
 }
 
 function clearStartedTaskArgs(value) {
-  if($('task_ytdlp_args').value.trim() === value) $('task_ytdlp_args').value = '';
+  if($('task_ytdlp_args').value.trim() === value) {
+    $('task_ytdlp_args').value = '';
+    updateTaskYtdlpArgsUI();
+  }
 }
 
 async function doStartDl(url, biliParts, tcPassword, customArgs) {
@@ -988,6 +1077,7 @@ function connectSSE() {
       (readyData.logs || []).forEach(e => addLog(e));
       download_running = Boolean(readyData.running);
       $('btnStart').disabled = download_running || readyData.phase === 'suspended';
+      $('btnWithnyLive').disabled = download_running || readyData.phase === 'suspended';
       $('btnStop').disabled = !download_running || readyData.phase === 'stopping';
       if($('btnSubtitleDownload')) $('btnSubtitleDownload').disabled = download_running || readyData.phase === 'suspended';
       if($('btnCoverDownload')) $('btnCoverDownload').disabled = download_running || readyData.phase === 'suspended';

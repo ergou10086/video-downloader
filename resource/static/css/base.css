@@ -127,6 +127,7 @@ input[type=range]::-moz-range-thumb{width:11px;height:11px;border-radius:50%;bac
 .row>.lb{width:148px;flex:none;font-size:13px;color:var(--fg2)}
 .row .hint{font-size:12px;color:var(--fg3)}
 .sub-hint{font-size:12px;color:var(--fg3);padding-left:144px}
+.sub-hint.speed-limit-warning{color:var(--warn)}
 .cols{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:22px 44px;align-items:start}
 .cols .row>.lb{width:132px}
 .cols .sub-hint{padding-left:128px}
@@ -151,8 +152,10 @@ input[type=range]::-moz-range-thumb{width:11px;height:11px;border-radius:50%;bac
 .notice a{color:var(--fg2);border-bottom-color:var(--line2);white-space:nowrap}
 
 .compose-wrap{display:flex;flex-direction:column;gap:5px;flex:none}
-.task-args-row{padding:3px 0}
-.task-args-row>.lb{width:126px}
+.task-options-row{display:flex;align-items:center;flex-wrap:wrap;gap:8px 12px;padding:3px 0}
+.task-option-actions{display:flex;align-items:center;gap:8px}
+.task-options-row #liveRecordSummary{font-size:12px;line-height:1.45}
+.task-args-indicator{width:5px;height:5px;border-radius:50%;background:var(--fg);flex:none}
 .args-setting-row{align-items:flex-start}
 .args-setting-row textarea.ctl{display:block;width:100%;height:auto;min-height:70px;padding:8px 11px;line-height:1.5;resize:vertical;flex:1}
 .compose{border:1px solid var(--line2);border-radius:8px;background:var(--surface);display:flex;flex-direction:column;flex:none}
@@ -274,6 +277,11 @@ textarea.ta:disabled{color:var(--fg3)}
 .dhead .btn{margin-left:auto}
 .dbody{padding:16px 18px;display:flex;flex-direction:column;gap:12px;overflow-y:auto}
 .dfoot{padding:12px 18px;border-top:1px solid var(--line);display:flex;gap:8px;justify-content:flex-end;flex:none}
+.live-record-dlg,.task-args-dlg{width:460px}
+.live-record-hint{line-height:1.65}
+.task-args-dlg .lb{font-size:13px;color:var(--fg2)}
+.task-args-dlg textarea.ctl{display:block;width:100%;height:auto;min-height:94px;padding:9px 11px;line-height:1.6;resize:vertical}
+.task-args-dlg .hint{font-size:12px;color:var(--fg3);line-height:1.65}
 .plist{display:flex;flex-direction:column;gap:6px;overflow-y:auto}
 .pitem{display:flex;align-items:center;gap:11px;padding:9px 12px;border:1px solid var(--line);border-radius:var(--r);font-size:12.5px;cursor:pointer;min-width:0}
 .pitem .pi{font-family:var(--mono);color:var(--fg3);flex:none}
