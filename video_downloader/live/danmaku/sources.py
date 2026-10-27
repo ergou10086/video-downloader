@@ -14,7 +14,7 @@ from ..catchup import context_arguments
 from ..urls import classify_target
 from ..session import public_url
 from .dependencies import library
-from .transport import remote_url
+from .transport import remote_url, option
 from .twitch import parse_line
 from .youtube import messages
 
@@ -115,17 +115,31 @@ def twitcasting(context, transport, stop, emit, stats):
     if not re.fullmatch(r"[A-Za-z0-9_:]{1,100}", user):
         raise ValueError("invalid_twitcasting_user")
     page = transport.json("https://frontendapi.twitcasting.tv/watch/user/" + user, method="POST", content=b"")
-    if page.get("is_live") is False:
-        raise PermissionError("twitcasting_not_live")
     movie = page.get("movie") or {}
     room = str(movie.get("id") or page.get("movie_id") or "")
-    if not room:
+    if not room or page.get('is_live') is False:
         history = transport.text("https://twitcasting.tv/" + user + "/show/")
+        if page.get('is_live') is False and not re.search(r'data-status=["\']live["\']', history):
+            raise PermissionError('twitcasting_not_live')
         match = re.search(r'(?s)<a\s+class="tw-movie-thumbnail2"\s+href="/[^/"]+/movie/(?P<id>\d+)"', history)
         if match:
             room = match["id"]
     if not room.isdigit():
         raise ValueError("twitcasting_movie_unavailable")
+    specified = re.search(r'/(?:movie|twplayer)/(\d+)', urlsplit(context['url']).path)
+    if specified and specified[1] != room:
+        raise PermissionError('twitcasting_broadcast_changed')
+    password = option(context.get('command', []), '--video-password')
+    if password:
+        # Reuse the official extractor's form authentication in this isolated
+        # cookie jar before requesting a private comment subscription.
+        from yt_dlp.extractor.common import InfoExtractor
+        movie_url = f'https://twitcasting.tv/{user}/movie/{room}'
+        hidden = InfoExtractor._hidden_inputs(transport.text(movie_url))
+        unlocked = transport.response(movie_url, method='POST', data=dict(hidden, password=password),
+                                      headers={'Origin':'https://twitcasting.tv', 'Referer':movie_url}).decode('utf-8', 'replace')
+        if re.search(r'<form\s+method="POST">\s*<input\s+[^>]+?name="password"', unlocked):
+            raise PermissionError('twitcasting_password_rejected')
     endpoint = transport.json("https://twitcasting.tv/eventpubsuburl.php", method="POST", data={"movie_id": room})["url"]
     ws = transport.socket(remote_url(endpoint, ["twitcasting.tv"], websocket=True), origin="https://twitcasting.tv")
     try:

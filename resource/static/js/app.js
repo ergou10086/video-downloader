@@ -1968,15 +1968,17 @@ function renderLiveRecording(data) {
   liveRecordings.set(data.job_id, {...(liveRecordings.get(data.job_id) || {}), ...data});
   while(liveRecordings.size > 20) liveRecordings.delete(liveRecordings.keys().next().value);
   $('liveRecordingSect').style.display = '';
-  const conclusions = {complete:'文件验证通过', from_earliest_available:'平台最早可用内容', gaps:'有缺口或边界诊断，请检查报告', failed:'录制或文件验证失败'};
+  const conclusions = {complete:'文件验证通过', from_earliest_available:'平台最早可用内容', gaps:'有缺口或边界诊断，请检查报告', failed:'录制或文件验证失败', cancelled_before_recording:'未开始录制，已停止等待'};
   $('liveRecordingList').innerHTML = Array.from(liveRecordings.values()).reverse().map(job => {
     const state = job.conclusion ? conclusions[job.conclusion] || job.conclusion : `录制中 · 分段 ${job.part || 1}`;
     const reason = {user:'已停止（已收尾）', timeout:'已到录制时限', crash:'进程崩溃', disk_full:'磁盘不足'}[job.stop_reason] || '';
     const reportLink = job.report ? `<p><a target="_blank" rel="noopener" href="/api/live/report?job_id=${encodeURIComponent(job.job_id)}&token=${encodeURIComponent(SESSION_TOKEN)}">查看完整性报告</a></p>` : '';
     const commentLabels = {exported:'弹幕已导出', partial:'弹幕已保留；同步估算或采集缺口请查看报告', empty:'本次未收到可导出的弹幕', failed:'弹幕导出失败，媒体保留', unavailable:'弹幕来源不可用'};
     const comments = commentLabels[job.comments?.status] || '';
+    const sync = job.comments?.sync;
+    const syncText = sync && (sync.clock_verified_count || sync.clock_estimated_count || sync.unmapped_count) ? (sync.clock_verified_count > 0 ? `弹幕时间轴：已校准 ${sync.clock_verified_count} 条，估算 ${sync.clock_estimated_count || 0} 条` : '弹幕同步精度尚未确认，请查看报告') : '';
     const exportButton = job.conclusion && job.comments?.status && job.comments.status !== 'disabled' ? `<button class="btn sm" data-comment-export="${escHtml(job.job_id)}">按当前格式和偏移重新导出弹幕</button>` : '';
-    return `<div class="notice"><b>${escHtml(job.engine || '直播')} ${job.degraded ? '· 已降级' : ''}</b><p>${escHtml(reason ? reason + ' · ' + state : state)}</p>${job.reason ? `<p>${escHtml(job.reason)}</p>` : ''}${comments ? `<p>${escHtml(comments)}</p>` : ''}<small class="mono">${escHtml(job.report || job.report_dir || '')}</small>${reportLink}${exportButton}</div>`;
+    return `<div class="notice"><b>${escHtml(job.engine || '直播')} ${job.degraded ? '· 已降级' : ''}</b><p>${escHtml(reason ? reason + ' · ' + state : state)}</p>${job.reason ? `<p>${escHtml(job.reason)}</p>` : ''}${comments ? `<p>${escHtml(comments)}</p>` : ''}${syncText ? `<p>${escHtml(syncText)}</p>` : ''}<small class="mono">${escHtml(job.report || job.report_dir || '')}</small>${reportLink}${exportButton}</div>`;
   }).join('');
   $('liveRecordingList').querySelectorAll('[data-comment-export]').forEach(button => button.addEventListener('click', async () => {
     button.disabled = true;

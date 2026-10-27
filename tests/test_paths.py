@@ -114,7 +114,7 @@ class AppPathsTests(unittest.TestCase):
 
             self.assertEqual(
                 AppPaths(root).plugin_dirs(),
-                (dependency, root),
+                (dependency, root, root / 'yt-dlp-plugins'),
             )
 
     def test_archive_uses_legacy_file_only_when_canonical_is_missing(self):

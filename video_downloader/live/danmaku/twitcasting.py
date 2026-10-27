@@ -9,6 +9,8 @@ def events(payload, room, received):
     if isinstance(payload, dict):
         payload = payload.get("data", payload.get("events", [payload]))
     for item in payload if isinstance(payload, list) else []:
+        if not isinstance(item, dict):
+            continue
         kind = item.get("type")
         if kind not in {"comment", "gift"}:
             continue

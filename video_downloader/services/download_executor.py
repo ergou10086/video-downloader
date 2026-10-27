@@ -330,14 +330,8 @@ class DownloadExecutor:
         """返回命令中传给 TwitCasting 的密码；不存在或为空时返回 None。"""
         if not cmd:
             return None
-        try:
-            index = cmd.index("--video-password") + 1
-        except (ValueError, IndexError):
-            return None
-        if index >= len(cmd):
-            return None
-        value = str(cmd[index])
-        return value or None
+        from ..live.danmaku.transport import option
+        return option(cmd, "--video-password") or None
 
     @staticmethod
     def _is_twitcasting_parallel_plugin_error(line):
@@ -721,6 +715,8 @@ class DownloadExecutor:
             return {"ok": True, "cancelled": True}
 
         executable = self._paths.executable("withny-dl-windows-amd64", self._exe_suffix)
+        from ..live.engines.withnydl import managed_binary
+        executable = managed_binary(self._paths.dependency_dir) or executable
         if not executable.is_file():
             return {"error": f"缺少依赖: {executable.name}"}
         try:
@@ -1487,7 +1483,7 @@ class DownloadExecutor:
         self._live_runner = runner
         self._live_finished.clear()
         try:
-            direct_tried = firefox_tried = ffmpeg_tried = False
+            direct_tried = firefox_tried = ffmpeg_tried = plugin_tried = False
             password_attempts = 0
             while True:
                 self._remember_ytdlp_command(cmd)
@@ -1499,6 +1495,10 @@ class DownloadExecutor:
                         or handle.cancel_event.is_set()):
                     break
                 lines = result.get("error_lines", [])
+                if not plugin_tried and any(self._is_twitcasting_parallel_plugin_error(line) for line in lines):
+                    plugin_tried = True
+                    cmd = self._without_twitcasting_parallel(cmd)
+                    continue
                 recovery = self._twitcasting_recovery(
                     cmd, m3u8_400=any(self._is_twitcasting_m3u8_400(line) for line in lines),
                     access_error=any(self._is_twitcasting_access_error(line) for line in lines),
@@ -1531,7 +1531,9 @@ class DownloadExecutor:
                       "timeout": "已到录制时限（已收尾）", "gaps": "录制有缺口，请查看完整性报告",
                       "earliest": "已录制平台最早可用内容，请查看报告", "fail": "直播录制失败，请查看报告"}
             status = result["status"]
-            if status == "success" and result.get("output") and Path(result["output"]).is_file():
+            verified_media = status == 'success' or (status in {'stopped', 'timeout', 'gaps', 'earliest'} and
+                result.get('conclusion') in {'complete', 'gaps', 'from_earliest_available'})
+            if verified_media and result.get("output") and Path(result["output"]).is_file():
                 self._remember_twitcasting_password(url, platform, cmd, self._live_config)
                 self._remove_ytdl_sidecar(result["output"])
             self._update_progress(1 if status == "success" else 0, labels[status], "", "")

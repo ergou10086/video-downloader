@@ -39,10 +39,10 @@ def twitcasting_hls_fallback_args(tool_dir, *, force_ffmpeg=True):
         return args
 
     plugin_dir_args = []
-    if plugin_root not in configured_plugin_dirs:
+    if plugin_root / 'yt-dlp-plugins' not in configured_plugin_dirs:
         # PyInstaller 单文件版的数据文件位于 _MEIPASS；外部 yt-dlp 需要显式
         # 获得该临时目录，才能发现打包进去的插件。
-        plugin_dir_args = ["--plugin-dirs", str(plugin_root)]
+        plugin_dir_args = ["--plugin-dirs", str(plugin_root / 'yt-dlp-plugins')]
     return [
         *plugin_dir_args,
         "--enable-file-urls",
@@ -62,6 +62,19 @@ def _browser_cookie_spec(cfg):
     if browser == "firefox" and profile.lower() == "default":
         profile = ""
     return f"{browser}:{profile}" if profile else browser
+
+
+def niconico_live_mux_args(paths):
+    import sys
+    relative = Path('yt-dlp-plugins/video_downloader/yt_dlp_plugins/postprocessor/niconico_live_mux.py')
+    candidates = [*paths.plugin_dirs(), Path(__file__).resolve().parents[2] / 'dependency']
+    if getattr(sys, '_MEIPASS', None):
+        candidates.insert(0, Path(sys._MEIPASS))
+    root = next((root for root in candidates if (root / relative).is_file()), None)
+    if root is None:
+        raise ValueError('缺少 Niconico 直播音视频合并插件，请补全依赖')
+    return ([] if root / 'yt-dlp-plugins' in paths.plugin_dirs() else ['--plugin-dirs', str(root / 'yt-dlp-plugins')]) + [
+        '--use-postprocessor', 'NiconicoLiveMux:when=before_dl']
 
 
 def _append_proxy_option(cmd, cfg):
@@ -290,6 +303,8 @@ def build_ytdlp_cmd(url, config, tool_dir, exe_suffix="", *, is_live=False, live
         # 参数由 live 包的策略根据平台能力 + 模式生成：
         # catch_up -> --live-from-start；live_edge -> --no-live-from-start。
         cmd += build_live_arguments(platform_name, live_mode, is_live=True)
+        if is_nico_live:
+            cmd += niconico_live_mux_args(paths)
 
     cmd += ["-o", out_tmpl]
     archive = paths.archive(f"{platform_name.lower()}_archive.txt")
@@ -319,6 +334,8 @@ def build_ytdlp_cmd(url, config, tool_dir, exe_suffix="", *, is_live=False, live
     # === 音频处理方案 ===
     audio_mode = cfg.get("AUDIO_MODE", "0")
     audio_fmt = cfg.get("AUDIO_FORMAT", "mp3")
+    if is_nico_live and str(audio_mode) == '1':
+        raise ValueError('Niconico 直播暂不支持分离音视频文件，请选择合并或同时导出音频')
 
     if audio_mode == "3":
         # 只输出音频：bestaudio 优先（有独立音频流则直下），否则回退 best 再提取

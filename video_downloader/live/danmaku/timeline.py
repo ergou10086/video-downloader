@@ -18,9 +18,10 @@ def epoch(value):
         return None
 
 
-def project(events, *, segment, anchor_utc, mode, platform, offset_ms=0, duration_ms=None, stats=None):
+def project(events, *, segment, anchor_utc, mode, platform, offset_ms=0, duration_ms=None, stats=None, clock_ranges=()):
     stats = stats if stats is not None else {}
     stats.update(anchor_error_ms=None, anchor_source="clock_estimate", pre_start_count=0, unmapped_count=0)
+    stats.update(clock_verified_count=0, clock_estimated_count=0)
     for event in events:
         if mode == "catch_up" and platform == "YouTube" and event.time_source == "source_relative":
             # YouTube's replay offset is programme-relative. An unknown DVR head
@@ -32,7 +33,18 @@ def project(events, *, segment, anchor_utc, mode, platform, offset_ms=0, duratio
             if stamp is None or anchor_utc is None:
                 stats["unmapped_count"] += 1
                 continue
-            point = round((stamp - anchor_utc) * 1000)
+            verified = next((r for r in clock_ranges if r['utc_start'] <= stamp <= r['utc_end']
+                             and r['error_ms'] < 2000), None)
+            if verified and event.time_source != 'receive':
+                point = round((stamp - verified['origin_utc']) * 1000)
+                stats['clock_verified_count'] += 1
+                stats['anchor_source'] = 'hls_pdt_aac_packet_match'
+                if not stats['clock_estimated_count']:
+                    stats['anchor_error_ms'] = max(stats.get('anchor_error_ms') or 0, verified['error_ms'])
+            else:
+                point = round((stamp - anchor_utc) * 1000)
+                stats['clock_estimated_count'] += 1
+                stats['anchor_error_ms'] = None
         point += offset_ms
         if point < 0:
             stats["pre_start_count"] += 1

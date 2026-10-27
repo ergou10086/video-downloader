@@ -161,7 +161,7 @@ class YtdlpCommandTests(unittest.TestCase):
             for index, value in enumerate(cmd[:-1])
             if value == "--plugin-dirs"
         ]
-        self.assertEqual(plugin_dirs, [str(dependency), str(root)])
+        self.assertEqual(plugin_dirs, [str(dependency), str(root), str(root / 'yt-dlp-plugins')])
 
     def test_enabled_subtitles_use_chinese_languages_and_separate_directory(self):
         config = dict(DEFAULT_CONFIG, DOWNLOAD_SUBTITLES=1)
@@ -496,7 +496,7 @@ class YtdlpCommandTests(unittest.TestCase):
             for index, value in enumerate(cmd[:-1])
             if value == "--plugin-dirs"
         ]
-        self.assertIn(str(bundle_dir), plugin_dirs)
+        self.assertIn(str(bundle_dir / 'yt-dlp-plugins'), plugin_dirs)
         self.assertIn("--use-postprocessor", cmd)
 
     def test_twitcasting_default_uses_native_hls_downloader(self):

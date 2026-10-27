@@ -21,6 +21,19 @@ CONTEXT_PAIRS = {"--proxy", "--cookies", "--cookies-from-browser", "--username",
 CONTEXT_FLAGS = {"--force-ipv4", "--force-ipv6", "--no-check-certificates", "--legacy-server-connect"}
 
 
+def format_arguments(command):
+    result, index = [], 1
+    while index < len(command):
+        value = command[index]
+        if value.split('=', 1)[0] in {'-f', '--format', '-S', '--format-sort'}:
+            result.append(value)
+            if '=' not in value and index + 1 < len(command):
+                index += 1
+                result.append(command[index])
+        index += 1
+    return result
+
+
 def context_arguments(command):
     """Reuse authentication/routing, without output, archive or download side effects."""
     result, i = [], 1
@@ -39,7 +52,7 @@ def context_arguments(command):
 
 
 def metadata_command(command, url, *, from_start=False):
-    return [command[0], "--ignore-config", *context_arguments(command), "--simulate", "--dump-single-json",
+    return [command[0], "--ignore-config", *context_arguments(command), *format_arguments(command), "--simulate", "--dump-single-json",
             "--no-warnings", "--no-playlist", "--socket-timeout", "8", "--retries", "0",
             "--live-from-start" if from_start else "--no-live-from-start", url]
 
@@ -53,6 +66,7 @@ class CatchUpEvidence:
     started_at: float | None = None
     observed_at: float = 0
     window_seconds: float | None = None
+    backfill_format: str = ""
 
     def to_dict(self):
         return asdict(self)
@@ -129,9 +143,19 @@ class CatchUpPlanner:
                      and any(f.get("is_from_start") for f in archive.get("formats", [])))
             if not valid:
                 raise ValueError("no_matching_vod")
+            # Preserve the live rendition instead of independently picking the
+            # archive's best stream. Packet identity still owns final joining.
+            rendition = ""
+            if edge.get('height'):
+                candidates = [f for f in archive.get('formats', []) if f.get('is_from_start')
+                              and f.get('height') == edge['height']
+                              and (not edge.get('fps') or f.get('fps') == edge['fps'])]
+                if not candidates:
+                    raise ValueError('matching_archive_rendition_unavailable')
+                rendition = str(candidates[-1].get('format_id') or '')
             return CatchUpEvidence(True, "发现本场可访问 VOD；先录实时尾部，独立回填，重叠须经包指纹验证",
                                    "tail_and_backfill", "https://www.twitch.tv/videos/" + archive_id[1:],
-                                   started, time.time())
+                                   started, time.time(), backfill_format=rendition)
         except (OSError, ValueError, TypeError, subprocess.TimeoutExpired):
             reason = ("未能验证该场直播的 DVR（探测失败、权限不足或直播已结束），只能从当前录制" if platform == "YouTube"
                       else "未确认本场可访问的 VOD（探测失败或 VOD 不匹配），只能从当前录制")
@@ -166,7 +190,9 @@ class BackfillJob:
                            "--retries", "2", self.evidence.archive_url]
                 # Reuse the exact format/audio processing choices from the main
                 # command when possible. Different bitstreams are safely kept separate.
-                for option in ("-f", "--format", "-r", "--limit-rate", "-N", "--concurrent-fragments",
+                command[-1:-1] = (['-f', self.evidence.backfill_format] if self.evidence.backfill_format
+                                   else format_arguments(self.command))
+                for option in ("-r", "--limit-rate", "-N", "--concurrent-fragments",
                                "--fragment-retries", "--ffmpeg-location"):
                     if option in self.command:
                         index = self.command.index(option)

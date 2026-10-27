@@ -179,19 +179,32 @@ class WatchJobStore:
                  json.dumps(job.probe, ensure_ascii=False), job.triggered_at, job.session_id),
             )
 
-    def update(self, job: WatchJob) -> None:
+    def update(self, job: WatchJob, *, expected_status: WatchStatus | None = None) -> bool:
         import json
 
         with self._connection() as connection:
-            connection.execute(
+            cursor = connection.execute(
                 """UPDATE watch_jobs SET url=?,platform=?,target_kind=?,stable_id=?,record_mode=?,
                    status=?,updated_at=?,next_probe_at=?,max_wait_at=?,attempts=?,last_error=?,
-                   probe_json=?,triggered_at=?,session_id=? WHERE id=?""",
+                   probe_json=?,triggered_at=?,session_id=? WHERE id=?""" +
+                   (" AND status=?" if expected_status else ""),
                 (job.url, job.platform, job.target_kind, job.stable_id, job.record_mode,
                  job.status.value, job.updated_at, job.next_probe_at, job.max_wait_at,
                  job.attempts, job.last_error, json.dumps(job.probe, ensure_ascii=False),
-                 job.triggered_at, job.session_id, job.id),
+                 job.triggered_at, job.session_id, job.id) +
+                ((expected_status.value,) if expected_status else ()),
             )
+            return cursor.rowcount == 1
+
+    def claim(self, job_id: str, now: float) -> bool:
+        """Atomically claim a due probe; cancellation and another scheduler win safely."""
+        with self._connection() as connection:
+            return connection.execute(
+                "UPDATE watch_jobs SET status=?,next_probe_at=NULL,updated_at=? WHERE id=? "
+                "AND status IN (?,?,?,?) AND next_probe_at<=?",
+                (WatchStatus.PROBING.value, now, job_id, WatchStatus.PROBING.value,
+                 WatchStatus.WAITING.value, WatchStatus.WAITING_NEAR.value, WatchStatus.ERROR.value, now),
+            ).rowcount == 1
 
     def get(self, job_id: str) -> WatchJob | None:
         with self._connection() as connection:
@@ -238,15 +251,20 @@ class WatchJobStore:
         return row is not None
 
     def recover_interrupted(self) -> int:
-        """把上次进程退出时残留的 PROBING/STARTING 重置为 WAITING。"""
+        """Resume probes; an interrupted dispatch needs review to avoid duplicates."""
         now = time.time()
         with self._connection() as connection:
             cursor = connection.execute(
-                "UPDATE watch_jobs SET status=?, next_probe_at=?, updated_at=? WHERE status IN (?,?)",
-                (WatchStatus.WAITING.value, now, now,
-                 WatchStatus.PROBING.value, WatchStatus.STARTING.value),
+                "UPDATE watch_jobs SET status=?, next_probe_at=?, updated_at=? WHERE status=?",
+                (WatchStatus.WAITING.value, now, now, WatchStatus.PROBING.value),
             )
-            return cursor.rowcount
+            count = cursor.rowcount
+            cursor = connection.execute(
+                "UPDATE watch_jobs SET status=?,next_probe_at=NULL,updated_at=?,last_error=? WHERE status=?",
+                (WatchStatus.ERROR.value, now, "启动期间退出，请先确认录制任务是否已创建，再重新蹲守",
+                 WatchStatus.STARTING.value),
+            )
+            return count + cursor.rowcount
 
 
 class LiveWatchService:
@@ -359,11 +377,15 @@ class LiveWatchService:
             return {"error": "等待任务不存在"}
         if job.is_terminal:
             return {"ok": True, "job": job.to_dict()}
+        if job.status is WatchStatus.STARTING:
+            return {"error": "直播任务正在启动，请在录制任务中停止"}
+        previous = job.status
         job.status = WatchStatus.CANCELLED
         job.next_probe_at = None
         job.updated_at = self._clock()
         job.last_error = "用户取消"
-        self._store.update(job)
+        if not self._store.update(job, expected_status=previous):
+            return {"error": "任务状态已变化，请刷新后重试"}
         self._notify()
         return {"ok": True, "job": job.to_dict()}
 
@@ -386,10 +408,9 @@ class LiveWatchService:
                 if job.id in self._in_progress:
                     continue
                 self._in_progress.add(job.id)
-            job.status = WatchStatus.PROBING
-            job.next_probe_at = None
-            job.updated_at = now
-            self._store.update(job)
+            if not self._store.claim(job.id, now):
+                self._release(job.id)
+                continue
             futures.append(self._executor.submit(self._probe_job, job.id))
         if wait:
             for future in futures:
@@ -410,13 +431,16 @@ class LiveWatchService:
                 return
             self._apply_probe(current, probe)
         except Exception as exc:
+            job = self._store.get(job_id)
+            if not job or job.status is not WatchStatus.PROBING:
+                return
             now = self._clock()
             job.status = WatchStatus.WAITING
-            job.last_error = f"{type(exc).__name__}: {exc}"
+            job.last_error = f"探测异常：{type(exc).__name__}"
             job.attempts += 1
             job.updated_at = now
             job.next_probe_at = now + self._retry_interval(job.attempts)
-            self._store.update(job)
+            self._store.update(job, expected_status=WatchStatus.PROBING)
             self._notify()
         finally:
             self._release(job_id)
@@ -430,14 +454,15 @@ class LiveWatchService:
             job.status = WatchStatus.EXPIRED
             job.next_probe_at = None
             job.last_error = "超过最长等待时间"
-            self._store.update(job)
+            self._store.update(job, expected_status=WatchStatus.PROBING)
             self._notify()
             return
 
         if probe.status is LiveStatus.LIVE:
             job.status = WatchStatus.STARTING
             job.next_probe_at = None
-            self._store.update(job)
+            if not self._store.update(job, expected_status=WatchStatus.PROBING):
+                return
             self._notify()
             try:
                 result = self._on_live(job, probe) or {}
@@ -454,7 +479,7 @@ class LiveWatchService:
                 job.last_error = ""
                 job.session_id = str(result.get("session_id") or "")
             job.updated_at = self._clock()
-            self._store.update(job)
+            self._store.update(job, expected_status=WatchStatus.STARTING)
             self._notify()
             return
 
@@ -462,7 +487,7 @@ class LiveWatchService:
             job.status = WatchStatus.WAITING_NEAR
             job.last_error = ""
             job.next_probe_at = now + self._schedule_interval(probe, now)
-            self._store.update(job)
+            self._store.update(job, expected_status=WatchStatus.PROBING)
             self._notify()
             return
 
@@ -470,7 +495,7 @@ class LiveWatchService:
             job.status = WatchStatus.WAITING
             job.last_error = ""
             job.next_probe_at = now + self._schedule_interval(probe, now)
-            self._store.update(job)
+            self._store.update(job, expected_status=WatchStatus.PROBING)
             self._notify()
             return
 
@@ -480,7 +505,7 @@ class LiveWatchService:
             job.last_error = probe.error or (
                 "直播已结束" if probe.status is LiveStatus.ENDED else "需要登录或无权限"
             )
-            self._store.update(job)
+            self._store.update(job, expected_status=WatchStatus.PROBING)
             self._notify()
             return
 
@@ -493,7 +518,7 @@ class LiveWatchService:
             job.status = WatchStatus.EXPIRED
             job.last_error = probe.error or "不可恢复的探测错误"
             job.next_probe_at = None
-        self._store.update(job)
+        self._store.update(job, expected_status=WatchStatus.PROBING)
         self._notify()
 
     def _release(self, job_id: str) -> None:

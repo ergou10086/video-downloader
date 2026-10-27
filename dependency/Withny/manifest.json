@@ -1,0 +1,16 @@
+{
+  "version": "2.0.0-local-chat-1",
+  "source": "https://github.com/Darkness4/withny-dl/tree/v2.0.0",
+  "source_sha256": "f64134ff918b6611b635a1f13563f098531a7143ff19d3276adb483a5dd69f11",
+  "sha256": "610c311f3122b5a736708538b6e74a574326db108f41e76cc5f7e72920f6f71f",
+  "license": "MIT",
+  "scope": "managed single-file live recording; external ffmpeg/ffprobe; multi-file concat disabled",
+  "build": "python scripts/build_withny_dependency.py",
+  "patches": {
+    "chat.go": "4020d075649ac5bf5dc3e6386c28164420b31fa1103d3456c11dfbd73813b7bc",
+    "chat_protocol.go": "f05f1128ffdb284bb9eca8ca146eed58b70e30733db628c7eec3754ac8e3c126",
+    "lifecycle.go": "8a3ac6e440bba0b5608f44c0b23f5c2e2ba1c152b5560d91ef7ec8f61e446f47",
+    "probe_windows.go": "1495f4c7904451613cda4090b1a252ae0cf23ee29e5b70a24a83dbac0ff5a59c",
+    "remux_windows.go": "cd81d8b3cc6931d93c58dc5d00ae3f7b94d863bed46630b9686763bcb0f99192"
+  }
+}

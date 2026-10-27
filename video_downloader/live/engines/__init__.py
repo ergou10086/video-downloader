@@ -9,3 +9,5 @@ class EngineFeatures:
     annotate_report: bool = False
     original_working_directory: bool = False
     concatenate: bool = True
+    clock_source: bool = False
+    native_waiting: bool = False

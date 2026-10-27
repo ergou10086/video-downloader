@@ -28,6 +28,7 @@ class YtDlpEngine:
         result += ["--no-simulate", "--newline",
                    "-P", str(directory), "-o", "recording.%(ext)s",
                    "--print", "before_dl:LIVE_META:%(.{id,title,is_live,live_status,timestamp,release_timestamp,tbr,vcodec,acodec})j",
+                   "--print", 'before_dl:LIVE_CLOCK:{"url":%(_video_downloader_niconico_formats.1.url,requested_formats.1.url,url)j,"protocol":%(_video_downloader_niconico_formats.1.protocol,requested_formats.1.protocol,protocol)j,"height":%(height)j,"http_headers":%(_video_downloader_niconico_formats.1.http_headers,requested_formats.1.http_headers,http_headers)j}',
                    "--print", "after_move:LIVE_FILE:%(filepath)j"]
         return result
 

@@ -76,6 +76,9 @@ class ToolService:
             deps[dep] = self._paths.executable(dep, self._exe_suffix).exists()
         deps["fantiadl"] = self._paths.executable("fantiadl", self._exe_suffix).exists()
         deps["withny_dl"] = self._paths.executable("withny-dl-windows-amd64", self._exe_suffix).exists()
+        from video_downloader.live.engines.withnydl import managed_binary
+        deps['withny_live_chat'] = managed_binary(self._paths.dependency_dir) is not None
+        deps['withny_dl'] = deps['withny_dl'] or deps['withny_live_chat']
         deps["nicochannel_plugin"] = self._paths.dependency("nicochannel.zip").exists()
         deps["youtube_po_token"] = all(path.exists() for path in (
             self._paths.executable("deno", self._exe_suffix),

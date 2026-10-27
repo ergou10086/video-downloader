@@ -280,6 +280,8 @@ def test_withny_managed_config_tracks_and_metadata_do_not_use_programme_start(tm
     command=engine.command(directory)
     yaml=library('ruamel.yaml').YAML(typ='safe',pure=True);data=yaml.load(engine.private.read_text(encoding='utf-8'))
     assert data['channels']['alice']['writeChat'] and not data['channels']['bob']['concat']
+    assert data['channels']['bob']['quality']['audioOnly'] is True
+    assert 'qualityConstraint' not in data['channels']['bob']
     assert '.MetaData.Stream.UUID' in data['defaultParams']['outFormat']
     assert command[-1]==str(engine.private) and engine.cwd==tmp_path and config.read_bytes()==original
     folder=directory/'alice';folder.mkdir();ts=folder/'one.ts';ts.touch();mp4=folder/'one.mp4';mp4.touch()

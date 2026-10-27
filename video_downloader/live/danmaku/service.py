@@ -59,7 +59,8 @@ def process_comments(session, media_report, config):
                         else:
                             events = project(events, segment=segment, anchor_utc=anchor,
                                              mode=session.data.get("mode"), platform=platform, duration_ms=duration,
-                                             offset_ms=offset, stats=stats)
+                                             offset_ms=offset, stats=stats,
+                                             clock_ranges=file.get('comment_clock', {}).get('ranges', []))
                         output = media.with_suffix("." + format_)
                         if format_ == "srt":
                             counts = export_srt(events, output, duration_ms=duration)
@@ -76,8 +77,15 @@ def process_comments(session, media_report, config):
                     report["sources"].append(stats)
                 except Exception as exc:
                     report["errors"].append({"source": str(source), "error": type(exc).__name__})
-        uncertain = any(s.get("event_count") and s.get("anchor_source") in {
-            "clock_estimate", "programme_relative_unverified_head"} for s in report["sources"])
+        uncertain = any(s.get('clock_estimated_count') or (s.get("event_count") and s.get("anchor_source") in {
+            "clock_estimate", "programme_relative_unverified_head"}) for s in report["sources"])
+        report['sync'] = {key:sum(s.get(key, 0) for s in report['sources'])
+                          for key in ('clock_verified_count', 'clock_estimated_count', 'unmapped_count')}
+        report['sync']['scope'] = 'sampled_media_clock_mapping'
+        report['sync']['manual_offset_ms'] = int(config.get('LIVE_DANMAKU_OFFSET_MS', 0))
+        errors = [s['anchor_error_ms'] for s in report['sources'] if s.get('anchor_error_ms') is not None]
+        if errors and not uncertain and not report['sync']['unmapped_count']:
+            report['anchor_error_ms'] = max(errors)
         report["status"] = "partial" if report["errors"] or uncertain or capture.get("status") in {"failed","partial","unavailable"} or any(
             s.get("truncated") or s.get("rejected_count") for s in report["sources"]) else (
                 "exported" if report["outputs"] else "empty" if report["sources"] else "unavailable")

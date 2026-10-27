@@ -214,8 +214,12 @@ class AppPaths:
         roots = []
         if any(path.exists() for path in canonical_markers):
             roots.append(self.dependency_dir)
+            if canonical_markers[0].is_dir():
+                roots.append(canonical_markers[0])
         if any(path.exists() for path in legacy_markers):
             roots.append(self.app_dir)
+            if legacy_markers[0].is_dir():
+                roots.append(legacy_markers[0])
         return tuple(roots or (self.dependency_dir,))
 
     def subprocess_env(self, base: dict[str, str] | None = None) -> dict[str, str]:

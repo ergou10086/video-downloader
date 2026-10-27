@@ -5,15 +5,18 @@ Adapted from temp/firefox_utils.py. Extracts the JWT auth token from Firefox's
 localStorage database, which is needed because nicochannel.jp migrated from
 cookie-based auth to localStorage-based JWT auth.
 
-The JWT is passed to yt-dlp via --extractor-args, and the yt-dlp plugin
-(niconicochannelplus) handles token refresh internally via the cookie file.
+The JWT is passed to yt-dlp via --username jwt_token --password. Browser
+refresh tokens are never consumed or rotated by this read-only extractor.
 """
 
 import contextlib
+import base64
 import json
 import os
 import re
 import tempfile
+import sqlite3
+import time
 import urllib.parse
 from typing import Callable
 
@@ -34,6 +37,7 @@ class NicochannelAuthService:
     def __init__(self, log: Callable[[str, str], None]):
         self._log = log
         self._cached_token: str | None = None
+        self._cached_context = (None, None)
 
     # ------------------------------------------------------------------
     # Public API
@@ -50,7 +54,8 @@ class NicochannelAuthService:
         The result is cached — subsequent calls return the cached token
         without re-reading the Firefox database.
         """
-        if self._cached_token is not None:
+        if (self._cached_token is not None and self._cached_context == (profile, container)
+                and self._token_expiry(self._cached_token) > time.time() + 60):
             return self._cached_token
 
         try:
@@ -110,6 +115,7 @@ class NicochannelAuthService:
             token = self._find_jwt(items)
             if token:
                 self._cached_token = token
+                self._cached_context = (profile, container)
                 self._log("[NicoChannel] JWT 令牌已从 Firefox 提取", "success")
             else:
                 self._log(
@@ -248,7 +254,19 @@ class NicochannelAuthService:
             return items
 
         with tempfile.TemporaryDirectory() as tmpdir:
-            cursor = open_database_copy(db_file, tmpdir)
+            # Copying only data.sqlite omits the active WAL and can select an
+            # expired token even while Firefox is logged in. Online backup is
+            # a consistent read-only snapshot and never writes to the profile.
+            from pathlib import Path
+            snapshot = os.path.join(tmpdir, 'localstorage.sqlite')
+            deadline = time.monotonic() + 3
+            def progress(*_):
+                if time.monotonic() > deadline:
+                    raise TimeoutError('Firefox storage snapshot timed out')
+            with contextlib.closing(sqlite3.connect(Path(db_file).resolve().as_uri() + '?mode=ro', uri=True, timeout=0.2)) as source:
+                with contextlib.closing(sqlite3.connect(snapshot)) as target:
+                    source.backup(target, pages=128, progress=progress, sleep=0.05)
+            cursor = sqlite3.connect(snapshot).cursor()
             with contextlib.closing(cursor.connection):
                 db_schema_version = cursor.execute(
                     "PRAGMA user_version;"
@@ -287,6 +305,15 @@ class NicochannelAuthService:
     # ------------------------------------------------------------------
 
     @staticmethod
+    def _token_expiry(token):
+        try:
+            payload = token.split('.')[1]
+            data = json.loads(base64.urlsafe_b64decode(payload + '=' * (-len(payload) % 4)))
+            return float(data.get('exp', float('inf')))
+        except (ValueError, TypeError, IndexError):
+            return float('inf')
+
+    @staticmethod
     def _find_jwt(items: dict[str, str]) -> str | None:
         """Find the JWT auth token in nicochannel's localStorage items.
 
@@ -305,6 +332,7 @@ class NicochannelAuthService:
            ``{"totalUserInformation": "{\\"root\\":{\\"userInformation\\":{\\"accessToken\\":\\"<JWT>\\"}}}"}``
            → JWT is nested inside a string-encoded JSON
         """
+        candidates = []
         for value in items.values():
             if "access_token" not in value and "accessToken" not in value:
                 continue
@@ -313,16 +341,19 @@ class NicochannelAuthService:
             except (json.JSONDecodeError, TypeError):
                 continue
 
+            if not isinstance(parsed, dict):
+                continue
+
             # Pattern 1: Auth0 cache — body is a dict with access_token
             body = parsed.get("body")
             if isinstance(body, dict):
                 token = body.get("access_token")
                 if isinstance(token, str) and token.count(".") == 2:
-                    return token
+                    candidates.append(token)
 
             # Pattern 2: Legacy — body is the JWT string directly
             if isinstance(body, str) and body.count(".") == 2:
-                return body
+                candidates.append(body)
 
             # Pattern 3: Persisted user info — nested string-encoded JSON
             total_info = parsed.get("totalUserInformation")
@@ -335,8 +366,9 @@ class NicochannelAuthService:
                         .get("accessToken")
                     )
                     if isinstance(token, str) and token.count(".") == 2:
-                        return token
+                        candidates.append(token)
                 except (json.JSONDecodeError, TypeError):
                     pass
 
-        return None
+        valid = [token for token in candidates if NicochannelAuthService._token_expiry(token) > time.time() + 60]
+        return max(valid, key=NicochannelAuthService._token_expiry, default=None)

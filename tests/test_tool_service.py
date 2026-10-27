@@ -84,6 +84,7 @@ class ToolServiceTests(unittest.TestCase):
                 "ffprobe": False,
                 "fantiadl": False,
                 "withny_dl": False,
+            "withny_live_chat": False,
                 "nicochannel_plugin": False,
                 "youtube_po_token": False,
             })

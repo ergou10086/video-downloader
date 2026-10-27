@@ -266,6 +266,26 @@ class ActualOverlapTests(unittest.TestCase):
         self.assertEqual(result['status'],'unverified')
         self.assertNotIn('joined',report)
 
+    def test_b_frames_keep_initial_payloads_with_missing_matroska_dts(self):
+        source, tail = self.root/'bframes.mkv', self.root/'bframes-tail.mkv'
+        self.run_ffmpeg('-f','lavfi','-i','testsrc2=size=160x90:rate=30','-f','lavfi','-i',
+                        'anoisesrc=seed=42:r=48000','-t','12','-c:v','libx264','-bf','2',
+                        '-g','60','-c:a','aac',source)
+        self.run_ffmpeg('-ss','6','-i',source,'-c','copy',tail)
+        original=list(packets(self.ffprobe,source))
+        video=[p for p in original if p['codec_type']=='video']
+        self.assertIn('K',video[0]['flags'])
+        self.assertTrue(video[0].get('dts_inferred'))
+        self.assertEqual(len(video),360)
+        session=LiveSession(self.root/'sessions','Twitch','catch_up','b-frame-fixture')
+        report={'files':[self.checker.inspect(tail)]}
+        result=reconcile(session,self.checker,[source],report)
+        self.assertEqual(result['status'],'joined',result)
+        joined=list(packets(self.ffprobe,result['joined']))
+        for kind in ('video','audio'):
+            self.assertEqual([p['data_hash'] for p in original if p['codec_type']==kind],
+                             [p['data_hash'] for p in joined if p['codec_type']==kind])
+
     def test_backfill_start_failure_does_not_kill_real_primary_media(self):
         paths = AppPaths(self.root)
         paths.executable = lambda name,suffix:Path({'ffmpeg':self.ffmpeg,'ffprobe':self.ffprobe}[name])

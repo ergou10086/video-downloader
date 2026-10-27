@@ -26,6 +26,7 @@ from .danmaku.service import process_comments
 from .danmaku.preferences import enabled as comments_enabled
 from .danmaku.capture import CommentCapture
 from .splice import reconcile
+from .clock import MediaClock
 
 
 class LiveRunner:
@@ -113,9 +114,10 @@ class LiveRunner:
         features = EngineFeatures()
         backfill, catch_up_evidence = None, None
         comments = None
+        clocks = []
         original_command = list(command)
         error_lines = []
-        max_retries = int(config.get("LIVE_MAX_RETRIES", 2))
+        max_retries = int(config.get("LIVE_MAX_RETRIES", 5))
         timeout = int(config.get("LIVE_DOWNLOAD_TIMEOUT", 0)) * 60
         # Installation checks, authentication and connecting are not recording time.
         # Anchor the limit to the first observed media growth, once for all parts.
@@ -176,6 +178,9 @@ class LiveRunner:
             while not cancel.is_set():
                 directory, part = session.part(engine.name, [], next_reason)
                 cmd = engine.command(directory)
+                media_clock = MediaClock(directory, command, checker.ffprobe) if config.get('LIVE_DANMAKU_ENABLED') else None
+                if media_clock:
+                    clocks.append((media_clock, part))
                 part["process_cmd"] = redact_command(cmd)
                 session.save()
                 self.emit_event("live_recording", {"job_id": session.root.name, "engine": engine.name,
@@ -205,6 +210,7 @@ class LiveRunner:
                 started, last_activity, last_size = self.clock(), self.clock(), 0
                 last_check, warned, stop_requested = 0, False, None
                 fatal_error = False
+                stream_failure = False
                 events = getattr(engine, "events", None)
                 while proc.poll() is None or not read_done.is_set() or not lines.empty():
                     now = self.clock()
@@ -236,12 +242,16 @@ class LiveRunner:
                                 part["media_started_at"] = time.time()
                                 part["anchor_source"] = "first_media_growth_estimate"
                                 session.save()
+                                if media_clock and features.clock_source:
+                                    media_clock.start(lambda engine=engine, directory=directory:engine.clock_metadata(directory))
                             if timeout and deadline is None:
                                 deadline = now + timeout
                         last_size, last_check = size, now
                         if shutil.disk_usage(session.media).free < minimum:
                             stop_requested = "disk_full"
                         stall = int(config.get("LIVE_WATCHDOG_SECONDS", 60))
+                        if features.native_waiting and engine.waiting:
+                            last_activity = now
                         if now - last_activity >= stall and not warned:
                             warned = True
                             session.event("watchdog_warning", idle_seconds=now - last_activity)
@@ -267,6 +277,13 @@ class LiveRunner:
                         continue
                     if not line:
                         continue
+                    if line.startswith('LIVE_CLOCK:'):
+                        if media_clock:
+                            try:
+                                media_clock.start(json.loads(line[len('LIVE_CLOCK:'):]))
+                            except (ValueError, TypeError):
+                                session.event('clock_metadata_unavailable')
+                        continue  # Never retain signed URLs/headers as raw logs.
                     # Only media growth/progress counts; repeated error logs cannot feed the watchdog.
                     if "[download]" in line and ("%" in line or "fragment" in line.lower()):
                         last_activity = now
@@ -279,10 +296,19 @@ class LiveRunner:
                                 title = metadata.get("title") or title
                                 session.data["probe"] = metadata
                                 session.save()
+                                if metadata.get('live_status') in {'was_live', 'post_live', 'not_live'}:
+                                    warnings.append('source_no_longer_live')
+                                    stop_requested = 'error'
+                                    session.event('source_no_longer_live')
                         except ValueError:
                             pass
                     if any(value in line.lower() for value in ("403 forbidden", "login required", "drm", "private video", "unsupported url")):
                         fatal_error = True
+                    if any(value in line.lower() for value in (
+                            'failed to reload playlist', 'failed to open segment', 'error when loading first segment',
+                            'unable to download fragment', 'unable to download video data')):
+                        stream_failure = True
+                        warnings.append('stream_transport_interrupted')
                     if "ERROR" in line or "ERR]" in line or "FTL]" in line:
                         error_lines.append(line[:2000])
                         error_lines = error_lines[-16:]
@@ -315,7 +341,7 @@ class LiveRunner:
                 if cancel.is_set():
                     reason = "user"
                     break
-                if proc.returncode == 0 and not stop_requested:
+                if proc.returncode == 0 and not stop_requested and not stream_failure:
                     reason = "crash" if engine.name == "withny-dl" else "ended"
                     break
                 # Startup-only BR failures may fall back; never append yt-dlp to a BR session with media.
@@ -349,7 +375,7 @@ class LiveRunner:
                 if isinstance(engine, YtDlpEngine):
                     engine.original = [v for v in engine.original if v not in {"--live-from-start", "--no-live-from-start"}]
                     engine.original += ["--no-live-from-start"]
-                if cancel.wait(min(2 ** attempt, 10)):
+                if cancel.wait(min(10 * 2 ** (attempt - 1), 30)):
                     reason = "user"
                     break
             else:
@@ -362,6 +388,8 @@ class LiveRunner:
             if proc and proc.poll() is None:
                 forced = not process.stop(proc, self.force_kill)
         finally:
+            for media_clock, _ in clocks:
+                media_clock.stop()
             if proc:
                 self.clear_process(proc)
             if engine:
@@ -397,6 +425,8 @@ class LiveRunner:
                                     webhook_complete=webhook_complete)
             if features.annotate_report:
                 engine.annotate(report)
+            for media_clock, part in clocks:
+                media_clock.annotate(report, part)
             for file in report["files"]:
                 anchor = next((p.get("media_anchors", {}).get(str(Path(file["path"]).with_suffix("")))
                                for p in session.data["parts"]
@@ -450,7 +480,7 @@ class LiveRunner:
         if report["conclusion"] == "failed":
             status = "fail"
         elif reason == "user":
-            status = "stopped" if report["conclusion"] in {"complete", "from_earliest_available"} else "gaps"
+            status = "stopped" if report["conclusion"] in {"complete", "from_earliest_available", "cancelled_before_recording"} else "gaps"
         elif reason == "timeout":
             status = "timeout"
         elif report["conclusion"] == "gaps":

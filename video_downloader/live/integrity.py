@@ -90,8 +90,12 @@ class IntegrityChecker:
                 rate = str(stream.get("avg_frame_rate", "0/1")).split("/")
                 fps = number(rate[0]) / (number(rate[1], 1) or 1) if len(rate) == 2 else number(rate[0])
                 limits[str(stream.get("index"))] = max(1, 5 / fps) if fps else (1 if stream.get("codec_type") == "audio" else 5)
-            if any(t["max_gap"] > limits.get(key, 1) or t["backwards"] for key, t in result["timestamps"].items()):
+            if any(t['backwards'] for t in result['timestamps'].values()):
                 result["errors"].append("timestamp_discontinuity")
+            elif any(t['max_gap'] > limits.get(key, 1) for key, t in result['timestamps'].items()):
+                # A forward gap leaves a playable recording with missing media.
+                # Preserve it as usable and report gaps rather than corruption.
+                result['warnings'].append('timestamp_discontinuity')
             for start in sorted({0, max(0, result["duration"] - 10)}):
                 decode = subprocess.run(
                     [self.ffmpeg, "-hide_banner", "-v", "error", "-nostdin", "-ss", str(start), "-i", str(path),
@@ -117,15 +121,16 @@ class IntegrityChecker:
             {s.get("codec_type") for file in files for s in file.get("streams", []) if not s.get("attached_pic")})
         if missing_pair:
             issues.append("missing_track_pair")
-        if any(file.get("warnings") for file in files):
-            issues.append("decode_boundary_diagnostics")
+        issues.extend(dict.fromkeys(w for file in files for w in file.get('warnings', [])))
         if retries:
             issues.append("recording_restarted_possible_gap")
         if forced:
             issues.append("forced_termination")
         if not webhook_complete:
             issues.append("webhook_close_not_confirmed")
-        if reason in {"crash", "error", "disk_full", "watchdog"}:
+        if reason == 'user' and not files:
+            conclusion = 'cancelled_before_recording'
+        elif reason in {"crash", "error", "disk_full", "watchdog"}:
             conclusion = "failed"
         elif not usable or missing_pair:
             conclusion = "failed"

@@ -116,7 +116,7 @@ def collect(context, transport, stop, emit, stats):
     if not view:
         raise ValueError("niconico_ndgr_view_unavailable")
     seen, order, futures = set(), deque(), set()
-    at = None
+    at = 'now'
     cutoff = stats.get("latest_server_utc", time.time() - 30) - 2
     def accept(message):
         event = normalize(message, room, time.time())

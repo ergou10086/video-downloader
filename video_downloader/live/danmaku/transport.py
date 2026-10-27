@@ -69,7 +69,9 @@ class Transport:
     def stream(self, url):
         with self.client.stream("GET", url, timeout=library("httpx").Timeout(10, read=40)) as response:
             response.raise_for_status()
-            yield response.iter_bytes(chunk_size=4096)
+            # Small protobuf entries must be delivered immediately. A fixed
+            # chunk size buffers low-volume live streams until the buffer fills.
+            yield response.iter_bytes()
 
     def socket(self, url, *, origin=None):
         params = {"timeout": 1, "header": ["User-Agent: " + self.headers["User-Agent"]],
