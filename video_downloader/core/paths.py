@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import shutil
+import sys
 import tempfile
 from pathlib import Path
 
@@ -220,6 +221,13 @@ class AppPaths:
             roots.append(self.app_dir)
             if legacy_markers[0].is_dir():
                 roots.append(legacy_markers[0])
+        # Application-authored plugins are source assets, not downloaded runtime
+        # dependencies. Keep the same discovery root in portable/frozen builds.
+        resource_root = (Path(sys._MEIPASS) if getattr(sys, '_MEIPASS', None)
+                         else self.app_dir / 'resource')
+        bundled_plugins = resource_root / 'yt-dlp-plugins'
+        if bundled_plugins.is_dir() and bundled_plugins not in roots:
+            roots.append(bundled_plugins)
         return tuple(roots or (self.dependency_dir,))
 
     def subprocess_env(self, base: dict[str, str] | None = None) -> dict[str, str]:

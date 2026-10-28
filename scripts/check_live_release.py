@@ -12,7 +12,7 @@ from video_downloader.live.danmaku.dependencies import self_check
 
 def check(root=ROOT):
     root = Path(root)
-    lock = json.loads((root / "dependency/live-python.lock.json").read_text(encoding="utf-8"))
+    lock = json.loads((root / "resource/dependencies/live-python.lock.json").read_text(encoding="utf-8"))
     runtime = root / "dependency/live-python"
     result = self_check()
     result["installed_lock"] = json.loads((runtime / "installed.json").read_text(encoding="utf-8")) == lock

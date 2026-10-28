@@ -7,7 +7,7 @@ project_root = Path(SPECPATH)
 sys.path.insert(0, str(project_root / "dependency" / "live-python"))
 entry_script = project_root / "视频下载工具v2.6.0-GUI.py"
 resource_root = project_root / "resource"
-plugin_root = project_root / "dependency" / "yt-dlp-plugins"
+plugin_root = resource_root / "yt-dlp-plugins"
 packaging_deps = project_root / "build" / "packaging-deps"
 
 datas = [
@@ -15,7 +15,7 @@ datas = [
     (str(project_root / "dependency" / "pysubs2.LICENSE"), "licenses"),
     (str(project_root / "dependency" / "defusedxml.LICENSE"), "licenses"),
     (str(project_root / "dependency" / "NDGR-protocol.LICENSE"), "licenses"),
-    (str(project_root / "dependency" / "live-python.lock.json"), "licenses"),
+    (str(resource_root / "dependencies" / "live-python.lock.json"), "licenses"),
     (str(resource_root / "templates"), "templates"),
     (str(resource_root / "static"), "static"),
     (str(plugin_root), "yt-dlp-plugins"),

@@ -24,6 +24,6 @@ Version: 0.7.1; license: Python Software Foundation License
 Source: https://github.com/tiran/defusedxml
 License text: dependency/defusedxml.LICENSE
 
-Pinned official PyPI wheel URLs and SHA256 values: dependency/live-python.lock.json.
+Pinned official PyPI wheel URLs and SHA256 values: resource/dependencies/live-python.lock.json.
 Portable source installs use dependency/live-python/; PyInstaller includes these
 Python modules and the license texts above. No new GPL component is embedded.

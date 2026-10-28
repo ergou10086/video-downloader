@@ -28,6 +28,7 @@ def twitcasting_hls_fallback_args(tool_dir, *, force_ffmpeg=True):
     configured_plugin_dirs = paths.plugin_dirs()
     plugin_root = None
     for candidate in (
+        tool_dir / 'resource',
         paths.dependency_dir,
         tool_dir,
         Path(sys._MEIPASS) if getattr(sys, "_MEIPASS", None) else None,
@@ -67,7 +68,8 @@ def _browser_cookie_spec(cfg):
 def niconico_live_mux_args(paths):
     import sys
     relative = Path('yt-dlp-plugins/video_downloader/yt_dlp_plugins/postprocessor/niconico_live_mux.py')
-    candidates = [*paths.plugin_dirs(), Path(__file__).resolve().parents[2] / 'dependency']
+    candidates = [paths.app_dir / 'resource', *paths.plugin_dirs(),
+                  Path(__file__).resolve().parents[2] / 'resource']
     if getattr(sys, '_MEIPASS', None):
         candidates.insert(0, Path(sys._MEIPASS))
     root = next((root for root in candidates if (root / relative).is_file()), None)

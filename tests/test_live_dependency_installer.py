@@ -17,6 +17,7 @@ class LiveDependencyTests(unittest.TestCase):
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
         (self.root/'dependency').mkdir()
+        (self.root/'resource/dependencies').mkdir(parents=True)
 
     def fixture(self, filename='package/__init__.py', *, url='https://files.pythonhosted.org/package.whl', digest=None):
         buffer = io.BytesIO()
@@ -24,7 +25,7 @@ class LiveDependencyTests(unittest.TestCase):
             archive.writestr(filename,'value=1')
         data = buffer.getvalue()
         lock = {'packages':[{'name':'package','version':'1','url':url,'sha256':digest or hashlib.sha256(data).hexdigest()}]}
-        (self.root/'dependency/live-python.lock.json').write_text(json.dumps(lock),encoding='utf-8')
+        (self.root/'resource/dependencies/live-python.lock.json').write_text(json.dumps(lock),encoding='utf-8')
         return data
 
     def test_verified_wheel_install_is_idempotent_and_preserves_source_metadata(self):
@@ -41,7 +42,7 @@ class LiveDependencyTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError,'checksum'):
                 install(self.root)
         self.assertFalse((self.root/'dependency/live-python').exists())
-        self.assertEqual(len(list((self.root/'dependency').iterdir())),1)
+        self.assertEqual(len(list((self.root/'dependency').iterdir())),0)
 
     def test_zip_traversal_and_unofficial_hosts_are_rejected(self):
         data=self.fixture('../outside.py')
@@ -67,10 +68,10 @@ class LiveDependencyTests(unittest.TestCase):
         data=self.fixture()
         with patch('scripts.install_live_dependencies.urlopen',return_value=io.BytesIO(data)):
             target=install(self.root)
-        lock=json.loads((self.root/'dependency/live-python.lock.json').read_text())
+        lock=json.loads((self.root/'resource/dependencies/live-python.lock.json').read_text())
         payload=b'# generated definition\n'
         lock['assets']=[{'path':'ndgr_client/proto/payload.py','url':'https://raw.githubusercontent.com/owner/repo/commit/file.py','sha256':hashlib.sha256(payload).hexdigest()}]
-        (self.root/'dependency/live-python.lock.json').write_text(json.dumps(lock),encoding='utf-8')
+        (self.root/'resource/dependencies/live-python.lock.json').write_text(json.dumps(lock),encoding='utf-8')
         with patch('scripts.install_live_dependencies.urlopen',side_effect=[io.BytesIO(data),io.BytesIO(payload)]):
             install(self.root,upgrade=True)
         self.assertEqual((target/'ndgr_client/proto/payload.py').read_bytes(),payload)

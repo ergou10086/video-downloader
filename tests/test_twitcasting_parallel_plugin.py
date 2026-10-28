@@ -9,7 +9,7 @@ from unittest import mock
 YTDLP_AVAILABLE = importlib.util.find_spec("yt_dlp") is not None
 PLUGIN_PATH = (
     Path(__file__).parents[1]
-    / "dependency"
+    / "resource"
     / "yt-dlp-plugins"
     / "video_downloader"
     / "yt_dlp_plugins"

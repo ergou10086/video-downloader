@@ -7,6 +7,13 @@ from video_downloader.core.paths import AppPaths
 
 
 class AppPathsTests(unittest.TestCase):
+    def test_source_plugins_are_discovered_without_runtime_dependencies(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            plugins = root / 'resource/yt-dlp-plugins'
+            plugins.mkdir(parents=True)
+            self.assertEqual(AppPaths(root).plugin_dirs(), (plugins,))
+
     def test_runtime_directories_use_clean_layout(self):
         with tempfile.TemporaryDirectory() as directory:
             paths = AppPaths(directory)

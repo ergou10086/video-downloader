@@ -30,7 +30,8 @@ def replace_directory(source, target):
 
 def install(root, *, upgrade=False):
     root = Path(root)
-    lock = json.loads((root / "dependency/live-python.lock.json").read_text(encoding="utf-8"))
+    lock = json.loads((root / "resource/dependencies/live-python.lock.json").read_text(encoding="utf-8"))
+    (root / "dependency").mkdir(parents=True, exist_ok=True)
     target = root / "dependency/live-python"
     if target.exists():
         if (target / "installed.json").read_text(encoding="utf-8") == json.dumps(lock, indent=2):

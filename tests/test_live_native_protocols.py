@@ -13,7 +13,7 @@ ROOT=Path(__file__).resolve().parents[1]
 
 
 def load_plugin(kind,name):
-    path=ROOT/'dependency/yt-dlp-plugins/video_downloader/yt_dlp_plugins'/kind/(name+'.py')
+    path=ROOT/'resource/yt-dlp-plugins/video_downloader/yt_dlp_plugins'/kind/(name+'.py')
     spec=importlib.util.spec_from_file_location('release_'+name,path)
     module=importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)

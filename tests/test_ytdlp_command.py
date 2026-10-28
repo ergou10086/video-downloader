@@ -10,6 +10,17 @@ from video_downloader.core.platform import detect_platform
 
 
 class YtdlpCommandTests(unittest.TestCase):
+    def test_twitcasting_uses_source_assets_without_downloaded_plugins(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            plugin = root / 'resource/yt-dlp-plugins/video_downloader/yt_dlp_plugins/postprocessor/twitcasting_parallel.py'
+            plugin.parent.mkdir(parents=True)
+            plugin.touch()
+            command = build_ytdlp_cmd('https://twitcasting.tv/user/movie/123', DEFAULT_CONFIG,
+                                      root, platform_override='TwitCasting')
+            self.assertIn('TwitCastingParallelHls:when=before_dl', command)
+            self.assertIn(str(root / 'resource/yt-dlp-plugins'), command)
+
     def test_custom_args_parser_preserves_quoted_values(self):
         self.assertEqual(
             parse_custom_ytdlp_args('--add-header "Referer: https://example.com/a b" --sleep-requests 1'),
