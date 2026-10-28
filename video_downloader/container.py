@@ -611,6 +611,8 @@ class AppContainer:
                 clean_temp=clean_temp,
                 gen_url_template=gen_url_template,
                 wav_to_mp3=wav_to_mp3,
+                audio_convert=tool_service.audio_convert,
+                stop_audio_tool=tool_service.stop_audio_tool,
                 audio_loudnorm=audio_loudnorm,
                 audio_volume=audio_volume,
                 request_exit=request_exit,

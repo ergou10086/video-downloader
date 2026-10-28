@@ -370,8 +370,9 @@ function applyConfig(s) {
   if(s.BILI_MULTIP_POLICY !== undefined) $('s_bili_policy').value = s.BILI_MULTIP_POLICY;
   // 音频输出格式设置（audio-convert.js 负责 UI 初始化）
   if(s.AUDIO_OUTPUT_FORMAT !== undefined && $('audioOutFormat')) $('audioOutFormat').value = s.AUDIO_OUTPUT_FORMAT;
-  setSwitch('sw_audioDelSrc', s.DEL_SRC_AFTER_CONVERT);
+  setSwitch('sw_audioDelSrc', false); // Destructive choice is explicit for each session.
   setSwitch('sw_audioRecursive', s.AUDIO_RECURSIVE);
+  if(typeof updateAudioQualityUI === 'function') updateAudioQualityUI();
   toggleCookieMode();
   paintRange($('s_threads'));
   paintRange($('s_speed'));
@@ -1745,12 +1746,16 @@ function connectSSE() {
     const evt = JSON.parse(e.data);
     if(evt.type === 'log') {
       addLog(evt.data);
+    } else if(evt.type === 'audio_tool_result') {
+      showToolStatus(evt.data.message, evt.data.level === 'success' ? 'success' : 'error');
+      showToast(evt.data.message, evt.data.level);
     } else if(evt.type === 'progress') {
       if(evt.task_id) return;
       renderProgress(evt.data);
     } else if(evt.type === 'download_state') {
       if(evt.task_id) return;
       const d = evt.data;
+      syncAudioToolState(d);
       download_running = Boolean(d.running);
       downloadGeneration = d.generation;
       $('btnStart').disabled = download_running || d.phase === 'suspended';
@@ -1799,6 +1804,7 @@ function connectSSE() {
     } else if(evt.type === 'ready') {
       taskSnapshotVersion++;
       const readyData = Array.isArray(evt.data) ? {logs:evt.data, running:false} : evt.data;
+      syncAudioToolState(readyData);
       downloadGeneration = readyData.generation;
       (readyData.logs || []).forEach(e => addLog(e));
       download_running = Boolean(readyData.running);

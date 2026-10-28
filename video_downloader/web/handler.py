@@ -68,6 +68,8 @@ class HttpHandlerDependencies:
     list_live_recordings: object = None
     get_live_report: object = None
     export_live_comments: object = None
+    audio_convert: object = None
+    stop_audio_tool: object = None
 
 
 def create_handler(dependencies):
@@ -191,6 +193,7 @@ def create_handler(dependencies):
                     "running": download_snapshot["running"],
                     "phase": download_snapshot["phase"],
                     "generation": download_snapshot["generation"],
+                    "kind": download_snapshot.get("kind"),
                     "progress": dict(dependencies.app_state.progress_data),
                     "stats": dict(dependencies.app_state.batch_stats),
                     "archive_prompt": dependencies.app_state.archive_prompt,
@@ -489,6 +492,24 @@ def create_handler(dependencies):
                 self._json(dependencies.clean_temp())
             elif path == "/api/gen-template":
                 self._json(dependencies.gen_url_template())
+            elif path == "/api/audio-stop":
+                self._json(dependencies.stop_audio_tool() if dependencies.stop_audio_tool
+                           else {"error": "音频工具未配置"})
+            elif path == "/api/audio-convert":
+                fields = {
+                    'dir': (str, ''), 'recursive': (bool, False),
+                    'output_format': (str, 'mp3'), 'del_src': (bool, False),
+                    'bitrate': ((str, int), '320k'),
+                    'compression_level': (int, 5), 'quality': ((int, float), 7),
+                }
+                values = {}
+                for key, (kind, default) in fields.items():
+                    values[key] = self._field(data, key, kind, default)
+                    if values[key] is None:
+                        return
+                directory = values.pop('dir')
+                self._json(dependencies.audio_convert(directory, **values) if dependencies.audio_convert
+                           else {"error": "音频转换工具未配置"})
             elif path == "/api/wav2mp3":
                 directory = self._field(data, "dir", str, "")
                 if directory is None:

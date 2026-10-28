@@ -113,6 +113,7 @@ def validate_config(values, base=None):
         "BILI_MULTIP_POLICY": BILI_POLICY_OPTIONS,
         "AUDIO_MODE": AUDIO_MODE_OPTIONS,
         "AUDIO_FORMAT": AUDIO_FORMAT_OPTIONS,
+        "AUDIO_OUTPUT_FORMAT": ["mp3", "aac", "wav", "flac", "ogg", "opus", "wma", "ac3", "alac"],
         "LIVE_STREAM_METHOD": LIVE_STREAM_METHOD_OPTIONS,
         "LIVE_MODE": LIVE_MODE_OPTIONS,
         "LIVE_DANMAKU_FORMATS": ["srt", "ass", "srt,ass"],
@@ -140,7 +141,7 @@ def validate_config(values, base=None):
         "DOWNLOAD_THUMB", "DOWNLOAD_SUBTITLES", "WIN_FILENAMES", "STRICT_FILENAME",
         "NICO_COMMENTS", "NICO_RECODE", "ENABLE_LOG", "DEL_WAV_AFTER_CONVERT",
         "YOUTUBE_PO_TOKEN_ENABLED", "TC_REMEMBER_PASSWORD", "TC_SAVE_PASSWORD_XLSX",
-        "TASK_MIXED_PARALLEL",
+        "TASK_MIXED_PARALLEL", "AUDIO_RECURSIVE",
         "LIVE_DANMAKU_ENABLED", "LIVE_DANMAKU_ANONYMIZE",
     }
     for key, value in values.items():

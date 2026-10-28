@@ -437,17 +437,17 @@
           </div>
           <div class="cols" style="gap:14px 44px">
             <div class="colstack" style="gap:12px">
-              <div class="row"><span class="lb">源文件目录</span><input type="text" class="ctl mono" id="audioDir" style="flex:1" placeholder="选择或输入音频目录…"><button class="btn sm" onclick="browseAudioDir()"><svg class="ico s14"><use href="#i-folder-open"></use></svg>浏览</button></div>
-              <div class="row"><span class="lb">目标格式</span><span class="sel"><select class="ctl" id="audioOutFormat"></select><svg class="ico s14 cv"><use href="#i-chevron"></use></svg></span></div>
-              <div class="row" id="audioQualityRow"><span class="lb">质量参数</span><span class="sel"><select class="ctl" id="audioQuality"></select><svg class="ico s14 cv"><use href="#i-chevron"></use></svg></span></div>
+              <div class="row"><span class="lb">源文件目录</span><input type="text" class="ctl mono" id="audioDir" aria-label="音频转换源目录" style="flex:1" placeholder="选择或输入音频目录…"><button class="btn sm" onclick="browseAudioDir()"><svg class="ico s14"><use href="#i-folder-open"></use></svg>浏览</button></div>
+              <div class="row"><span class="lb">目标格式</span><span class="sel"><select class="ctl" id="audioOutFormat" aria-label="音频转换目标格式"></select><svg class="ico s14 cv"><use href="#i-chevron"></use></svg></span></div>
+              <div class="row" id="audioQualityRow"><span class="lb">质量参数</span><span class="sel"><select class="ctl" id="audioQuality" aria-label="音频转换质量"></select><svg class="ico s14 cv"><use href="#i-chevron"></use></svg></span></div>
             </div>
             <div class="colstack" style="gap:12px">
-              <div class="row"><span class="lb">包含子目录</span><span class="sw" id="sw_audioRecursive" onclick="toggleSwitch(this)"><i></i></span></div>
-              <div class="row"><span class="lb">转换后删除源文件</span><span class="sw" id="sw_audioDelSrc" onclick="toggleSwitch(this)"><i></i></span></div>
+              <div class="row"><span class="lb">包含子目录</span><span class="sw" id="sw_audioRecursive" role="switch" aria-label="转换包含子目录" aria-checked="false" tabindex="0" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();this.click()}" onclick="toggleSwitch(this)"><i></i></span></div>
+              <div class="row"><span class="lb">转换后删除源文件</span><span class="sw" id="sw_audioDelSrc" role="switch" aria-label="转换后删除源文件" aria-checked="false" tabindex="0" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();this.click()}" onclick="toggleSwitch(this)"><i></i></span></div>
             </div>
           </div>
           <div class="pfoot">
-            <span class="hint">无损格式（WAV / FLAC / ALAC）无需设置质量参数。</span>
+            <span class="hint">转换结果保存在源文件旁；已有文件跳过。删除源文件前会验证音轨并完整解码输出。</span>
             <button class="btn pri" onclick="startAudioConvert()"><svg class="ico s14"><use href="#i-play"></use></svg>开始转换</button>
           </div>
         </div>
@@ -461,22 +461,22 @@
           </div>
           <div class="cols" style="gap:14px 44px">
             <div class="colstack" style="gap:12px">
-              <div class="row"><span class="lb">源文件目录</span><input type="text" class="ctl mono" id="loudnormDir" style="flex:1" placeholder="选择或输入音频目录…"><button class="btn sm" onclick="browseLoudnormDir()"><svg class="ico s14"><use href="#i-folder-open"></use></svg>浏览</button></div>
-              <div class="row"><span class="lb">处理模式</span><span class="sel"><select class="ctl" id="loudnormMode"><option value="single">单次标准处理 — 速度快</option><option value="double">双次精准处理 — 先分析后处理</option></select><svg class="ico s14 cv"><use href="#i-chevron"></use></svg></span></div>
-              <div class="row"><span class="lb">输出格式</span><span class="sel"><select class="ctl" id="loudnormOutFormat"></select><svg class="ico s14 cv"><use href="#i-chevron"></use></svg></span></div>
-              <div class="row"><span class="lb">输出目录</span><input type="text" class="ctl" id="loudnormOutDir" style="flex:1" placeholder="留空 = 源目录下 loudnorm_output/"></div>
-              <div class="row"><span class="lb">包含子目录</span><span class="sw" id="sw_loudnormRecursive" onclick="toggleSwitch(this)"><i></i></span></div>
+              <div class="row"><span class="lb">源文件目录</span><input type="text" class="ctl mono" id="loudnormDir" aria-label="响度统一源目录" style="flex:1" placeholder="选择或输入音频目录…"><button class="btn sm" onclick="browseLoudnormDir()"><svg class="ico s14"><use href="#i-folder-open"></use></svg>浏览</button></div>
+              <div class="row"><span class="lb">处理模式</span><span class="sel"><select class="ctl" id="loudnormMode" aria-label="响度处理模式"><option value="single">单次标准处理 — 速度快</option><option value="double">双次精准处理 — 先分析后处理</option></select><svg class="ico s14 cv"><use href="#i-chevron"></use></svg></span></div>
+              <div class="row"><span class="lb">输出格式</span><span class="sel"><select class="ctl" id="loudnormOutFormat" aria-label="响度输出格式"></select><svg class="ico s14 cv"><use href="#i-chevron"></use></svg></span></div>
+              <div class="row"><span class="lb">输出目录</span><input type="text" class="ctl" id="loudnormOutDir" aria-label="响度输出目录" style="flex:1" placeholder="留空 = 源目录下 loudnorm_output/"></div>
+              <div class="row"><span class="lb">包含子目录</span><span class="sw" id="sw_loudnormRecursive" role="switch" aria-label="响度处理包含子目录" aria-checked="false" tabindex="0" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();this.click()}" onclick="toggleSwitch(this)"><i></i></span></div>
             </div>
             <div class="colstack" style="gap:12px">
-              <div class="row"><span class="lb">目标响度 I</span><input type="range" id="loudnormI" min="-70" max="-5" value="-24" step="0.5"><span class="rval" id="loudnormIVal">-24 LUFS</span></div>
+              <div class="row"><span class="lb">目标响度 I</span><input type="range" id="loudnormI" aria-label="目标综合响度" min="-70" max="-5" value="-24" step="0.5"><span class="rval" id="loudnormIVal">-24 LUFS</span></div>
               <div class="sub-hint">广播标准 -23 LUFS，流媒体常用 -16 ~ -14 LUFS</div>
-              <div class="row"><span class="lb">响度范围 LRA</span><input type="range" id="loudnormLRA" min="1" max="20" value="7" step="0.5"><span class="rval" id="loudnormLRAVal">7 LU</span></div>
-              <div class="row"><span class="lb">真峰值上限 TP</span><input type="range" id="loudnormTP" min="-9" max="0" value="-2" step="0.5"><span class="rval" id="loudnormTPVal">-2 dBTP</span></div>
+              <div class="row"><span class="lb">响度范围 LRA</span><input type="range" id="loudnormLRA" aria-label="目标响度范围" min="1" max="20" value="7" step="0.5"><span class="rval" id="loudnormLRAVal">7 LU</span></div>
+              <div class="row"><span class="lb">真峰值上限 TP</span><input type="range" id="loudnormTP" aria-label="目标真峰值" min="-9" max="0" value="-2" step="0.5"><span class="rval" id="loudnormTPVal">-2 dBTP</span></div>
               <div class="sub-hint">EBU R128 为 -2 dBTP，CD 母带常用 -1 dBTP</div>
             </div>
           </div>
           <div class="pfoot">
-            <span class="hint">支持 MP3 / WAV / FLAC / AAC / OGG / Opus，双次模式会先分析实际响度再精准归一化。</span>
+            <span class="hint">支持 MP3 / WAV / FLAC / AAC / OGG / Opus，双次模式先分析再处理；静音无法测量时回退单次。APE 输入请改选 FLAC。</span>
             <button class="btn pri" onclick="startAudioLoudnorm()"><svg class="ico s14"><use href="#i-play"></use></svg>开始处理</button>
           </div>
         </div>
@@ -490,15 +490,15 @@
           </div>
           <div class="cols" style="gap:14px 44px">
             <div class="colstack" style="gap:12px">
-              <div class="row"><span class="lb">源文件目录</span><input type="text" class="ctl mono" id="volumeDir" style="flex:1" placeholder="选择或输入音频目录…"><button class="btn sm" onclick="browseVolumeDir()"><svg class="ico s14"><use href="#i-folder-open"></use></svg>浏览</button></div>
-              <div class="row"><span class="lb">输出格式</span><span class="sel"><select class="ctl" id="volumeOutFormat"></select><svg class="ico s14 cv"><use href="#i-chevron"></use></svg></span></div>
-              <div class="row"><span class="lb">输出目录</span><input type="text" class="ctl" id="volumeOutDir" style="flex:1" placeholder="留空 = 源目录下 volume_output/"></div>
-              <div class="row"><span class="lb">包含子目录</span><span class="sw" id="sw_volumeRecursive" onclick="toggleSwitch(this)"><i></i></span></div>
+              <div class="row"><span class="lb">源文件目录</span><input type="text" class="ctl mono" id="volumeDir" aria-label="音量调整源目录" style="flex:1" placeholder="选择或输入音频目录…"><button class="btn sm" onclick="browseVolumeDir()"><svg class="ico s14"><use href="#i-folder-open"></use></svg>浏览</button></div>
+              <div class="row"><span class="lb">输出格式</span><span class="sel"><select class="ctl" id="volumeOutFormat" aria-label="音量输出格式"></select><svg class="ico s14 cv"><use href="#i-chevron"></use></svg></span></div>
+              <div class="row"><span class="lb">输出目录</span><input type="text" class="ctl" id="volumeOutDir" aria-label="音量输出目录" style="flex:1" placeholder="留空 = 源目录下 volume_output/"></div>
+              <div class="row"><span class="lb">包含子目录</span><span class="sw" id="sw_volumeRecursive" role="switch" aria-label="音量调整包含子目录" aria-checked="false" tabindex="0" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();this.click()}" onclick="toggleSwitch(this)"><i></i></span></div>
             </div>
             <div class="colstack" style="gap:12px">
-              <div class="row"><span class="lb">音量增益</span><input type="range" id="volumeGain" min="-30" max="30" value="0" step="0.5"><span class="rval" id="volumeGainVal">0.0 dB</span></div>
+              <div class="row"><span class="lb">音量增益</span><input type="range" id="volumeGain" aria-label="音量增益" min="-30" max="30" value="0" step="0.5"><span class="rval" id="volumeGainVal">0.0 dB</span></div>
               <div class="sub-hint">正增益建议 ≤ +6 dB，过大会削波失真；负增益安全无失真。</div>
-              <div class="row" id="volumeLimiterRow" style="display:none"><span class="lb">限幅器保护</span><span class="sw on" id="sw_volumeLimiter" onclick="toggleSwitch(this)"><i></i></span><span class="hint">前瞻限幅 alimiter，峰值不超过 -0.1 dBTP</span></div>
+              <div class="row" id="volumeLimiterRow" style="display:none"><span class="lb">限幅器保护</span><span class="sw on" id="sw_volumeLimiter" role="switch" aria-label="启用音量限幅器" aria-checked="true" tabindex="0" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();this.click()}" onclick="toggleSwitch(this)"><i></i></span><span class="hint">采样峰值限幅 -0.1 dBFS；有损编码后的真峰值可能更高</span></div>
             </div>
           </div>
           <div class="pfoot">
@@ -507,7 +507,8 @@
           </div>
         </div>
 
-        <div class="tool-status" id="toolStatus" style="display:none"></div>
+        <div class="tool-status" id="toolStatus" style="display:none" role="status" aria-live="polite"></div>
+        <button class="btn sm" id="btnAudioStop" onclick="stopAudioTool()" disabled>停止音频工具</button>
 
         <div class="console" id="toolConsole">
           <div class="chead">

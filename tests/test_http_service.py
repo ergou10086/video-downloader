@@ -100,6 +100,30 @@ def make_dependencies(exit_event):
 
 
 class HttpServiceTests(unittest.TestCase):
+    def test_audio_converter_routes_validate_fields_and_ignore_client_codec(self):
+        converter = Mock(return_value={"ok": True, "total": 1})
+        stop = Mock(return_value={"ok": True})
+        self.service.stop()
+        self.dependencies = replace(self.dependencies, audio_convert=converter, stop_audio_tool=stop)
+        self.service = HttpService(lambda: create_handler(self.dependencies), port=0)
+        self.service.start()
+        self.url = f"http://127.0.0.1:{self.service.port}"
+        payload = {"dir": "中文 目录", "output_format": "alac", "codec": "injected", "del_src": False}
+        status, body, _ = self.request('/api/audio-convert', method='POST', payload=payload)
+        self.assertEqual(status, 200)
+        self.assertTrue(json.loads(body)['ok'])
+        self.assertNotIn('codec', converter.call_args.kwargs)
+        self.assertEqual(converter.call_args.args, ('中文 目录',))
+        for invalid in ({"dir": 1}, {"recursive": "false"}, {"del_src": "false"}, {"bitrate": True}):
+            with self.assertRaises(HTTPError) as error:
+                self.request('/api/audio-convert', method='POST', payload=invalid)
+            self.assertEqual(error.exception.code, 400)
+        with self.assertRaises(HTTPError) as error:
+            self.request('/api/audio-convert', method='POST', payload=payload, token=False)
+        self.assertEqual(error.exception.code, 403)
+        self.request('/api/audio-stop', method='POST', payload={})
+        stop.assert_called_once_with()
+
     def test_comment_reexport_requires_auth_and_valid_json_fields(self):
         export = Mock(return_value={"ok": True, "comments": {"status": "partial"}})
         self.service.stop()
