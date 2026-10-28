@@ -35,9 +35,6 @@ LEGACY_DEPENDENCY_ITEMS = (
     "nicochannel.zip",
     "yt-dlp-plugins",
     "bgutil-ytdlp-pot-provider",
-    "node_modules",
-    "package.json",
-    "package-lock.json",
 )
 
 LEGACY_DOWNLOAD_DIRS = (*DOWNLOAD_PLATFORM_DIRS, "converted", "logs")

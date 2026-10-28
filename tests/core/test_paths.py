@@ -7,6 +7,22 @@ from video_downloader.core.paths import AppPaths
 
 
 class AppPathsTests(unittest.TestCase):
+    def test_runtime_setup_does_not_move_unrelated_npm_projects_into_dependencies(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            module = root / 'node_modules' / 'framer-motion' / 'index.js'
+            module.parent.mkdir(parents=True)
+            module.write_text('unrelated frontend experiment', encoding='utf-8')
+            for name in ('package.json', 'package-lock.json'):
+                (root / name).write_text('{}', encoding='utf-8')
+            paths = AppPaths(root)
+            paths.ensure_runtime_dirs()
+            self.assertTrue(module.is_file())
+            self.assertFalse((paths.dependency_dir / 'node_modules').exists())
+            for name in ('package.json', 'package-lock.json'):
+                self.assertTrue((root / name).is_file())
+                self.assertFalse((paths.dependency_dir / name).exists())
+
     def test_source_plugins_are_discovered_without_runtime_dependencies(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
