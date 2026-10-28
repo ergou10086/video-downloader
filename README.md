@@ -1,9 +1,12 @@
 # 多平台视频下载工具 v2.6.0 WebUI
+
 支持 YouTube / Bilibili / Twitch / Niconico / NicoChannel / Fantia / TwitCasting / Twitter 八个平台的视频/直播下载，并提供 Withny 已授权历史存档 HAR 保存及直播监控录制功能。Release 的 EXE 绿色版无需安装 Python；源码运行版使用 Python 3 启动。
 
-![Version](https://img.shields.io/badge/version-v2.6.0%20WebUI-purple) ![Platform](https://img.shields.io/badge/platform-Windows-blue) ![License](https://img.shields.io/badge/license-MIT-green)
+![Version](https://img.shields.io/badge/version-v2.6.0%20WebUI-purple)
+![Platform](https://img.shields.io/badge/platform-Windows-blue)
+![License](https://img.shields.io/badge/license-MIT-green)
 
-> v2.6.0 由 [猫猫葉汐A_spy（@maomaoyexi）](https://github.com/maomaoyexi) 完成 YouTube、Bilibili、Twitch、Niconico、NicoChannel、TwitCasting、Twitter/X Spaces 直播入口识别、直播录制策略、断流处理与实时状态展示，以及任务页「本次 yt-dlp 参数」和「直播录制设置」两个按钮及相关设置功能、Cookie 模板修复、TwitCasting 密码表与失效记录清理、HLS 回退、下载完成后 `.ytdl` 清理、回归测试及相关文档整理；[ErgouTree（@ergou10086）](https://github.com/ergou10086) 完成 PR #15 的下载归档选择、独立批量封面及 PO Token Provider 启动改进。
+> v2.5.0 由 [DarkKandaoMaster](https://github.com/DarkKandaoMaster) 重构 WebUI 视觉与交互体系；[ErgouTree (@ergou10086)](https://github.com/ergou10086) 完善设置控件、TwitCasting 下载与进度、YouTube PO Token Provider 集成及运行目录收拢。本版同时支持自定义 yt-dlp 参数，并修复关闭代理后仍可能继承系统代理的问题。
 
 ## ✨ 功能特性
 
@@ -11,16 +14,15 @@
 - 🎬 **八平台支持** - YouTube、Bilibili、Twitch、Niconico、NicoChannel、Fantia、TwitCasting、Twitter，自动识别平台
 - 📦 **Withny 支持** - 从 HAR 保存已授权历史存档，也可通过 withny-dl 配置监控和录制直播
 - 📺 **Bilibili 支持** - 支持普通视频、直播和多 P 分集选择
-- 🎮 **直播录制** - 支持 YouTube、Bilibili、Twitch、Niconico、NicoChannel、TwitCasting、Twitter/X Spaces 直播识别、录制和实时状态；Withny 另提供独立监控录制。本版跨平台直播录制由 [猫猫葉汐A_spy（@maomaoyexi）](https://github.com/maomaoyexi) 实现与维护
+- 🎮 **直播录制** - 支持直播模式选择（自动/追开播/从当前时刻/蹲开播）；开始前按平台检查直播状态并提示开播时间/已开播时长，蹲开播会在开播后自动开始录制
+- 🗂️ **任务模式** - 一次点击创建一个任务；支持 1–5 个任务并行（默认 2），任务内直播与视频使用独立并发额度，并支持网络检测后应用高性能/高可靠配置
 - 💾 **配置预设** - 保存常用设置组合，一键切换
 - 📜 **下载历史** - 自动记录每次下载，最多500条
-- 📂 **下载归档选择** - 命中归档时可选择重新下载或跳过，20 秒未选择默认跳过；跳过单独计数
 - 🔄 **断点续传** - 默认启用，网络中断后自动续传
 - 📊 **批量下载** - 支持从TXT文件批量导入链接
 - ⌨️ **命令行模式** - 支持直接传入 URL 或通过 `--batch` 批量下载
 - 🧾 **多行链接** - 下载页可直接粘贴多行 URL，按顺序加入批量队列
 - 🖼️ **封面处理** - 下载独立 JPG 封面，并在兼容格式中自动嵌入
-- 🖼️ **独立批量封面** - 可仅下载多个视频的封面，沿用视频命名规则，不写入下载归档
 - **字幕下载** - 支持普通下载附带字幕及独立多链接字幕下载，默认关闭，开启后默认中文
 - 🎵 **MP3 音频下载** - 支持在下载视频时单独保存 MP3 音频
 - 🍪 **Cookie支持** - 支持cookies.txt文件模式
@@ -28,7 +30,7 @@
 - 🧩 **自定义 yt-dlp 参数** - 支持仅本次任务参数与每次下载默认参数
 - ⚡ **硬件加速** - 支持NVIDIA NVENC、Intel QSV、AMD AMF
 - 🔄 **自动更新** - 启动后通过 GitHub Releases 检查新版本，校验通过后自动更新替换
-- 🧰 **工具箱** - 提供独立字幕与封面下载、WAV转MP3、yt-dlp更新、临时文件清理等工具
+- 🧰 **工具箱** - 内置WAV转MP3、yt-dlp更新、临时文件清理等8个工具
 - 🛡️ **进程管理** - 关闭网页30秒后自动退出，无残留进程
 
 ## 🚀 快速开始
@@ -40,109 +42,91 @@
 
 > 💡 **提示**：依赖包的 `dependency/` 包含 yt-dlp.exe、ffmpeg.exe、ffprobe.exe、deno.exe、fantiadl.exe、withny-dl-windows-amd64.exe 和 `yt-dlp-plugins` 目录。NicoChannel 还需要单独准备 `nicochannel.zip` 并放入 `dependency/`。首次运行会自动生成 `download/`、归档及日志目录。
 
-若要启用 YouTube PO Token，请同时保留 `dependency/yt-dlp-plugins/bgutil-ytdlp-pot-provider.zip` 和 `dependency/bgutil-ytdlp-pot-provider/server`（含已安装的 `node_modules`）。在「设置 → 平台专项」打开 YouTube PO Token 后，程序会在 YouTube 任务开始前自动启动 Provider，并在退出工具时关闭它；无需另开 CMD。Provider 可能缓解部分 403，但不能保证绕过所有风控或登录校验。
-
-Provider 首次启动在后台准备，日志每 5 秒报告等待进度，最多等待 60 秒，期间可点击「停止」。健康检查通过后才运行 yt-dlp，后续任务复用已就绪的 Provider。启动失败会保留 Deno 错误并释放任务，修复依赖后可重试；启动过程只使用已安装的依赖，不在线安装包，也不等待控制台确认。
-
-TwitCasting 多初始化段归档会自动加载随项目提供的 `dependency/yt-dlp-plugins/video_downloader` 插件，按设置中的下载线程数并发预取 HLS 分片，再由 FFmpeg 完成本地封装；无需另装下载器。若插件缺失，程序会安全退回 FFmpeg 串行下载。
-
 ### 源码运行版
 
-保持 `视频下载工具v2.6.0-GUI.py`、`video_downloader/`、`resource/` 与 `dependency/` 位于同一目录，安装 Python 3 后运行：
+保持 `视频下载工具v2.6.0-GUI.py`、`video_downloader/` 与 `dependency/` 位于同一目录，安装 Python 3 后运行：
 
 ```powershell
 python ".\视频下载工具v2.6.0-GUI.py"
 ```
 
-源码运行版不会用下载到的 EXE 自动覆盖 Python 源码；升级源码时请手动替换主脚本、`video_downloader/` 与 `resource/` 目录。
-
-如需 EXE 绿色版，请查看 [Releases](https://github.com/maomaoyexi/video-downloader/releases) 中的 v2.6.0 正式版及其配套依赖包，并按该版本说明安装。
+源码运行版不会用下载到的 EXE 自动覆盖 Python 源码；升级源码时请手动替换主脚本与 `video_downloader/` 目录。
 
 ## 📖 使用说明
 
 ### 单视频下载
+
 1. 在「下载」页面粘贴视频链接
 2. 点击「开始下载」
 3. 实时查看进度、速度、剩余时间
 
+### 任务模式
+
+在「设置 → 任务与并发」启用任务模式后，每次点击「开始」会创建一个任务，显示在链接输入框下方的任务列表。多行链接和 TXT 批量分别归入一次点击对应的任务，Withny 专用下载/监控也进入队列。任务行按进度填充颜色，点击展开可查看每条链接的状态、历史和日志，并单独取消父任务；密码与归档确认直接在对应详情内处理，刷新页面也能恢复待确认内容。
+
+任务间默认并行 2 个，最多 5 个。任务内默认开启直播与视频并行：每个任务默认录制 2 路直播（可设 2–5 路），同时下载 1 条视频（可设 1–5 条），两类额度互不占用，避免直播和普通下载相互阻塞。关闭任务内并行开关后，全部链接按输入顺序串行。排序只影响排队任务，不中断运行中的任务；任务内设置在提交时固定，任务间并行数与排序对队列实时生效。
+
+「设置 → 网络与代理 → 快速检测网络」会按当前代理设置测量单/多连接吞吐、HTTP 首字节延迟、抖动、失败率和负载延迟，约 20 秒，最多 32 MiB 测试数据（不含协议开销）。检测完成后可预览并应用「高性能」或「高可靠」方案；高可靠保持每任务视频串行，并通过仅限普通 yt-dlp 视频的独立限速为直播留出带宽。开始检测及应用方案前需先完成或取消活跃任务。详见 [任务并发与网络自动调整](docs/任务并发与网络自动调整.md)。
+
+任务列表保留本次运行中最近 100 个已结束任务，程序重启后不恢复普通队列；全局下载历史照常保存。相同的活跃链接会拒绝重复提交。关闭任务模式后，需先完成或取消现有队列，才能启动旧单任务流程；“停止”会处理实际活跃任务。蹲开播仍通过等待开播面板管理。实现检查和当前边界见 [任务模式检查报告](docs/任务模式检查报告.md)。
+
 ### 批量下载
+
 1. 进入「工具箱」页面
 2. 点击「生成链接模板」创建 `urls.txt`
 3. 编辑 `urls.txt`，每行一个链接（支持混合平台）
 4. 点击「TXT批量下载」开始批量下载
 
-### 已下载记录与重新下载
+### 直播录制（Twitch / YouTube）
 
-命中下载归档时，弹窗提供「重新下载」和「跳过」，20 秒未选择后默认跳过并继续队列。跳过单独计数，不算下载成功。归档只表示曾经记录过该视频，不能证明磁盘文件仍然完整。
+在「设置 → 直播设置」选择全局模式，并可分别为 YouTube/Twitch 设置默认录制方式。任务前检查和实际执行都会核验条件：YouTube 需要可追播 DASH；Twitch 需要可访问的本场 VOD。未满足条件时会说明原因并从当前时刻录制。Twitch 会先录实时尾部、独立回填历史；只有轨道兼容且音视频包指纹确认重叠后才生成合并文件，无法验证时保留原件并报告缺口。未开播时可选择蹲开播，并在下载页「等待开播」面板取消。
 
-选择重下只清除当前命中的归档记录，保留其他记录，并按当前输出模板覆盖同名视频和配套音频，不生成编号副本。重下失败不会重新写入成功归档。更改输出目录、文件名模板或格式后，文件会按新设置保存。
+直播媒体、会话记录和完整性报告保存在 `download/.live-jobs/<job-id>/`。报告验证容器、轨道、全文件时间戳和首尾解码，不承诺平台已删除的历史分片仍能取得。实现、来源与实测边界见 [直播录制 P4 与部分 P5](temp/plan/live_record/step/直播录制-P4-P5.md)。
 
-### Twitch直播录制
-直接粘贴主播频道URL（如 `https://www.twitch.tv/xqc`）即可录制，具体从哪里开始由「直播录制模式」决定：默认追开播，选择蹲开播可等待未开播频道。停止则结束录制，文件自动保存到 `download/Twitch/主播名/直播/` 目录。
+### YouTube / Niconico 直播录制
 
-### 各平台直播录制
-
-程序会按链接形状自动识别直播入口，并将直播文件保存到对应平台的 `download/<平台>/.../直播/` 目录。支持的入口如下：
-
-本版 YouTube、Bilibili、Twitch、Niconico、NicoChannel、TwitCasting 和 Twitter/X Spaces 的直播入口识别、录制流程、断流处理与实时状态由 [猫猫葉汐A_spy（@maomaoyexi）](https://github.com/maomaoyexi) 完成。平台登录、地区和会员权限仍由平台及 yt-dlp 决定。
-
-- **YouTube**：`youtube.com/live/...` 或 `youtube.com/live`；选择「追开播」时使用 `--live-from-start` 尝试从直播开始处录制，其他模式按对应策略处理。
-- **Bilibili**：`live.bilibili.com/<房间号>`，按直播流持续录制，直播链接不会触发视频分 P 选择。
-- **Twitch**：主播频道页 `twitch.tv/<主播名>`；`/videos/` 和 `/clips/` 会按回放或剪辑处理。
-- **Niconico**：`live.nicovideo.jp/watch/lv...`、`live2.nicovideo.jp/...` 或 `nicovideo.jp/watch/lv...`；保留 yt-dlp 的 Timeshift 语义，不强制追加 `--live-from-start`。
-- **NicoChannel**：`nicochannel.jp/<频道>/live/sm...`，需要 `nicochannel.zip` 插件及 Firefox 登录令牌。
-- **TwitCasting**：主播页 `twitcasting.tv/<主播名>`；密码或会员限定内容可在设置中提供密码，m3u8 异常会自动执行直连、Firefox Cookie 和 FFmpeg 回退。
-
-TwitCasting 成功验证的录播密码会按完整链接保存到程序根目录的 `twitcasting_passwords.xlsx`，表格包含“链接、密码、时间”三列，列宽默认分别为 60、15、20；表头上方会显示“除非获得明确授权，请勿发送给其他人”的警告。工作簿会冻结表头、启用筛选并按日期格式显示时间。旧版本的 `twitcasting_passwords.csv` 或 `download/` 下的密码表会在首次读取时自动迁移。下次下载同一链接时会先自动尝试已保存密码；如果密码失效，程序会删除该条记录并重新弹窗输入，验证成功后更新记录。密码以明文保存在本机，请勿将此文件分享给他人。
-- **Twitter/X Spaces**：`x.com/i/spaces/...` 或 `twitter.com/i/spaces/...`，通常需要登录 Cookie，平台未保留回放时无法录制。
-- **Withny**：选择 Withny 后使用“选择配置并录制”，由 `withny-dl` YAML 配置执行频道监控。
-
-Fantia 当前仅接入帖子/媒体下载，项目没有稳定的直播 URL 形状，因此不会把普通 Fantia 页面误判为直播。
-
-直播录制期间会显示 LIVE、时长、大小、速度和分片状态；点击“停止”结束当前录制。平台登录、地区、会员权限和直播是否提供回放仍由平台及 yt-dlp 决定。
-
-「下载任务」页面的「本次 yt-dlp 参数」在左、「直播录制设置」在右，两个按钮并排显示，分别打开对应的设置小窗口。
-
-点击「直播录制设置」可选择直播录制模式：
-
-- **蹲开播**：任务保持运行，按检测间隔轮询直播状态，检测到开播后自动开始录制；适合还未开播的频道。
-- **追开播**：直播已开始时，使用 `--live-from-start` 尝试从直播起点追录；如果平台返回没有可回溯分片，程序会自动降级为从当前分片录制。
-- **加入时开录**：不追溯，直接从提交链接时能获取到的当前分片开始录制。
-
-蹲开播的检测间隔可设置为 5–600 秒，停止任务会立即取消等待。Withny 的 YAML 监控仍由 `withny-dl` 独立负责。
+YouTube 使用 `/live` 直播链接，Niconico 使用 `live.nicovideo.jp`、`live2.nicovideo.jp` 或 `www.nicovideo.jp/watch/lv...` 链接。YouTube 在 DVR/归档可用时可追开播；Niconico 当前只从当前时刻录制（上游 chasePlay 固定关闭）。程序实时显示录制时长、大小、速度和分片状态。
 
 ### TwitCasting 直播录制 / 录播下载
-粘贴主播页 URL（如 `https://twitcasting.tv/主播名`）即可录制直播，起点由「直播录制模式」决定（蹲开播、追开播或加入时开录）；文件保存到 `download/TwitCasting/主播名/直播/` 目录。单条录播使用 `/movie/数字ID` 链接，历史直播列表使用 `/show` 或 `/archive` 链接。密码保护或会员限定内容可在「设置」页填写「TwitCasting 密码」后下载。
+
+粘贴主播页 URL（如 `https://twitcasting.tv/主播名`）后默认从当前时刻录制（平台不支持 yt-dlp 从头），文件保存到 `download/TwitCasting/主播名/直播/` 目录。单条录播使用 `/movie/数字ID` 链接，历史直播列表使用 `/show` 或 `/archive` 链接。密码保护或会员限定内容会在对应任务中询问密码；可在「设置 → 平台专项 → TwitCasting」选择记住密码或保存到 XLSX，两个开关默认关闭。
 
 ### Bilibili 下载
-粘贴 Bilibili 视频或直播链接后程序会自动识别。多 P 视频可按设置下载全部分集或弹出分集选择器；1080P 及以上画质通常需要在程序目录配置 `cookies.txt`。
+
+粘贴 Bilibili 视频或直播链接后程序会自动识别。直播默认从当前时刻录制（普通观看侧无 DVR，不支持追开播）；多 P 视频可按设置下载全部分集或弹出分集选择器；1080P 及以上画质通常需要在程序目录配置 `cookies.txt`。
+
+如需直播弹幕，在「设置 → 直播设置」开启「录制直播弹幕」，可选择 SRT、ASS 或两者。本轮读取录播姬原生 XML，结束后为每个媒体分段生成同名字幕；其他直播引擎的评论采集暂未接入。源码版先运行 `python scripts/install_live_dependencies.py`，脚本会校验固定版本并将 `pysubs2`、`defusedxml` 放入 `dependency/live-python/`。匿名化只作用于派生事件库和字幕，原始 XML 仍含原始身份信息。
 
 ### Withny 历史存档
+
 在下载页面选择 Withny，点击「选择 HAR 并下载」，依次选择浏览器导出的包含内容 HAR 和输出文件。程序只处理已授权的普通未加密 HLS，检测到 DRM、加密 HLS、缺失媒体清单正文或签名 Cookie 时会拒绝下载。HAR 可能包含登录信息，使用后应立即删除。
 
 ### 配置预设
+
 1. 在「设置」页面调整好各项参数
 2. 在「配置预设」区域输入预设名称
 3. 点击「保存」按钮
 4. 之后可随时从下拉框选择预设一键加载
 
 ### 自动更新
+
 程序启动后3秒自动通过 GitHub Releases 静默检查更新。检测到新版本时右上角显示「⬆ 有更新」徽标，点击后可一键下载；程序会校验可信下载来源、文件大小、Windows EXE 格式及 SHA-256，校验通过后自动替换重启，所有配置和下载记录保留。
 
 ## ⚙️ 配置选项
 
-| 设置项 | 说明 | 默认值 |
-|--------|------|--------|
-| 分辨率 | best/2160/1440/1080/720/480/360 | best |
-| 编码 | best/h264/av1/vp9 | best |
-| 音频质量 | best/192/128 | best |
-| 输出格式 | mp4/mkv/webm | mp4 |
-| 合并模式 | 合并/分离 | 合并 |
-| 线程数 | 下载线程数 | 4 |
-| 代理 | HTTP/SOCKS5代理支持 | 关闭 |
-| Cookie | cookies.txt文件模式 | 文件模式 |
-| 硬件加速 | CPU/NVENC/QSV/AMF | CPU |
-| 字幕下载 | 人工/自动字幕，支持语言预设 | 关闭（开启后默认中文） |
+
+| 设置项   | 说明                            | 默认值                 |
+| -------- | ------------------------------- | ---------------------- |
+| 分辨率   | best/2160/1440/1080/720/480/360 | best                   |
+| 编码     | best/h264/av1/vp9               | best                   |
+| 音频质量 | best/192/128                    | best                   |
+| 输出格式 | mp4/mkv/webm                    | mp4                    |
+| 合并模式 | 合并/分离                       | 合并                   |
+| 线程数   | 下载线程数                      | 4                      |
+| 代理     | HTTP/SOCKS5代理支持             | 关闭                   |
+| Cookie   | cookies.txt文件模式             | 文件模式               |
+| 硬件加速 | CPU/NVENC/QSV/AMF               | CPU                    |
+| 字幕下载 | 人工/自动字幕，支持语言预设     | 关闭（开启后默认中文） |
 
 ## 🍪 Cookie配置
 
@@ -154,17 +138,13 @@ Fantia 当前仅接入帖子/媒体下载，项目没有稳定的直播 URL 形�
 4. 将导出的文件重命名为 `cookies.txt`，放到exe同目录
 5. 重启程序即可生效
 
-工具箱的「生成 Cookie 模板」只创建空白 Netscape 格式模板，不含登录凭证；真实 Cookie 仍需从已登录浏览器导出。已有 `cookies.txt` 不会被覆盖，也不会自动转换格式。文件首行应为 `# Netscape HTTP Cookie File`，每条 Cookie 的 7 个字段须用实际 TAB 分隔，不能用空格或字面量 `\t` 代替。
-
 > ⚠️ **注意**：Fantia仅支持cookies.txt文件模式，不支持浏览器提取。Cookie仅传递登录态，不能绕过付费墙。
 
 ## 📂 目录结构
 
 ```
 工具目录/
-├── 视频下载工具v2.6.0-GUI.py  # 当前源码入口
-├── video_downloader/          # 程序模块
-├── resource/                  # WebUI 模板与静态资源
+├── 视频下载工具v2.6.0-GUI.exe # 主程序
 ├── dependency/              # 所有第三方依赖，可整体替换
 │   ├── yt-dlp.exe           # 下载核心
 │   ├── ffmpeg.exe           # 音视频处理
@@ -180,6 +160,7 @@ Fantia 当前仅接入帖子/媒体下载，项目没有稳定的直播 URL 形�
 ├── presets.json             # 预设配置（自动生成）
 ├── cookies.txt              # Cookie文件（自行放置）
 ├── urls.txt                 # 批量下载链接（自行编辑）
+├── changelog.html           # 更新日志
 ├── CREDITS.txt              # 作者与贡献者
 ├── docs/                    # 帮助文档
 │   ├── 使用教程.txt
@@ -209,40 +190,50 @@ Fantia 当前仅接入帖子/媒体下载，项目没有稳定的直播 URL 形�
 
 - 📋 **TXT批量下载** - 从urls.txt读取链接批量下载
 - 📝 **生成链接模板** - 生成带注释的urls.txt模板
-- 🍪 **生成Cookie模板** - 创建不含登录凭证的空白 Netscape 模板和配置说明；已有 cookies.txt 不覆盖
+- 🍪 **生成Cookie模板** - 生成Netscape格式cookies.txt模板
 - 🔄 **更新yt-dlp** - 一键更新下载核心到最新版本
 - 🗑️ **清理临时文件** - 清理下载产生的.part/.ytdl等临时文件
 - 🎵 **WAV转MP3** - 批量音频转换，支持比特率选择
 - 📂 **打开下载目录** - 在资源管理器中打开下载文件夹
 - 📋 **打开日志目录** - 在资源管理器中打开日志文件夹
 - **单独下载字幕** - 输入一个或多个链接，仅下载指定类型和语言的字幕
-- 🖼️ **下载视频封面** - 输入一个或多个链接，只下载封面并转换为 JPG；保存目录和文件名沿用当前视频输出模板，不写入下载归档，不影响之后的正式下载。Fantia、Withny 及未识别平台暂不支持此工具
+- 🖼️ **下载视频封面** - 输入一个或多个链接，只抓封面图片；自动识别平台，保存
+  到该视频所在的平台目录，文件名与视频完全一致（如 `[20260907] 标题 [ID].jpg`），
+  不写入下载归档，因此不影响之后的正式下载。Fantia 与 Withny 不走 yt-dlp，暂不支持。
 
 ## ❓ 常见问题
 
 **Q: 下载速度慢怎么办？**
+
 > A: 1. 配置代理；2. 适当增加线程数；3. 在工具箱更新yt-dlp到最新版本。
 
 **Q: 提示需要登录？**
+
 > A: 配置Cookie，参考Cookie配置说明。
 
 **Q: Niconico只能下载低画质？**
+
 > A: 需要配置登录Cookie，游客身份仅能获取低清晰度。登录后导出cookies.txt即可。
 
 **Q: 下载的文件在哪里？**
+
 > A: 默认保存在exe同目录的 `download/` 下，如 `download/YouTube/`、`download/Twitch/` 等。
 
 **Q: 可以同时下载多个视频吗？**
+
 > A: 同一时间只能运行一个下载任务，但批量下载会按顺序自动下载所有链接。
 
 **Q: 关闭浏览器会中断下载吗？**
+
 > A: 不会。下载在后台继续进行，下载完成后30秒自动退出。如需停止请点击「停止」按钮或右上角「✕ 退出」按钮。
 
 **Q: 双击exe后浏览器没自动打开？**
+
 > A: 查看控制台窗口显示的端口号（如 http://127.0.0.1:8765），手动在浏览器中输入该地址访问。
 
 **Q: 老用户如何升级？**
-> A: 关闭旧程序后下载 GitHub Release 中的 v2.6.0 正式版，按说明替换主程序并补齐 `dependency/`；原有配置和下载记录保留。源码用户也可以替换主脚本、`video_downloader/` 与 `resource/` 后运行。
+
+> A: 下载 `video-downloader-v2.6.0-GUI.exe` 替换旧版 exe，并使用 v2.6.0 依赖包补齐新增插件；原有配置和下载记录无需改动。
 
 ## 📚 详细文档
 
@@ -253,13 +244,14 @@ Fantia 当前仅接入帖子/媒体下载，项目没有稳定的直播 URL 形�
 - [🍪 Cookie配置指南](docs/cookies问题答疑.txt) - Cookie配置详细说明和常见问题
 - [❓ 常见问题答疑](docs/常见问题答疑.txt) - 常见问题的解决方案
 - [⚠️ 错误码说明手册](docs/错误码.txt) - 下载错误码详解和排查流程
-- [📋 更新日志](RELEASE_NOTES.md) - 版本更新历史
+- [📋 更新日志](resource/templates/changelog.html) - 版本更新历史
 
 ## 📋 版本更新
 
 v2.6.0 的完整更新内容和升级说明请查看：
 
 - [发布说明](RELEASE_NOTES.md)
+- [版本更新日志](RELEASE_NOTES.md)
 
 ## ⚠️ 免责声明
 
@@ -284,8 +276,7 @@ v2.6.0 的完整更新内容和升级说明请查看：
 - v2.4.0 字幕功能修复与合并适配：[猫猫葉汐A_spy（GitHub：@maomaoyexi）](https://github.com/maomaoyexi)
 - v2.5.0 WebUI 视觉与交互体系重构：[DarkKandaoMaster](https://github.com/DarkKandaoMaster)
 - v2.5.0 设置控件、TwitCasting 下载与进度、BgUtils Provider 及目录收拢：[ErgouTree（GitHub：@ergou10086）](https://github.com/ergou10086)
-- v2.6.0 各平台直播入口识别、直播录制策略、断流处理与实时状态展示；任务页「本次 yt-dlp 参数」和「直播录制设置」两个按钮及相关设置功能、Cookie 模板修复、TwitCasting 密码表及失效记录清理、HLS 回退、`.ytdl` 清理、回归测试与相关文档：[猫猫葉汐A_spy（GitHub：@maomaoyexi）](https://github.com/maomaoyexi)
-- v2.6.0 PR #15 下载归档选择、独立批量封面及 PO Token Provider 启动改进：[ErgouTree（GitHub：@ergou10086）](https://github.com/ergou10086)
+- v2.6.0 上游修复：[@maomaoyexi](https://github.com/maomaoyexi) 的 Cookie 模板、TwitCasting 密码表、HLS 路径和恢复、文件对话框回退与相关测试，按本分支直播架构整合。
 
 ## 致谢
 

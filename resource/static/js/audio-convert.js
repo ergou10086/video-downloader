@@ -196,8 +196,6 @@ async function startAudioConvert() {
   const payload = {
     dir: dir,
     output_format: fmtId,
-    codec: fmt.codec,
-    extension: fmt.ext,
     recursive: recursive,
     del_src: isOn('sw_audioDelSrc'),
   };
@@ -251,4 +249,20 @@ function showAudioConverter() {
 function hideAudioConverter() {
   const dlg = $('audioConvertDialog');
   if(dlg) { dlg.classList.remove('show'); syncToolTiles(); }
+}
+
+// The shared task slot prevents concurrent tools and permits scoped cancellation.
+function syncAudioToolState(state) {
+  document.querySelectorAll('button[onclick^="startAudio"]').forEach(button => {
+    button.disabled = Boolean(state.running) || state.phase === 'suspended';
+  });
+  const stop = $('btnAudioStop');
+  if(stop) stop.disabled = !String(state.kind || '').startsWith('audio_') || state.phase === 'stopping';
+}
+
+async function stopAudioTool() {
+  try {
+    const result = await api('/api/audio-stop', {method:'POST'});
+    showToolStatus(result.error || result.message, result.error ? 'error' : 'working');
+  } catch(error) { showToolStatus(error.message, 'error'); }
 }

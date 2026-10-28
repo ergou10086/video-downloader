@@ -48,6 +48,7 @@
 
   .row{flex-wrap:wrap;gap:8px}
   .row>.lb{width:100%}
+  .live-comment-control>.hint{flex-basis:100%}
   .sub-hint,.cols .sub-hint{padding-left:0}
   .rval{min-width:56px}
 

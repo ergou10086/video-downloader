@@ -45,15 +45,32 @@ DEFAULT_CONFIG = {
     "STRICT_FILENAME": 0,
     "NICO_COMMENTS": 0,
     "NICO_RECODE": 0,
-    "LIVE_STREAM_METHOD": "yt-dlp",
-    # 直播录制策略：wait=蹲开播，from_start=追开播，current=加入时开录。
-    # 默认值保持历史行为，避免升级后正在使用的链接改变录制起点。
-    "LIVE_RECORD_MODE": "from_start",
-    # 蹲开播模式的状态探测间隔（秒）。
-    "LIVE_WATCH_INTERVAL": 30,
+    "TC_REMEMBER_PASSWORD": 0,
+    "TC_SAVE_PASSWORD_XLSX": 0,
+    "LIVE_STREAM_METHOD": "auto",
+    "LIVE_MODE": "auto",
+    "LIVE_PLATFORM_MODES": "{}",
     "LIVE_DOWNLOAD_TIMEOUT": 0,
+    "LIVE_MAX_RETRIES": 5,
+    "LIVE_WATCHDOG_SECONDS": 60,
+    "LIVE_MIN_FREE_MB": 256,
+    "LIVE_ESTIMATED_BITRATE_KBPS": 8000,
+    "LIVE_DANMAKU_ENABLED": 0,
+    "LIVE_DANMAKU_PLATFORMS": "{}",
+    "LIVE_DANMAKU_OFFSET_MS": 0,
+    "LIVE_DANMAKU_FORMATS": "srt,ass",
+    "LIVE_DANMAKU_ANONYMIZE": 0,
+    "TASK_MODE": 1,
+    "TASK_MAX_PARALLEL": 2,
+    "TASK_MIXED_PARALLEL": 1,
+    "TASK_LIVE_PARALLEL": 2,
+    "TASK_DOWNLOAD_PARALLEL": 1,
+    "TASK_DOWNLOAD_SPEED_LIMIT": 0.0,
+    "TASK_ORDER": "none",
     "ENABLE_LOG": 1,
     "MP3_BITRATE": 320,
+    "AUDIO_OUTPUT_FORMAT": "mp3",
+    "AUDIO_RECURSIVE": 0,
     "DEL_WAV_AFTER_CONVERT": 0,
     "BILI_MULTIP_POLICY": "all",
     "YOUTUBE_PO_TOKEN_ENABLED": 0,
@@ -61,18 +78,27 @@ DEFAULT_CONFIG = {
 }
 
 RESOLUTION_OPTIONS = ["best", "2160", "1440", "1080", "720", "480", "360"]
+RESOLUTION_LABELS = ["无限制", "4K (2160p)", "2K (1440p)", "1080P", "720P", "480P", "360P"]
 CODEC_OPTIONS = ["best", "h264", "av1", "vp9"]
+CODEC_LABELS = ["极致画质", "兼容优先(H.264)", "AV1优先", "VP9优先"]
 AUDIO_OPTIONS = ["best", "192", "128"]
+AUDIO_LABELS = ["最高音质", "均衡(192k)", "最小体积(128k)"]
 FORMAT_OPTIONS = ["mp4", "mkv", "webm"]
 AUDIO_MODE_OPTIONS = ["0", "1", "2", "3"]
+AUDIO_MODE_LABELS = ["不单独处理音频", "分离音画输出", "同时输出音频", "只输出音频"]
 AUDIO_FORMAT_OPTIONS = ["m4a", "mp3", "wav"]
 HWACCEL_OPTIONS = ["cpu", "h264_nvenc", "h264_qsv", "h264_amf"]
+HWACCEL_LABELS = ["CPU软编码", "N卡 NVENC", "Intel QSV", "AMD AMF"]
 BROWSER_OPTIONS = ["chrome", "edge", "firefox", "brave", "opera"]
 PROXY_TYPE_OPTIONS = ["http", "socks5"]
 MP3_BITRATE_OPTIONS = [128, 192, 256, 320]
 BILI_POLICY_OPTIONS = ["all", "select"]
-LIVE_STREAM_METHOD_OPTIONS = ["yt-dlp"]
-LIVE_RECORD_MODE_OPTIONS = ["wait", "from_start", "current"]
+LIVE_STREAM_METHOD_OPTIONS = ["auto", "yt-dlp", "bililive-recorder"]
+LIVE_STREAM_METHOD_LABELS = ["自动（B站优先录播姬）", "yt-dlp", "BililiveRecorder（仅B站）"]
+LIVE_MODE_OPTIONS = ["auto", "catch_up", "live_edge", "wait"]
+LIVE_MODE_LABELS = ["自动（推荐）", "追开播（平台支持时）", "从当前时刻", "蹲开播（开播后自动录制）"]
+TASK_ORDER_OPTIONS = ["none", "live_first", "download_first"]
+TASK_ORDER_LABELS = ["不排序（默认）", "直播录制优先", "下载任务优先"]
 SUBTITLE_TYPE_OPTIONS = ["all", "manual", "auto"]
 
 PLATFORM_INFO = [

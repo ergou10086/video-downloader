@@ -10,6 +10,7 @@
 <link rel="stylesheet" href="/static/css/dark.css">
 <link rel="stylesheet" href="/static/css/responsive.css">
 <link rel="stylesheet" href="/static/css/animations.css">
+<link rel="stylesheet" href="/static/css/settings.css?v=task-network-1">
 </head>
 <body>
 
@@ -49,10 +50,13 @@
   <symbol id="i-play" viewBox="0 0 24 24"><path d="M8.4 5.6L18 12l-9.6 6.4z"></path></symbol>
   <symbol id="i-save" viewBox="0 0 24 24"><path d="M5 5.5h11.2L19 8.3v10.2H5z"></path><path d="M8.4 5.5v4.4h6.8V5.5"></path><path d="M8.4 18.5v-4.6h7.2v4.6"></path></symbol>
   <symbol id="i-bookmark" viewBox="0 0 24 24"><path d="M6.8 4.5h10.4v15.2L12 16.2l-5.2 3.5z"></path></symbol>
+  <symbol id="i-film" viewBox="0 0 24 24"><rect x="3.5" y="5" width="17" height="14" rx="1.5"></rect><path d="M8 5v14M16 5v14M3.5 12h17"></path></symbol>
   <symbol id="i-globe" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"></circle><path d="M3.6 12h16.8"></path><path d="M12 3.5c2.2 2.4 3.3 5.3 3.3 8.5s-1.1 6.1-3.3 8.5c-2.2-2.4-3.3-5.3-3.3-8.5S9.8 5.9 12 3.5z"></path></symbol>
+  <symbol id="i-cpu" viewBox="0 0 24 24"><rect x="7.2" y="7.2" width="9.6" height="9.6" rx="1.4"></rect><path d="M4.4 10h2.8M4.4 14h2.8M16.8 10h2.8M16.8 14h2.8M10 4.4v2.8M14 4.4v2.8M10 16.8v2.8M14 16.8v2.8"></path></symbol>
   <symbol id="i-arrow-up" viewBox="0 0 24 24"><path d="M12 19.5V5"></path><path d="M6 11l6-6 6 6"></path></symbol>
   <symbol id="i-lock" viewBox="0 0 24 24"><rect x="5.5" y="10.6" width="13" height="9" rx="1.5"></rect><path d="M8.6 10.6V8.2a3.4 3.4 0 0 1 6.8 0v2.4"></path></symbol>
   <symbol id="i-inbox" viewBox="0 0 24 24"><path d="M3.5 13.2l2.8-8.4h11.4l2.8 8.4v6H3.5v-6z"></path><path d="M3.5 13.2H9a1 1 0 0 1 1 1 1 1 0 0 0 1 1h2a1 1 0 0 0 1-1 1 1 0 0 1 1-1h5.5"></path></symbol>
+  <symbol id="i-external" viewBox="0 0 24 24"><path d="M14 4.5h5.5V10"></path><path d="M19.5 4.5l-8.2 8.2"></path><path d="M18 13.6v5.9H4.5V6h5.9"></path></symbol>
   <symbol id="i-alert" viewBox="0 0 24 24"><path d="M12 4.4l8.4 15.2H3.6z"></path><path d="M12 10v4"></path><path d="M12 16.6h0"></path></symbol>
   <symbol id="i-rocket" viewBox="0 0 24 24"><path d="M13.4 4.6c3.6-.7 6 1.7 5.3 5.3-.6 3.2-3.4 6-6.4 7.4l-3-.3-2.9-2.9-.3-3c1.4-3 4.1-5.9 7.3-6.5z"></path><circle cx="14.4" cy="9.6" r="1.6"></circle><path d="M8.4 15.6L5 19"></path></symbol>
   <symbol id="i-tv" viewBox="0 0 24 24"><rect x="3.5" y="7" width="17" height="12" rx="1.6"></rect><path d="M8.4 3.6L12 7l3.6-3.4"></path></symbol>
@@ -137,7 +141,7 @@
             <b>Twitter/X 提示：</b>部分内容需要登录才能下载，建议使用「浏览器 Cookie 模式」自动提取登录状态。
           </div>
           <div class="notice" id="twitcastingHint" style="display:none">
-            <b>TwitCasting 提示：</b>受限归档建议使用已登录的 Firefox；密码视频会自动弹窗。若 m3u8 返回 400，工具会依次尝试直连与 Firefox 登录状态；多初始化片段会按“下载线程数”并发预取，再由 FFmpeg 本地封装。
+            <b>TwitCasting 提示：</b>密码视频会自动弹窗，会员限定内容需使用有观看权限的登录状态。录播会自动检查播放列表，多初始化段按“下载线程数”并发下载后本地封装；中断重试会校验并复用完整分片。播放地址失效时先自动刷新，特殊清单才使用 FFmpeg 兼容下载。
           </div>
           <div class="notice" id="nicochannelHint" style="display:none">
             <b>NicoChannel 提示：</b>首次下载需从 Firefox 自动提取 JWT 登录令牌，请确保已在 Firefox 中登录 <b>nicochannel.jp</b>。
@@ -146,16 +150,9 @@
             <b>Withny 提示：</b>历史存档选浏览器导出的「包含内容」HAR，直播录制选 withny-dl 的 YAML 配置。凭据可能含登录信息，请勿分享。<a href="#" onclick="setActivePage('help');return false;">查看教程 →</a>
           </div>
 
-          <div class="task-options-row">
-            <div class="task-option-actions">
-              <button class="btn sm" id="btnTaskYtdlpArgs" onclick="showTaskYtdlpArgs()" type="button" aria-haspopup="dialog" aria-controls="taskYtdlpArgsOverlay">
-                <svg class="ico s14"><use href="#i-terminal"></use></svg><span>本次 yt-dlp 参数</span><span class="task-args-indicator" id="taskYtdlpArgsIndicator" hidden aria-hidden="true"></span>
-              </button>
-              <button class="btn sm" id="btnLiveRecordSettings" onclick="showLiveRecordSettings()" type="button" aria-haspopup="dialog" aria-controls="liveRecordOverlay">
-                <svg class="ico s14"><use href="#i-radio"></use></svg><span>直播录制设置</span>
-              </button>
-            </div>
-            <span class="dim" id="liveRecordSummary">追开播 · 起点优先</span>
+          <div class="row task-args-row">
+            <span class="lb">本次 yt-dlp 参数</span>
+            <input type="text" class="ctl mono" id="task_ytdlp_args" maxlength="4000" autocomplete="off" spellcheck="false" placeholder='仅用于本次单条或批量任务，例如：--sleep-requests 1' style="flex:1">
           </div>
 
           <div class="compose">
@@ -171,57 +168,12 @@
           </div>
         </div>
 
-        <!-- ====== 本次 yt-dlp 参数 ====== -->
-        <div class="scrim" id="taskYtdlpArgsOverlay" onclick="if(event.target===this) hideTaskYtdlpArgs()">
-          <div class="dlg task-args-dlg" role="dialog" aria-modal="true" aria-labelledby="taskYtdlpArgsDialogTitle">
-            <div class="dhead">
-              <svg class="ico s18"><use href="#i-terminal"></use></svg><b id="taskYtdlpArgsDialogTitle">本次 yt-dlp 参数</b>
-              <button class="btn sm gh" onclick="hideTaskYtdlpArgs()" type="button" aria-label="关闭"><svg class="ico s14"><use href="#i-x"></use></svg></button>
-            </div>
-            <div class="dbody">
-              <label class="lb" for="task_ytdlp_args">附加参数</label>
-              <textarea class="ctl mono" id="task_ytdlp_args" maxlength="4000" rows="3" autocomplete="off" spellcheck="false" placeholder='例如：--sleep-requests 1' oninput="updateTaskYtdlpArgsUI()" aria-describedby="taskYtdlpArgsHint"></textarea>
-              <p class="hint" id="taskYtdlpArgsHint">仅用于下一次单条或批量下载，任务启动后自动清空。每次下载都要使用的参数，请在下载设置中填写「默认 yt-dlp 参数」。</p>
-            </div>
-            <div class="dfoot">
-              <button class="btn" onclick="hideTaskYtdlpArgs()" type="button">完成</button>
-            </div>
-          </div>
+        <div class="task-panel" id="taskModePanel" style="display:none">
+          <div class="sh"><b>任务列表</b><span class="rule"></span><span class="note" id="taskCount"></span><button class="btn sm gh" onclick="clearFinishedTasks()">清理已结束</button></div>
+          <div id="taskList"></div>
         </div>
 
-        <!-- ====== 直播录制设置 ====== -->
-        <div class="scrim" id="liveRecordOverlay" onclick="if(event.target===this) hideLiveRecordSettings()">
-          <div class="dlg live-record-dlg" role="dialog" aria-modal="true" aria-labelledby="liveRecordDialogTitle">
-            <div class="dhead">
-              <svg class="ico s18"><use href="#i-radio"></use></svg><b id="liveRecordDialogTitle">直播录制设置</b>
-              <button class="btn sm gh" onclick="hideLiveRecordSettings()" type="button" aria-label="关闭"><svg class="ico s14"><use href="#i-x"></use></svg></button>
-            </div>
-            <div class="dbody">
-              <div class="row">
-                <label class="lb" for="s_live_record_mode">录制模式</label>
-                <span class="sel">
-                  <select class="ctl" id="s_live_record_mode" onchange="onLiveRecordModeChange()">
-                    <option value="wait">蹲开播（等待频道开播）</option>
-                    <option value="from_start" selected>追开播（从开播处录制）</option>
-                    <option value="current">加入时开录（从当前时刻）</option>
-                  </select>
-                  <svg class="ico s14 cv"><use href="#i-chevron"></use></svg>
-                </span>
-              </div>
-              <div class="row">
-                <label class="lb" for="s_live_watch_interval">检测间隔</label>
-                <input type="number" class="ctl mono" id="s_live_watch_interval" min="5" max="600" step="1" value="30" style="width:88px;flex:none" oninput="updateLiveRecordModeUI()">
-                <span class="dim">秒（5–600，仅蹲开播使用）</span>
-              </div>
-              <p class="hint live-record-hint" id="liveRecordModeHint">追开播会尝试回溯直播起点；能否回溯取决于平台是否提供 DVR。</p>
-            </div>
-            <div class="dfoot">
-              <button class="btn" onclick="hideLiveRecordSettings()" type="button">完成</button>
-            </div>
-          </div>
-        </div>
-
-        <div class="status">
+        <div class="status" id="legacyDownloadStatus">
           <div class="srow">
             <span class="st"><span class="blip idle" id="statusBlip"></span><span id="statusText">就绪</span></span>
             <span class="dim" id="idleText">等待任务</span>
@@ -241,6 +193,16 @@
             <span class="dim">·</span>
             <span class="dim">跳过 <span id="statSkip">0</span></span>
           </div>
+        </div>
+
+        <div class="sect" id="liveWatchSect" style="display:none">
+          <div class="sh"><b>等待开播</b><span class="rule"></span><span class="note" id="liveWatchCount"></span></div>
+          <div id="liveWatchList"></div>
+        </div>
+
+        <div class="sect" id="liveRecordingSect" style="display:none" aria-live="polite">
+          <div class="sh"><b>直播录制与验证</b><span class="rule"></span><span class="note">报告保留在下载目录</span></div>
+          <div id="liveRecordingList"></div>
         </div>
 
         <div class="console" id="logConsole">
@@ -264,100 +226,151 @@
 
       <!-- ====== 下载设置 ====== -->
       <div class="page" id="page-settings">
+        <div class="settings-layout">
+          <aside class="settings-toc" id="settingsToc">
+            <button class="settings-toc-toggle" id="settingsTocToggle" type="button" title="收起/展开目录" aria-label="收起/展开目录">
+              <svg class="ico s14"><use href="#i-view-list"></use></svg>
+            </button>
+            <nav class="settings-toc-nav" aria-label="设置目录">
+              <button class="settings-toc-item on" data-target="set-presets"><i>01</i><span>配置预设</span></button>
+              <button class="settings-toc-item" data-target="set-output"><i>02</i><span>输出与画质</span></button>
+              <button class="settings-toc-item" data-target="set-live"><i>03</i><span>直播设置</span></button>
+              <button class="settings-toc-item" data-target="set-network"><i>04</i><span>网络与代理</span></button>
+              <button class="settings-toc-item" data-target="set-cookie"><i>05</i><span>Cookie 登录</span></button>
+              <button class="settings-toc-item" data-target="set-subtitle"><i>06</i><span>字幕</span></button>
+              <button class="settings-toc-item" data-target="set-filename"><i>07</i><span>文件名</span></button>
+              <button class="settings-toc-item" data-target="set-platform"><i>08</i><span>平台专项</span></button>
+              <button class="settings-toc-item" data-target="set-tasks"><i>09</i><span>任务与并发</span></button>
+              <button class="settings-toc-item" data-target="set-advanced"><i>10</i><span>高级与诊断</span></button>
+            </nav>
+          </aside>
 
-        <div class="sect">
-          <div class="sh"><b>配置预设</b><span class="rule"></span></div>
-          <div class="row">
-            <span class="sel" style="max-width:300px">
-              <select class="ctl" id="presetSelect" onchange="loadPresetFromSelect()"><option value="">— 选择预设快速应用 —</option></select>
-              <svg class="ico s14 cv"><use href="#i-chevron"></use></svg>
-            </span>
-            <button class="btn sm" onclick="showSavePreset()"><svg class="ico s14"><use href="#i-save"></use></svg>另存为</button>
-            <button class="btn sm dgr" onclick="deletePresetFromSelect()"><svg class="ico s14"><use href="#i-trash"></use></svg>删除</button>
-          </div>
-          <div class="row" id="presetSaveRow" style="display:none">
-            <input type="text" class="ctl" id="presetNameInput" style="max-width:300px" placeholder="预设名称，如：4K 收藏">
-            <button class="btn sm pri" onclick="savePresetFromInput()">确认</button>
-            <button class="btn sm" onclick="hideSavePreset()">取消</button>
-          </div>
-        </div>
+          <div class="settings-stack">
+            <section class="settings-section" id="set-presets">
+              <div class="sh"><b>配置预设</b><span class="rule"></span><span class="note">保存/切换整组设置</span></div>
+              <div class="row">
+                <span class="sel" style="max-width:300px">
+                  <select class="ctl" id="presetSelect" onchange="loadPresetFromSelect()"><option value="">— 选择预设快速应用 —</option></select>
+                  <svg class="ico s14 cv"><use href="#i-chevron"></use></svg>
+                </span>
+                <button class="btn sm" onclick="showSavePreset()"><svg class="ico s14"><use href="#i-save"></use></svg>另存为</button>
+                <button class="btn sm dgr" onclick="deletePresetFromSelect()"><svg class="ico s14"><use href="#i-trash"></use></svg>删除</button>
+              </div>
+              <div class="row" id="presetSaveRow" style="display:none">
+                <input type="text" class="ctl" id="presetNameInput" style="max-width:300px" placeholder="预设名称，如：4K 收藏">
+                <button class="btn sm pri" onclick="savePresetFromInput()">确认</button>
+                <button class="btn sm" onclick="hideSavePreset()">取消</button>
+              </div>
+            </section>
 
-        <div class="cols">
-          <div class="colstack">
-
-            <div class="sect">
-              <div class="sh"><b>画质与输出</b><span class="rule"></span></div>
+            <section class="settings-section" id="set-output">
+              <div class="sh"><b>输出与画质</b><span class="rule"></span><span class="note">视频编码、音频与容器</span></div>
               <div class="row"><span class="lb">分辨率上限</span><span class="sel"><select class="ctl" id="s_resolution"></select><svg class="ico s14 cv"><use href="#i-chevron"></use></svg></span></div>
               <div class="row"><span class="lb">编码模式</span><span class="sel"><select class="ctl" id="s_codec"></select><svg class="ico s14 cv"><use href="#i-chevron"></use></svg></span></div>
               <div class="row"><span class="lb">音频质量</span><span class="sel"><select class="ctl" id="s_audio"></select><svg class="ico s14 cv"><use href="#i-chevron"></use></svg></span></div>
               <div class="row"><span class="lb">视频输出格式</span><span class="sel"><select class="ctl" id="s_format"></select><svg class="ico s14 cv"><use href="#i-chevron"></use></svg></span></div>
               <div class="row"><span class="lb">音频处理方案</span><span class="sel"><select class="ctl" id="s_audiomode" onchange="onAudioModeChange()"></select><svg class="ico s14 cv"><use href="#i-chevron"></use></svg></span></div>
-            </div>
+              <div class="row"><span class="lb">音频输出格式</span><span class="sel"><select class="ctl" id="s_audiofmt"></select><svg class="ico s14 cv"><use href="#i-chevron"></use></svg></span></div>
+              <div class="row"><span class="lb">硬件加速</span><span class="sel"><select class="ctl" id="s_hwaccel"></select><svg class="ico s14 cv"><use href="#i-chevron"></use></svg></span></div>
+              <div class="row"><span class="lb">嵌入元数据</span><span class="sw on" id="sw_meta" onclick="toggleSwitch(this)"><i></i></span></div>
+              <div class="row"><span class="lb">下载封面</span><span class="sw on" id="sw_thumb" onclick="toggleSwitch(this)"><i></i></span></div>
+            </section>
 
-            <div class="sect">
-              <div class="sh"><b>字幕下载</b><span class="rule"></span></div>
-              <div class="row"><span class="lb">下载字幕</span><span class="sw" id="sw_subtitles" onclick="toggleSwitch(this);onSubtitleToggle()"><i></i></span></div>
-              <div class="row" id="row_subtitle_type"><span class="lb">字幕类型</span><span class="sel"><select class="ctl" id="s_subtitle_type"><option value="all">人工字幕 + 自动字幕</option><option value="manual">仅人工字幕</option><option value="auto">仅自动字幕</option></select><svg class="ico s14 cv"><use href="#i-chevron"></use></svg></span></div>
-              <div class="row" id="row_subtitle_lang"><span class="lb">字幕语言</span><span class="sel"><select class="ctl" id="s_subtitle_lang_preset" onchange="onSubtitleLanguagePresetChange('s')"></select><svg class="ico s14 cv"><use href="#i-chevron"></use></svg></span></div>
-              <div class="row" id="row_subtitle_custom" style="display:none"><span class="lb">自定义语言</span><input type="text" class="ctl mono" id="s_subtitle_langs" maxlength="200" style="flex:1" placeholder="例如 ja.*,zh.*,en.*"></div>
-            </div>
+            <section class="settings-section" id="set-live">
+              <div class="sh"><b>直播设置</b><span class="rule"></span><span class="note">任务开始前会按平台检查直播状态</span></div>
+              <div class="row"><span class="lb">直播下载方式</span><span class="sel"><select class="ctl" id="s_live_stream_method"><option value="auto">自动（B站优先录播姬）</option><option value="yt-dlp">yt-dlp</option><option value="bililive-recorder">BililiveRecorder（仅B站）</option></select><svg class="ico s14 cv"><use href="#i-chevron"></use></svg></span></div>
+              <div class="row"><span class="lb">全局直播模式</span><span class="sel"><select class="ctl" id="s_live_mode"><option value="auto">自动（推荐）</option><option value="catch_up">追开播（条件）</option><option value="live_edge">从当前时刻</option><option value="wait">蹲开播（开播后自动录制）</option></select><svg class="ico s14 cv"><use href="#i-chevron"></use></svg></span></div>
+              <div class="row"><span class="lb">直播超时</span><input type="number" class="ctl mono" id="s_live_timeout" min="0" max="1440" value="0" style="width:110px"><span class="hint">分钟；0 表示不限时，单条和批量直播均有效；到点先收尾再验证</span></div>
+              <div class="row"><span class="lb">断流重试上限</span><input type="number" class="ctl mono" id="s_live_retries" min="0" max="5" value="5" style="width:110px"><span class="hint">每次保留新分段；恢复等待逐步增加，最长 30 秒。录播姬自行重连，崩溃标为失败</span></div>
+              <div class="row"><span class="lb">无增长告警</span><input type="number" class="ctl mono" id="s_live_watchdog" min="10" max="600" value="60" style="width:110px"><span class="hint">秒；连续两倍时间无媒体增长或下载进度则收尾并按策略重试</span></div>
+              <div class="row"><span class="lb">磁盘安全余量</span><input type="number" class="ctl mono" id="s_live_free_mb" min="64" max="102400" value="256" style="width:110px"><span class="hint">MiB；低于余量自动收尾</span></div>
+              <div class="row"><span class="lb">预检估算码率</span><input type="number" class="ctl mono" id="s_live_bitrate" min="128" max="100000" value="8000" style="width:110px"><span class="hint">Kbps；预计时长 × 码率 × 1.3；不限时先预留 15 分钟并持续检查</span></div>
+              <div class="hint">YouTube 先验证可追播 DASH；Twitch 先录实时尾部、独立回填本场 VOD。无法验证重叠时保留两路文件并报告缺口。B站录播姬使用原始 FLV、最高可用画质；代理、浏览器 Cookie、自定义参数或音频处理需要 yt-dlp 时会明确降级。</div>
+              <div class="row"><span class="lb">默认抓取直播弹幕</span><span class="sw" id="sw_live_danmaku" role="switch" aria-label="默认抓取直播弹幕" aria-checked="false" tabindex="0" onclick="toggleSwitch(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSwitch(this)}"><i></i></span><span class="hint">下方可按平台覆盖；只影响新任务，采集失败不停止媒体录制</span></div>
+              <div id="liveCommentPlatforms" class="live-platform-modes" aria-label="各平台弹幕默认值"></div>
+              <div class="row live-comment-control"><label class="lb" for="s_live_danmaku_formats">弹幕导出格式</label><span class="sel"><select class="ctl" id="s_live_danmaku_formats"><option value="srt,ass">SRT + ASS</option><option value="srt">SRT</option><option value="ass">ASS</option></select></span><span class="hint">结束后逐个媒体分段生成同名字幕；密集弹幕超出轨道容量会丢弃并计数</span></div>
+              <div class="row"><span class="lb">导出匿名化</span><span class="sw" id="sw_live_danmaku_anon" role="switch" aria-label="导出匿名化" aria-checked="false" tabindex="0" onclick="toggleSwitch(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSwitch(this)}"><i></i></span><span class="hint">事件库与字幕的 UID/昵称作会话内哈希；原生 XML / 聊天 JSON 仍含原始身份信息</span></div>
+              <div class="row live-comment-control"><label class="lb" for="s_live_danmaku_offset">弹幕时间微调</label><input type="number" class="ctl mono" id="s_live_danmaku_offset" min="-600000" max="600000" step="100" value="0" style="width:130px"><span class="hint">毫秒；正数延后，负数提前。可在录制结束后按当前格式与微调重新导出</span></div>
+              <div class="hint">B站复用录播姬 XML，YouTube 使用原生 live_chat，Withny 使用原生聊天 JSON；Twitch、TwitCasting、NicoChannel、Niconico 独立采集。部分平台需要登录或观看权限。源时间与本机时间精度不同，估算锚点会标明未知误差，不宣称已精确校准；详情见 comments-report.json。</div>
+              <div class="sh" style="margin-top:4px"><b>平台默认录制方式</b><span class="rule"></span><span class="note">仅显示同时支持追开播与当前录制的平台</span></div>
+              <div id="livePlatformModes" class="live-platform-modes"></div>
+              <div class="hint">追开播不可用时会提示原因并降级为从当前时刻；条件平台（Niconico/NicoChannel/TwitCasting/X）在探测能力接入前不显示。</div>
+              <div class="row"><span class="lb">直播提醒</span><button class="btn sm gh" onclick="clearLiveNoticeMutes()">清除“不再提醒”</button><span class="hint">提醒弹窗中的“不再提醒”保存在浏览器本地</span></div>
+            </section>
 
-            <div class="sect">
+            <section class="settings-section" id="set-network">
               <div class="sh"><b>网络与代理</b><span class="rule"></span></div>
-              <div class="row"><span class="lb">并发线程数</span><input type="range" id="s_threads" min="1" max="8" value="4"><span class="rval" id="thr_val">4</span></div>
+              <div class="row"><span class="lb">并发线程数</span><input type="range" id="s_threads" min="1" max="32" value="4"><span class="rval" id="thr_val">4</span></div>
               <div class="row"><span class="lb">下载限速</span><input type="range" id="s_speed" min="0" max="50" value="0"><span class="rval" id="spd_val">不限</span></div>
-              <div class="sub-hint speed-limit-warning">推荐限速：5–10 MB/s。高速或大批量下载可能导致 IP 或账号被限制或封禁，相关后果由使用者自行承担。</div>
               <div class="row"><span class="lb">启用代理</span><span class="sw" id="sw_proxy" onclick="toggleSwitch(this)"><i></i></span></div>
               <div class="row"><span class="lb">代理类型</span><span class="sel" style="max-width:150px"><select class="ctl" id="s_proxytype"><option value="http">HTTP</option><option value="socks5">SOCKS5</option></select><svg class="ico s14 cv"><use href="#i-chevron"></use></svg></span></div>
               <div class="row"><span class="lb">代理地址</span><input type="text" class="ctl mono" id="s_proxyaddr" value="127.0.0.1" style="flex:1"><span class="dim">:</span><input type="text" class="ctl mono" id="s_proxyport" value="7890" style="width:88px;flex:none"></div>
-            </div>
+              <div class="network-check">
+                <div class="row"><span class="lb">自动调整并发</span><button class="btn" id="btnNetworkTest" onclick="startNetworkTest()">快速检测网络</button><button class="btn gh" id="btnNetworkCancel" onclick="cancelNetworkTest()" disabled>取消检测</button></div>
+                <div class="hint">使用当前代理设置访问 Cloudflare 测试节点，约 20 秒、最多 32 MiB 测试数据（不含协议开销）；检测期间暂停新任务启动，请先完成或取消已有任务。</div>
+                <p id="networkTestStatus" role="status" aria-live="polite">检测后可选择高性能或高可靠配置。</p>
+                <div id="networkTestMetrics" class="network-metrics"></div>
+                <div id="networkTestNotes" class="hint"></div>
+                <div id="networkProfiles" class="network-profiles" style="display:none">
+                  <div class="network-profile"><b>高性能</b><p id="networkPerformanceSummary"></p><p class="mono" id="networkPerformanceSettings"></p><button class="btn" id="btnNetworkPerformance" onclick="applyNetworkProfile('performance')">应用高性能</button></div>
+                  <div class="network-profile"><b>高可靠</b><p id="networkReliableSummary"></p><p class="mono" id="networkReliableSettings"></p><button class="btn" id="btnNetworkReliable" onclick="applyNetworkProfile('reliable')">应用高可靠</button></div>
+                </div>
+                <div class="hint">检测结果 15 分钟内可用，切换网络或代理后请重新检测。快速检测给出本轮线路的观测区间，不代表所有平台的带宽上下限，也不能保证不漏录。高可靠方案仅对普通 yt-dlp 视频限速，保留直播带宽。</div>
+              </div>
+            </section>
 
-            <div class="sect">
+            <section class="settings-section" id="set-cookie">
               <div class="sh"><b>Cookie 登录</b><span class="rule"></span></div>
               <div class="row"><span class="lb">启用 Cookie</span><span class="sw on" id="sw_cookies" onclick="toggleSwitch(this)"><i></i></span></div>
               <div class="row"><span class="lb">Cookie 模式</span><span class="sel"><select class="ctl" id="s_cookiemode" onchange="toggleCookieMode()"><option value="1">cookies.txt 文件</option><option value="2">浏览器提取</option></select><svg class="ico s14 cv"><use href="#i-chevron"></use></svg></span></div>
               <div class="row" id="row_browser"><span class="lb">浏览器</span><span class="sel"><select class="ctl" id="s_browser"></select><svg class="ico s14 cv"><use href="#i-chevron"></use></svg></span></div>
               <div class="row" id="row_profile"><span class="lb">配置文件名</span><input type="text" class="ctl mono" id="s_profile" value="Default" placeholder="Firefox 留空自动探测" style="flex:1"></div>
-            </div>
+            </section>
 
-          </div>
-          <div class="colstack">
+            <section class="settings-section" id="set-subtitle">
+              <div class="sh"><b>字幕</b><span class="rule"></span></div>
+              <div class="row"><span class="lb">下载字幕</span><span class="sw" id="sw_subtitles" onclick="toggleSwitch(this);onSubtitleToggle()"><i></i></span></div>
+              <div class="row" id="row_subtitle_type"><span class="lb">字幕类型</span><span class="sel"><select class="ctl" id="s_subtitle_type"><option value="all">人工字幕 + 自动字幕</option><option value="manual">仅人工字幕</option><option value="auto">仅自动字幕</option></select><svg class="ico s14 cv"><use href="#i-chevron"></use></svg></span></div>
+              <div class="row" id="row_subtitle_lang"><span class="lb">字幕语言</span><span class="sel"><select class="ctl" id="s_subtitle_lang_preset" onchange="onSubtitleLanguagePresetChange('s')"></select><svg class="ico s14 cv"><use href="#i-chevron"></use></svg></span></div>
+              <div class="row" id="row_subtitle_custom" style="display:none"><span class="lb">自定义语言</span><input type="text" class="ctl mono" id="s_subtitle_langs" maxlength="200" style="flex:1" placeholder="例如 ja.*,zh.*,en.*"></div>
+            </section>
 
-            <div class="sect">
-              <div class="sh"><b>编码与合并</b><span class="rule"></span></div>
-              <div class="row"><span class="lb">硬件加速</span><span class="sel"><select class="ctl" id="s_hwaccel"></select><svg class="ico s14 cv"><use href="#i-chevron"></use></svg></span></div>
-              <div class="row"><span class="lb">音频输出格式</span><span class="sel"><select class="ctl" id="s_audiofmt"></select><svg class="ico s14 cv"><use href="#i-chevron"></use></svg></span></div>
-              <div class="row"><span class="lb">直播下载方式</span><span class="sel"><select class="ctl" id="s_live_stream_method"><option value="yt-dlp">yt-dlp（默认）</option></select><svg class="ico s14 cv"><use href="#i-chevron"></use></svg></span></div>
-              <div class="hint">蹲开播会持续等待未开播的频道；追开播依赖平台回溯/DVR；加入时开录立即从当前可获取位置开始。</div>
-              <div class="row"><span class="lb">嵌入元数据</span><span class="sw on" id="sw_meta" onclick="toggleSwitch(this)"><i></i></span></div>
-              <div class="row"><span class="lb">下载封面</span><span class="sw on" id="sw_thumb" onclick="toggleSwitch(this)"><i></i></span></div>
-            </div>
-
-            <div class="sect">
+            <section class="settings-section" id="set-filename">
               <div class="sh"><b>文件名</b><span class="rule"></span></div>
               <div class="row"><span class="lb">Win 兼容命名</span><span class="sw on" id="sw_winfn" onclick="toggleSwitch(this)"><i></i></span><span class="hint">去掉 Windows 不允许的字符</span></div>
               <div class="row"><span class="lb">严格文件名</span><span class="sw" id="sw_strict" onclick="toggleSwitch(this)"><i></i></span><span class="hint">仅保留 ASCII 与数字</span></div>
-            </div>
+            </section>
 
-            <div class="sect">
+            <section class="settings-section" id="set-platform">
               <div class="sh"><b>平台专项</b><span class="rule"></span></div>
               <div class="row"><span class="lb">B站多 P 策略</span><span class="sel"><select class="ctl" id="s_bili_policy"><option value="all">全部下载</option><option value="select">弹出选择</option></select><svg class="ico s14 cv"><use href="#i-chevron"></use></svg></span></div>
               <div class="row"><span class="lb">YouTube PO Token</span><span class="sw" id="sw_youtube_po_token" onclick="toggleSwitch(this)"><i></i></span><span class="hint">下载前自动启动本地 BgUtils Provider，缓解部分 403</span></div>
-              <div class="row"><span class="lb">Niconico 弹幕</span><span class="sw" id="sw_nicocmt" onclick="toggleSwitch(this)"><i></i></span><span class="hint">下载并保存 XML 弹幕</span></div>
+              <div class="row"><span class="lb">Niconico 点播弹幕</span><span class="sw" id="sw_nicocmt" onclick="toggleSwitch(this)"><i></i></span><span class="hint">直播弹幕使用上方的逐平台设置</span></div>
               <div class="row"><span class="lb">Niconico 重编码</span><span class="sw" id="sw_nicorec" onclick="toggleSwitch(this)"><i></i></span><span class="hint">兼容性优先，速度较慢</span></div>
-            </div>
+              <div class="sh" style="margin-top:12px"><b>TwitCasting</b><span class="rule"></span></div>
+              <div class="row"><span class="lb">记住密码</span><span class="sw" id="sw_tc_remember" role="switch" aria-label="记住 TwitCasting 密码" aria-checked="false" tabindex="0" onclick="toggleSwitch(this);onTcPasswordChange()" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();this.click()}"><i></i></span><span class="hint">默认关闭；开启后在本次运行内按链接复用成功使用的密码</span></div>
+              <div class="row"><span class="lb">保存密码到 XLSX</span><span class="sw" id="sw_tc_xlsx" role="switch" aria-label="保存 TwitCasting 密码到 XLSX" aria-checked="false" tabindex="0" onclick="if(this.getAttribute('aria-disabled')!=='true') toggleSwitch(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();this.click()}"><i></i></span><span class="hint">默认关闭；需开启记住密码，保存到根目录 twitcasting_passwords.xlsx，明文保存并在下次启动时读取</span></div>
+            </section>
 
-            <div class="sect">
-              <div class="sh"><b>高级参数</b><span class="rule"></span></div>
+            <section class="settings-section" id="set-tasks">
+              <div class="sh"><b>任务与并发</b><span class="rule"></span><span class="note">一次点击创建一个任务</span></div>
+              <div class="row"><span class="lb">启用任务模式</span><span class="sw on" id="sw_task_mode" onclick="toggleSwitch(this)"><i></i></span><span class="hint">下载/录制进入任务列表；关闭则使用旧单任务模式</span></div>
+              <div class="row"><span class="lb">最大并行任务数</span><input type="number" class="ctl mono" id="s_task_parallel" min="1" max="5" value="2" style="width:100px"><span class="hint">默认 2，最多 5；1 表示任务间串行</span></div>
+              <div class="row"><span class="lb">任务排序</span><span class="sel"><select class="ctl" id="s_task_order"></select><svg class="ico s14 cv"><use href="#i-chevron"></use></svg></span></div>
+              <div class="row"><span class="lb">任务内直播与下载并行</span><span class="sw on" id="sw_task_mixed" onclick="toggleSwitch(this);onTaskMixedChange()"><i></i></span><span class="hint">默认开启，直播与视频使用独立额度；关闭后全部链接按输入顺序串行</span></div>
+              <div class="row"><span class="lb">任务内直播并行数</span><input type="number" class="ctl mono" id="s_task_live_parallel" min="2" max="5" value="2" style="width:100px"><span class="hint">默认 2，可设置 2–5 路，不占用视频下载额度</span></div>
+              <div class="row"><span class="lb">任务内视频并行数</span><input type="number" class="ctl mono" id="s_task_download_parallel" min="1" max="5" value="1" style="width:100px"><span class="hint">默认 1，视频下载串行；最多 5 路，不占用直播额度</span></div>
+              <div class="row"><span class="lb">普通下载限速</span><input type="number" class="ctl mono" id="s_task_download_speed" min="0" max="100000" step="0.1" value="0" style="width:110px"><span class="hint">MiB/s / 每条普通 yt-dlp 视频；0 不限，不限制直播，Withny 专用流程不适用</span></div>
+              <div class="hint">排序只影响排队任务；任务间并行数与排序对队列实时生效，任务内设置在提交时固定。默认共可运行 4 路直播 + 2 路视频，上限共 25 路直播 + 25 路视频；每条链接还会使用所设下载线程。</div>
+              <div class="hint">任务列表在本次运行期间保留，重启后不恢复。归档和密码确认在对应任务详情内处理；蹲开播仍由等待开播面板管理。</div>
+            </section>
+
+            <section class="settings-section" id="set-advanced">
+              <div class="sh"><b>高级与诊断</b><span class="rule"></span></div>
               <div class="row args-setting-row"><span class="lb">默认 yt-dlp 参数</span><textarea class="ctl mono" id="s_ytdlp_default_args" maxlength="4000" rows="3" spellcheck="false" placeholder='每次下载都会添加，例如：--sleep-requests 1'></textarea></div>
               <div class="hint">参数使用空格分隔；含空格的值请用英文引号包裹。本次参数会追加在默认参数之后。</div>
-            </div>
-
-            <div class="sect">
-              <div class="sh"><b>诊断</b><span class="rule"></span></div>
               <div class="row"><span class="lb">运行日志</span><span class="sw on" id="sw_log" onclick="toggleSwitch(this)"><i></i></span><span class="hint">写入 logs/ 目录</span></div>
-            </div>
-
+            </section>
           </div>
         </div>
       </div>
@@ -368,7 +381,7 @@
         <div class="tiles">
           <button class="tile" onclick="startBatch()"><svg class="ico s20"><use href="#i-list"></use></svg><span class="nm">TXT 混合批量下载</span></button>
           <button class="tile" onclick="toolAction('gen-template')"><svg class="ico s20"><use href="#i-file-text"></use></svg><span class="nm">生成批量下载模板</span></button>
-          <button class="tile" onclick="toolAction('gen-cookie-template')" title="创建不含登录凭证的空白 Netscape 模板；已有 cookies.txt 不覆盖"><svg class="ico s20"><use href="#i-cookie"></use></svg><span class="nm">生成 Cookie 模板</span></button>
+          <button class="tile" onclick="toolAction('gen-cookie-template')"><svg class="ico s20"><use href="#i-cookie"></use></svg><span class="nm">生成 Cookie 模板</span></button>
           <button class="tile" data-panel="subtitleDownloadDialog" onclick="showSubtitleDownloader()"><svg class="ico s20"><use href="#i-file-text"></use></svg><span class="nm">单独下载字幕</span></button>
           <button class="tile" data-panel="coverDownloadDialog" onclick="showCoverDownloader()"><svg class="ico s20"><use href="#i-image"></use></svg><span class="nm">下载视频封面</span></button>
           <button class="tile" onclick="toolAction('update-ytdlp')"><svg class="ico s20"><use href="#i-refresh"></use></svg><span class="nm">更新 yt-dlp</span></button>
@@ -424,17 +437,17 @@
           </div>
           <div class="cols" style="gap:14px 44px">
             <div class="colstack" style="gap:12px">
-              <div class="row"><span class="lb">源文件目录</span><input type="text" class="ctl mono" id="audioDir" style="flex:1" placeholder="选择或输入音频目录…"><button class="btn sm" onclick="browseAudioDir()"><svg class="ico s14"><use href="#i-folder-open"></use></svg>浏览</button></div>
-              <div class="row"><span class="lb">目标格式</span><span class="sel"><select class="ctl" id="audioOutFormat"></select><svg class="ico s14 cv"><use href="#i-chevron"></use></svg></span></div>
-              <div class="row" id="audioQualityRow"><span class="lb">质量参数</span><span class="sel"><select class="ctl" id="audioQuality"></select><svg class="ico s14 cv"><use href="#i-chevron"></use></svg></span></div>
+              <div class="row"><span class="lb">源文件目录</span><input type="text" class="ctl mono" id="audioDir" aria-label="音频转换源目录" style="flex:1" placeholder="选择或输入音频目录…"><button class="btn sm" onclick="browseAudioDir()"><svg class="ico s14"><use href="#i-folder-open"></use></svg>浏览</button></div>
+              <div class="row"><span class="lb">目标格式</span><span class="sel"><select class="ctl" id="audioOutFormat" aria-label="音频转换目标格式"></select><svg class="ico s14 cv"><use href="#i-chevron"></use></svg></span></div>
+              <div class="row" id="audioQualityRow"><span class="lb">质量参数</span><span class="sel"><select class="ctl" id="audioQuality" aria-label="音频转换质量"></select><svg class="ico s14 cv"><use href="#i-chevron"></use></svg></span></div>
             </div>
             <div class="colstack" style="gap:12px">
-              <div class="row"><span class="lb">包含子目录</span><span class="sw" id="sw_audioRecursive" onclick="toggleSwitch(this)"><i></i></span></div>
-              <div class="row"><span class="lb">转换后删除源文件</span><span class="sw" id="sw_audioDelSrc" onclick="toggleSwitch(this)"><i></i></span></div>
+              <div class="row"><span class="lb">包含子目录</span><span class="sw" id="sw_audioRecursive" role="switch" aria-label="转换包含子目录" aria-checked="false" tabindex="0" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();this.click()}" onclick="toggleSwitch(this)"><i></i></span></div>
+              <div class="row"><span class="lb">转换后删除源文件</span><span class="sw" id="sw_audioDelSrc" role="switch" aria-label="转换后删除源文件" aria-checked="false" tabindex="0" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();this.click()}" onclick="toggleSwitch(this)"><i></i></span></div>
             </div>
           </div>
           <div class="pfoot">
-            <span class="hint">无损格式（WAV / FLAC / ALAC）无需设置质量参数。</span>
+            <span class="hint">转换结果保存在源文件旁；已有文件跳过。删除源文件前会验证音轨并完整解码输出。</span>
             <button class="btn pri" onclick="startAudioConvert()"><svg class="ico s14"><use href="#i-play"></use></svg>开始转换</button>
           </div>
         </div>
@@ -448,22 +461,22 @@
           </div>
           <div class="cols" style="gap:14px 44px">
             <div class="colstack" style="gap:12px">
-              <div class="row"><span class="lb">源文件目录</span><input type="text" class="ctl mono" id="loudnormDir" style="flex:1" placeholder="选择或输入音频目录…"><button class="btn sm" onclick="browseLoudnormDir()"><svg class="ico s14"><use href="#i-folder-open"></use></svg>浏览</button></div>
-              <div class="row"><span class="lb">处理模式</span><span class="sel"><select class="ctl" id="loudnormMode"><option value="single">单次标准处理 — 速度快</option><option value="double">双次精准处理 — 先分析后处理</option></select><svg class="ico s14 cv"><use href="#i-chevron"></use></svg></span></div>
-              <div class="row"><span class="lb">输出格式</span><span class="sel"><select class="ctl" id="loudnormOutFormat"></select><svg class="ico s14 cv"><use href="#i-chevron"></use></svg></span></div>
-              <div class="row"><span class="lb">输出目录</span><input type="text" class="ctl" id="loudnormOutDir" style="flex:1" placeholder="留空 = 源目录下 loudnorm_output/"></div>
-              <div class="row"><span class="lb">包含子目录</span><span class="sw" id="sw_loudnormRecursive" onclick="toggleSwitch(this)"><i></i></span></div>
+              <div class="row"><span class="lb">源文件目录</span><input type="text" class="ctl mono" id="loudnormDir" aria-label="响度统一源目录" style="flex:1" placeholder="选择或输入音频目录…"><button class="btn sm" onclick="browseLoudnormDir()"><svg class="ico s14"><use href="#i-folder-open"></use></svg>浏览</button></div>
+              <div class="row"><span class="lb">处理模式</span><span class="sel"><select class="ctl" id="loudnormMode" aria-label="响度处理模式"><option value="single">单次标准处理 — 速度快</option><option value="double">双次精准处理 — 先分析后处理</option></select><svg class="ico s14 cv"><use href="#i-chevron"></use></svg></span></div>
+              <div class="row"><span class="lb">输出格式</span><span class="sel"><select class="ctl" id="loudnormOutFormat" aria-label="响度输出格式"></select><svg class="ico s14 cv"><use href="#i-chevron"></use></svg></span></div>
+              <div class="row"><span class="lb">输出目录</span><input type="text" class="ctl" id="loudnormOutDir" aria-label="响度输出目录" style="flex:1" placeholder="留空 = 源目录下 loudnorm_output/"></div>
+              <div class="row"><span class="lb">包含子目录</span><span class="sw" id="sw_loudnormRecursive" role="switch" aria-label="响度处理包含子目录" aria-checked="false" tabindex="0" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();this.click()}" onclick="toggleSwitch(this)"><i></i></span></div>
             </div>
             <div class="colstack" style="gap:12px">
-              <div class="row"><span class="lb">目标响度 I</span><input type="range" id="loudnormI" min="-70" max="-5" value="-24" step="0.5"><span class="rval" id="loudnormIVal">-24 LUFS</span></div>
+              <div class="row"><span class="lb">目标响度 I</span><input type="range" id="loudnormI" aria-label="目标综合响度" min="-70" max="-5" value="-24" step="0.5"><span class="rval" id="loudnormIVal">-24 LUFS</span></div>
               <div class="sub-hint">广播标准 -23 LUFS，流媒体常用 -16 ~ -14 LUFS</div>
-              <div class="row"><span class="lb">响度范围 LRA</span><input type="range" id="loudnormLRA" min="1" max="20" value="7" step="0.5"><span class="rval" id="loudnormLRAVal">7 LU</span></div>
-              <div class="row"><span class="lb">真峰值上限 TP</span><input type="range" id="loudnormTP" min="-9" max="0" value="-2" step="0.5"><span class="rval" id="loudnormTPVal">-2 dBTP</span></div>
+              <div class="row"><span class="lb">响度范围 LRA</span><input type="range" id="loudnormLRA" aria-label="目标响度范围" min="1" max="20" value="7" step="0.5"><span class="rval" id="loudnormLRAVal">7 LU</span></div>
+              <div class="row"><span class="lb">真峰值上限 TP</span><input type="range" id="loudnormTP" aria-label="目标真峰值" min="-9" max="0" value="-2" step="0.5"><span class="rval" id="loudnormTPVal">-2 dBTP</span></div>
               <div class="sub-hint">EBU R128 为 -2 dBTP，CD 母带常用 -1 dBTP</div>
             </div>
           </div>
           <div class="pfoot">
-            <span class="hint">支持 MP3 / WAV / FLAC / AAC / OGG / Opus，双次模式会先分析实际响度再精准归一化。</span>
+            <span class="hint">支持 MP3 / WAV / FLAC / AAC / OGG / Opus，双次模式先分析再处理；静音无法测量时回退单次。APE 输入请改选 FLAC。</span>
             <button class="btn pri" onclick="startAudioLoudnorm()"><svg class="ico s14"><use href="#i-play"></use></svg>开始处理</button>
           </div>
         </div>
@@ -477,15 +490,15 @@
           </div>
           <div class="cols" style="gap:14px 44px">
             <div class="colstack" style="gap:12px">
-              <div class="row"><span class="lb">源文件目录</span><input type="text" class="ctl mono" id="volumeDir" style="flex:1" placeholder="选择或输入音频目录…"><button class="btn sm" onclick="browseVolumeDir()"><svg class="ico s14"><use href="#i-folder-open"></use></svg>浏览</button></div>
-              <div class="row"><span class="lb">输出格式</span><span class="sel"><select class="ctl" id="volumeOutFormat"></select><svg class="ico s14 cv"><use href="#i-chevron"></use></svg></span></div>
-              <div class="row"><span class="lb">输出目录</span><input type="text" class="ctl" id="volumeOutDir" style="flex:1" placeholder="留空 = 源目录下 volume_output/"></div>
-              <div class="row"><span class="lb">包含子目录</span><span class="sw" id="sw_volumeRecursive" onclick="toggleSwitch(this)"><i></i></span></div>
+              <div class="row"><span class="lb">源文件目录</span><input type="text" class="ctl mono" id="volumeDir" aria-label="音量调整源目录" style="flex:1" placeholder="选择或输入音频目录…"><button class="btn sm" onclick="browseVolumeDir()"><svg class="ico s14"><use href="#i-folder-open"></use></svg>浏览</button></div>
+              <div class="row"><span class="lb">输出格式</span><span class="sel"><select class="ctl" id="volumeOutFormat" aria-label="音量输出格式"></select><svg class="ico s14 cv"><use href="#i-chevron"></use></svg></span></div>
+              <div class="row"><span class="lb">输出目录</span><input type="text" class="ctl" id="volumeOutDir" aria-label="音量输出目录" style="flex:1" placeholder="留空 = 源目录下 volume_output/"></div>
+              <div class="row"><span class="lb">包含子目录</span><span class="sw" id="sw_volumeRecursive" role="switch" aria-label="音量调整包含子目录" aria-checked="false" tabindex="0" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();this.click()}" onclick="toggleSwitch(this)"><i></i></span></div>
             </div>
             <div class="colstack" style="gap:12px">
-              <div class="row"><span class="lb">音量增益</span><input type="range" id="volumeGain" min="-30" max="30" value="0" step="0.5"><span class="rval" id="volumeGainVal">0.0 dB</span></div>
+              <div class="row"><span class="lb">音量增益</span><input type="range" id="volumeGain" aria-label="音量增益" min="-30" max="30" value="0" step="0.5"><span class="rval" id="volumeGainVal">0.0 dB</span></div>
               <div class="sub-hint">正增益建议 ≤ +6 dB，过大会削波失真；负增益安全无失真。</div>
-              <div class="row" id="volumeLimiterRow" style="display:none"><span class="lb">限幅器保护</span><span class="sw on" id="sw_volumeLimiter" onclick="toggleSwitch(this)"><i></i></span><span class="hint">前瞻限幅 alimiter，峰值不超过 -0.1 dBTP</span></div>
+              <div class="row" id="volumeLimiterRow" style="display:none"><span class="lb">限幅器保护</span><span class="sw on" id="sw_volumeLimiter" role="switch" aria-label="启用音量限幅器" aria-checked="true" tabindex="0" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();this.click()}" onclick="toggleSwitch(this)"><i></i></span><span class="hint">采样峰值限幅 -0.1 dBFS；有损编码后的真峰值可能更高</span></div>
             </div>
           </div>
           <div class="pfoot">
@@ -494,7 +507,8 @@
           </div>
         </div>
 
-        <div class="tool-status" id="toolStatus" style="display:none"></div>
+        <div class="tool-status" id="toolStatus" style="display:none" role="status" aria-live="polite"></div>
+        <button class="btn sm" id="btnAudioStop" onclick="stopAudioTool()" disabled>停止音频工具</button>
 
         <div class="console" id="toolConsole">
           <div class="chead">
@@ -524,11 +538,9 @@
             <h3><svg class="ico s14"><use href="#i-cookie"></use></svg>Cookie 配置</h3>
             <p>Fantia 必须登录；YouTube / Twitch 的年龄限制与会员内容也需要。两种方式二选一：</p>
             <ol>
-              <li><b>cookies.txt 文件</b> — 从已登录浏览器导出 Netscape 格式，改名放到工具目录。</li>
+              <li><b>cookies.txt 文件</b> — 用浏览器扩展导出，改名放到工具目录。</li>
               <li><b>浏览器提取（推荐）</b> — 在设置里选已登录的浏览器，每次下载前自动取最新 Cookie。</li>
             </ol>
-            <p>「生成 Cookie 模板」只创建空白模板，不含登录凭证；已有 <span class="code">cookies.txt</span> 不会覆盖或自动转换。真实 Cookie 需从已登录浏览器导出。</p>
-            <p>文件首行应为 <span class="code"># Netscape HTTP Cookie File</span>；每条 Cookie 的 7 个字段须用实际 TAB 分隔，不能使用空格或字面量 <span class="code">\t</span>。导出“当前站点”不会自动包含其他平台的 Cookie。</p>
           </div>
 
           <div class="dsec">
@@ -540,14 +552,11 @@
 
           <div class="dsec">
             <h3><svg class="ico s14"><use href="#i-radio"></use></svg>直播录制</h3>
-            <p><b>YouTube：</b>粘贴 <span class="code">youtube.com/live/...</span> 或 <span class="code">youtube.com/live</span> 入口；需要登录的直播请启用 Cookie，已结束的直播按回放下载。</p>
-            <p><b>Bilibili：</b>粘贴 <span class="code">live.bilibili.com/房间号</span>，会按直播流录制并支持断流重连；直播链接不参与视频分P选择。</p>
-            <p><b>Twitch：</b>粘贴主播频道页（<span class="code">twitch.tv/主播名</span>）等待开播并录制；<span class="code">/videos/</span> 和 <span class="code">/clips/</span> 是回放/剪辑。</p>
-            <p><b>Niconico：</b>粘贴 <span class="code">live.nicovideo.jp/watch/lv...</span> 或 <span class="code">live2.nicovideo.jp</span> 入口；直播按分片持续录制，Timeshift/已结束内容按可用回放下载。</p>
-            <p><b>NicoChannel：</b>粘贴频道的 <span class="code">nicochannel.jp/频道/live/...</span> 入口；需要安装 NicoChannel 插件并在 Firefox 登录提取 JWT，会员直播仍受账号权限限制。</p>
-            <p><b>TwitCasting：</b>粘贴主播页录直播；<span class="code">/movie/ID</span> 下载单条，<span class="code">/show</span> 或 <span class="code">/archive</span> 拉取历史列表。密码保护或会员限定内容会弹窗要求输入密码。</p>
-            <p><b>Twitter / X Spaces：</b>粘贴 <span class="code">x.com/i/spaces/...</span> 或 <span class="code">twitter.com/i/spaces/...</span>；Spaces 以音频流录制，通常需要登录 Cookie，已结束 Space 取决于平台是否保留回放。</p>
-            <p>直播链接会自动识别并显示 LIVE 状态；在下载任务页提交链接前可选择「蹲开播」「追开播」或「加入时开录」，并设置蹲开播检测间隔。录制期间需保持工具运行，点「停止」即结束。各平台的登录、地区、会员和插件限制仍由平台及 yt-dlp 决定。</p>
+            <p><b>直播模式：</b>在「设置 → 直播设置」选择全局模式，并可分别设置支持追开播的平台默认方式。开始直播任务前会检查状态：未开播可加入蹲开播；已开播会显示开播时间和已开播时长，并让你确认录制方式；追开播不可用时会提示原因并降级为从当前时刻。</p>
+            <p><b>Bilibili：</b>粘贴 <span class="code">live.bilibili.com/房间号</span>，默认从当前时刻录制；普通观看侧无 DVR，不支持追开播。</p>
+            <p><b>Twitch：</b>粘贴频道 URL 录制当前直播；仅当本场有可访问的增长中 VOD 时才可能追开播。<span class="code">/videos/</span> 链接是回放。</p>
+            <p><b>TwitCasting：</b>主播页默认从当前时刻录制；<span class="code">/movie/ID</span> 下载单条，<span class="code">/show</span> 拉取历史列表。密码保护内容会弹窗要求输入密码；在平台专项设置中可选择记住密码或保存到 XLSX，两项默认关闭。</p>
+            <p>录制期间需保持工具运行；停止后先收尾，再验证音视频和文件完整性。恢复失败时会保留已录制内容与报告。</p>
           </div>
 
           <div class="dsec">
@@ -560,7 +569,7 @@
           <div class="dsec">
             <h3><svg class="ico s14"><use href="#i-globe"></use></svg>Twitter / NicoChannel</h3>
             <p><b>Twitter / X：</b>推文链接直接提取视频，Space 链接下载音频。未登录访问限流较严，建议开浏览器 Cookie 模式。</p>
-            <p><b>NicoChannel：</b>首次下载会从 Firefox 提取 JWT 登录令牌，请先在 Firefox 里登录；之后由插件通过 Cookie 文件自动续期。</p>
+            <p><b>NicoChannel：</b>从 Firefox 读取未过期的 JWT 登录令牌，请先在 Firefox 里登录。浏览器令牌过期时需重新刷新登录页面。</p>
           </div>
 
           <div class="dsec">
@@ -629,9 +638,8 @@
                 <div class="specrow"><span class="k">v2.4.0 字幕</span><span>ZheYi101 <a href="https://github.com/ZheYi101" target="_blank" rel="noopener noreferrer">@ZheYi101</a> — 字幕下载；猫猫葉汐A_spy — 修复与合并适配</span></div>
                 <div class="specrow"><span class="k">v2.4.0 更新</span><span>ErgouTree <a href="https://github.com/ergou10086" target="_blank" rel="noopener noreferrer">@ergou10086</a> — 其他更新与修复</span></div>
                 <div class="specrow"><span class="k">v2.5.0 WebUI</span><span>DarkKandaoMaster <a href="https://github.com/DarkKandaoMaster" target="_blank" rel="noopener noreferrer">@DarkKandaoMaster</a> — 视觉与交互体系重构</span></div>
+                <div class="specrow"><span class="k">v2.6.0 上游修复</span><span>猫猫葉汐A_spy <a href="https://github.com/maomaoyexi" target="_blank" rel="noopener noreferrer">@maomaoyexi</a> — Cookie 模板、TwitCasting 密码表、HLS 路径及恢复、文件对话框回退与相关测试</span></div>
                 <div class="specrow"><span class="k">v2.5.0 功能</span><span>ErgouTree <a href="https://github.com/ergou10086" target="_blank" rel="noopener noreferrer">@ergou10086</a> — 设置控件、TwitCasting、Provider 与目录收拢</span></div>
-                <div class="specrow"><span class="k">v2.6.0 功能与文档</span><span>猫猫葉汐A_spy <a href="https://github.com/maomaoyexi" target="_blank" rel="noopener noreferrer">@maomaoyexi</a> — 各平台直播、「本次 yt-dlp 参数」和「直播录制设置」按钮及相关功能、Cookie 模板、TwitCasting 密码表与 HLS 回退、.ytdl 清理、测试与文档</span></div>
-                <div class="specrow"><span class="k">v2.6.0 PR #15</span><span>ErgouTree <a href="https://github.com/ergou10086" target="_blank" rel="noopener noreferrer">@ergou10086</a> — 下载归档选择、独立批量封面、PO Token Provider 启动改进</span></div>
               </div>
             </div>
           </div>
@@ -730,12 +738,36 @@
   </div>
 </div>
 
+<!-- ====== 直播任务提醒 ====== -->
+<div class="scrim" id="liveNoticeOverlay">
+  <div class="dlg" style="width:520px" role="dialog" aria-modal="true" aria-labelledby="liveNoticeTitle">
+    <div class="dhead">
+      <svg class="ico s18"><use href="#i-radio"></use></svg><b id="liveNoticeTitle">直播任务</b>
+      <button class="btn sm gh" onclick="resolveLiveNotice(false)" aria-label="取消"><svg class="ico s14"><use href="#i-x"></use></svg></button>
+    </div>
+    <div class="dbody">
+      <p class="notice" id="liveNoticeSummary"></p>
+      <p class="mono dim" id="liveNoticeMeta" style="overflow-wrap:anywhere"></p>
+      <div class="row" id="liveNoticeModeRow">
+        <span class="lb">录制方式</span>
+        <span class="sel"><select class="ctl" id="liveNoticeMode" onchange="onLiveNoticeModeChange()"></select><svg class="ico s14 cv"><use href="#i-chevron"></use></svg></span>
+      </div>
+      <p class="notice" id="liveNoticeWarning" style="display:none"></p>
+      <label class="row" style="cursor:pointer"><input type="checkbox" id="liveNoticeMute" style="width:15px;height:15px"><span class="hint">此类提醒不再弹出</span></label>
+    </div>
+    <div class="dfoot">
+      <button class="btn" id="btnLiveNoticeCancel" onclick="resolveLiveNotice(false)">取消</button>
+      <button class="btn pri" id="btnLiveNoticeConfirm" onclick="confirmLiveNotice()">继续</button>
+    </div>
+  </div>
+</div>
+
 <script>
   window.SESSION_TOKEN = "__SESSION_TOKEN__";
 </script>
 <script src="/static/js/theme.js"></script>
 <script src="/static/js/audio-convert.js"></script>
 <script src="/static/js/audio-volume.js"></script>
-<script src="/static/js/app.js"></script>
+<script src="/static/js/app.js?v=task-network-1"></script>
 </body>
 </html>

@@ -6,7 +6,7 @@ from pathlib import Path
 
 from .constants import DEFAULT_SUBTITLE_LANGS
 from .paths import AppPaths
-from .platform import is_live_url
+from video_downloader.live import build_live_arguments
 
 
 _TWITCASTING_PLUGIN_RELATIVE_PATH = (
@@ -15,19 +15,20 @@ _TWITCASTING_PLUGIN_RELATIVE_PATH = (
 )
 
 
-def twitcasting_hls_fallback_args(tool_dir):
-    """返回多初始化段回退参数；插件缺失时安全降级为纯 FFmpeg。"""
+def twitcasting_hls_fallback_args(tool_dir, *, force_ffmpeg=True):
+    """加载 TwitCasting 清单规划器；兼容旧版执行器的强制 FFmpeg 重试。"""
     args = [
         "--downloader", "m3u8:ffmpeg",
         # 对插件不接管的播放列表显式启用 HLS 连接复用，避免依赖 FFmpeg
         # 不同版本的 auto 默认值。
         "--downloader-args", "ffmpeg_i:-http_persistent 1 -http_multiple 1",
-    ]
+    ] if force_ffmpeg else []
     tool_dir = Path(tool_dir)
     paths = AppPaths(tool_dir)
     configured_plugin_dirs = paths.plugin_dirs()
     plugin_root = None
     for candidate in (
+        tool_dir / 'resource',
         paths.dependency_dir,
         tool_dir,
         Path(sys._MEIPASS) if getattr(sys, "_MEIPASS", None) else None,
@@ -39,10 +40,10 @@ def twitcasting_hls_fallback_args(tool_dir):
         return args
 
     plugin_dir_args = []
-    if plugin_root not in configured_plugin_dirs:
+    if plugin_root / 'yt-dlp-plugins' not in configured_plugin_dirs:
         # PyInstaller 单文件版的数据文件位于 _MEIPASS；外部 yt-dlp 需要显式
         # 获得该临时目录，才能发现打包进去的插件。
-        plugin_dir_args = ["--plugin-dirs", str(plugin_root)]
+        plugin_dir_args = ["--plugin-dirs", str(plugin_root / 'yt-dlp-plugins')]
     return [
         *plugin_dir_args,
         "--enable-file-urls",
@@ -62,6 +63,20 @@ def _browser_cookie_spec(cfg):
     if browser == "firefox" and profile.lower() == "default":
         profile = ""
     return f"{browser}:{profile}" if profile else browser
+
+
+def niconico_live_mux_args(paths):
+    import sys
+    relative = Path('yt-dlp-plugins/video_downloader/yt_dlp_plugins/postprocessor/niconico_live_mux.py')
+    candidates = [paths.app_dir / 'resource', *paths.plugin_dirs(),
+                  Path(__file__).resolve().parents[2] / 'resource']
+    if getattr(sys, '_MEIPASS', None):
+        candidates.insert(0, Path(sys._MEIPASS))
+    root = next((root for root in candidates if (root / relative).is_file()), None)
+    if root is None:
+        raise ValueError('缺少 Niconico 直播音视频合并插件，请补全依赖')
+    return ([] if root / 'yt-dlp-plugins' in paths.plugin_dirs() else ['--plugin-dirs', str(root / 'yt-dlp-plugins')]) + [
+        '--use-postprocessor', 'NiconicoLiveMux:when=before_dl']
 
 
 def _append_proxy_option(cmd, cfg):
@@ -178,7 +193,7 @@ def _append_custom_ytdlp_args(cmd, cfg, custom_args):
     cmd += parse_custom_ytdlp_args(custom_args)
 
 
-def build_ytdlp_cmd(url, config, tool_dir, exe_suffix="", *, is_live=False, platform_override=None, cookie_file=None, bili_parts=None, nicochannel_auth_token=None, use_ffmpeg_for_hls=False, include_subtitles=True, subtitle_only=False, thumbnail_only=False, custom_args=None, po_token_base_url=None):
+def build_ytdlp_cmd(url, config, tool_dir, exe_suffix="", *, is_live=False, live_mode=None, platform_override=None, cookie_file=None, bili_parts=None, nicochannel_auth_token=None, use_ffmpeg_for_hls=False, include_subtitles=True, subtitle_only=False, thumbnail_only=False, custom_args=None, po_token_base_url=None):
     """构建 yt-dlp 下载命令行参数。
 
     根据配置项组装完整的 yt-dlp 命令行参数列表，包括输出模板、格式选择、
@@ -189,13 +204,14 @@ def build_ytdlp_cmd(url, config, tool_dir, exe_suffix="", *, is_live=False, plat
         config: 配置字典，包含分辨率、编码、音频质量等全部设置项。
         tool_dir: 应用程序根目录。第三方工具优先从 dependency 子目录加载。
         exe_suffix: 可执行文件后缀，Windows 下为 ".exe"，其他平台为空。
-        is_live: 是否为直播下载，直播归入直播目录；录制起点由 LIVE_RECORD_MODE 控制。
+        is_live: 是否为直播下载。
+        live_mode: 直播模式（auto/catch_up/live_edge）；由 live 包解析并校验。
         platform_override: 平台覆盖名，如果不为 None 则替代 config 中的 PLATFORM。
         cookie_file: Cookie 文件路径，用于文件模式 Cookie 鉴权。
         bili_parts: Bilibili 分P 选择参数，如 "1,3,5" 或 "all"，通过 -I 传递给 yt-dlp。
         nicochannel_auth_token: NicoChannel 的 JWT 鉴权令牌，通过 --extractor-args 注入。
-        use_ffmpeg_for_hls: TwitCasting 遇到多初始化片段的 fMP4 播放列表时，由
-            执行器重试阶段置 True，强制改用 FFmpeg 下载 m3u8，绕过 hlsnative 限制。
+        use_ffmpeg_for_hls: 兼容旧版 TwitCasting 重试路径，显式强制 FFmpeg。
+            正常录播在首次下载前自动检查清单并选择原生下载或本地封装。
         subtitle_only: 只下载字幕，跳过视频。
         thumbnail_only: 只下载封面，跳过视频与字幕。复用视频的输出模板，因此封面
             文件名与对应视频完全一致；不写下载归档，避免影响后续正式下载。
@@ -230,10 +246,7 @@ def build_ytdlp_cmd(url, config, tool_dir, exe_suffix="", *, is_live=False, plat
     for plugin_dir in plugin_dirs:
         cmd += ["--plugin-dirs", str(plugin_dir)]
     platform_name = platform_override if platform_override else cfg["PLATFORM"]
-    # Niconico 直播既可能使用 live.nicovideo.jp 子域名，也可能使用
-    # www.nicovideo.jp/watch/lv... 观看页；统一走平台识别逻辑，避免第二种
-    # 链接被误放进普通 VOD 目录并错误追加 --live-from-start。
-    is_nico_live = platform_name == "Niconico" and is_live_url(url, platform_name)
+    is_nico_live = platform_name == "Niconico" and is_live
 
     if subtitle_only:
         cmd += ["--skip-download"]
@@ -251,23 +264,13 @@ def build_ytdlp_cmd(url, config, tool_dir, exe_suffix="", *, is_live=False, plat
     # VOD 模板：开启嵌入元数据时，在文件名前追加 [YYYYMMDD] 发布日期，便于按时间排序
     vod_date_prefix = "[%(upload_date)s] " if cfg["EMBED_META"] else ""
 
-    # 直播统一由调用方传入的 is_live 驱动（Twitch/TwitCasting 等）。
-    # LIVE_RECORD_MODE 控制录制起点：from_start（追开播）使用
-    # --live-from-start，current（加入时开录）和 wait（蹲开播）从当前可用分片开始。
-    # wait 的等待由 DownloadExecutor 执行，命令构建器只负责录制阶段参数。
-    # Niconico 直播/录播（timeshift）不加 --live-from-start：
-    #   不加时 → yt-dlp 提取器自行判断直播/录播状态，录播下载全量分片后退出，
-    #            直播从当前时刻开始录制。
-    #   加了  → 对无 timeshift 缓冲的直播直接报错 "no formats that can be
-    #            downloaded from the start"，录播也会失败。
-    # 因此 Niconico 由 yt-dlp 自行决定，仅指定输出目录。
+    # 直播由 is_live + live_mode 驱动，参数由 live 包的能力表/策略生成。
+    # Niconico 当前只允许 live_edge：上游固定 chasePlay=false，追开播会失败；
+    # 仍使用独立的 Niconico/直播 输出目录。
     #
     # 直播文件名规则：
     #   EMBED_META=1 → "[20260730] title - id.ext"（日期前缀，方便按时间排序归档）
     #   EMBED_META=0 → "title - 20260730 id.ext"（日期在标题后，保持原有格式）
-    live_record_mode = str(cfg.get("LIVE_RECORD_MODE", "from_start")).strip().lower()
-    if live_record_mode not in {"wait", "from_start", "current"}:
-        live_record_mode = "from_start"
     if is_live and not is_nico_live:
         out_tmpl = str(
             download_dir / platform_name / "%(uploader)s" / "直播" / f"{vod_date_prefix}%(title)s - %(id)s.%(ext)s") if vod_date_prefix else str(
@@ -298,8 +301,12 @@ def build_ytdlp_cmd(url, config, tool_dir, exe_suffix="", *, is_live=False, plat
         cmd.append(url)
         return cmd
 
-    if is_live and not is_nico_live and live_record_mode == "from_start":
-        cmd += ["--live-from-start"]
+    if is_live:
+        # 参数由 live 包的策略根据平台能力 + 模式生成：
+        # catch_up -> --live-from-start；live_edge -> --no-live-from-start。
+        cmd += build_live_arguments(platform_name, live_mode, is_live=True)
+        if is_nico_live:
+            cmd += niconico_live_mux_args(paths)
 
     cmd += ["-o", out_tmpl]
     archive = paths.archive(f"{platform_name.lower()}_archive.txt")
@@ -329,6 +336,8 @@ def build_ytdlp_cmd(url, config, tool_dir, exe_suffix="", *, is_live=False, plat
     # === 音频处理方案 ===
     audio_mode = cfg.get("AUDIO_MODE", "0")
     audio_fmt = cfg.get("AUDIO_FORMAT", "mp3")
+    if is_nico_live and str(audio_mode) == '1':
+        raise ValueError('Niconico 直播暂不支持分离音视频文件，请选择合并或同时导出音频')
 
     if audio_mode == "3":
         # 只输出音频：bestaudio 优先（有独立音频流则直下），否则回退 best 再提取
@@ -365,18 +374,12 @@ def build_ytdlp_cmd(url, config, tool_dir, exe_suffix="", *, is_live=False, plat
     if cfg["HWACCEL"] != "cpu":
         cmd += ["--postprocessor-args", f"Merger+ffmpeg_o:-c:v {cfg['HWACCEL']}"]
     cmd += ["--ffmpeg-location", str(paths.executable("ffmpeg", exe_suffix).parent)]
-    # TwitCasting 的部分 fMP4 HLS 录像会在播放列表中途切换初始化片段，
-    # yt-dlp 原生 hlsnative 下载器会因此报
-    # "Initialization fragment found after media fragments"。默认仍用原生
-    # 下载器（可并发 -N 个分片，速度更快）；仅在检测到该错误后由执行器重试
-    # 时置 use_ffmpeg_for_hls，让 FFmpeg 接管 m3u8 下载以兼容这类播放列表。
-    if platform_name == "TwitCasting" and use_ffmpeg_for_hls:
-        # before_dl 插件并发预取带多个 EXT-X-MAP 的远程分片，再把本地播放列表
-        # 交给 FFmpeg 封装；yt-dlp 因而仍能继续执行元数据、封面和归档流程。
-        # 插件若遇到不支持的清单会保持原 URL，自动退回原有 FFmpeg 串行路径。
-        cmd += twitcasting_hls_fallback_args(tool_dir)
+    # 首次下载即规划 VOD 清单，避免先让 hlsnative 失败再重复整轮鉴权。
+    # 普通单初始化段仍用原生并发下载；多初始化段并发缓存后由 FFmpeg 本地封装。
+    if platform_name == "TwitCasting" and (not is_live or use_ffmpeg_for_hls):
+        cmd += twitcasting_hls_fallback_args(tool_dir, force_ffmpeg=use_ffmpeg_for_hls)
     # 评论抓取与重编码仅对 Niconico 注入。
-    if platform_name == "Niconico" and cfg["NICO_COMMENTS"]:
+    if platform_name == "Niconico" and cfg["NICO_COMMENTS"] and not is_live:
         cmd += ["--write-comments"]
     if platform_name == "Niconico" and cfg["NICO_RECODE"]:
         cmd += ["--recode-video", fmt]

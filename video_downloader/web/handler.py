@@ -28,6 +28,13 @@ class HttpHandlerDependencies:
     cancel_idle_timer: object
     start_idle_timer: object
     start_download: object
+    list_live_watch_jobs: object
+    cancel_live_watch: object
+    inspect_live_url: object
+    live_capabilities: object
+    list_tasks: object
+    cancel_task: object
+    clear_tasks: object
     start_withny_archive: object
     start_withny_live: object
     batch_txt_download: object
@@ -37,7 +44,9 @@ class HttpHandlerDependencies:
     stop_download: object
     get_current_command: object
     submit_password: object
+    submit_task_password: object
     submit_archive_choice: object
+    submit_task_archive_choice: object
     fetch_bili_playlist: object
     save_preset: object
     load_preset: object
@@ -55,6 +64,12 @@ class HttpHandlerDependencies:
     audio_loudnorm: object
     audio_volume: object
     request_exit: object
+    network_diagnostics: object = None
+    list_live_recordings: object = None
+    get_live_report: object = None
+    export_live_comments: object = None
+    audio_convert: object = None
+    stop_audio_tool: object = None
 
 
 def create_handler(dependencies):
@@ -78,6 +93,16 @@ def create_handler(dependencies):
             return secrets.compare_digest(token, dependencies.session_token)
 
         def _forbidden(self):
+            # As with the recording webhook, unread POST bytes can turn a 403
+            # into a TCP reset on Windows. Drain only a bounded small body.
+            if self.command == "POST":
+                try:
+                    length = int(self.headers.get("Content-Length", "0"))
+                    if 0 < length <= 65536:
+                        self.connection.settimeout(0.5)
+                        self.rfile.read(length)
+                except (ValueError, OSError):
+                    pass
             self.send_error(403, "Forbidden")
 
         def do_GET(self):
@@ -123,6 +148,21 @@ def create_handler(dependencies):
                 self._json(dependencies.updater.snapshot())
             elif path == "/api/current-command":
                 self._json(dependencies.get_current_command())
+            elif path == "/api/live/watch-jobs":
+                self._json({"jobs": dependencies.list_live_watch_jobs()})
+            elif path == "/api/live/capabilities":
+                self._json({"platforms": dependencies.live_capabilities()})
+            elif path == "/api/live/recordings":
+                self._json({"recordings": dependencies.list_live_recordings() if dependencies.list_live_recordings else []})
+            elif path == "/api/live/report":
+                job_id = parse_qs(parsed.query).get("job_id", [""])[0]
+                report = dependencies.get_live_report(job_id) if dependencies.get_live_report else None
+                self._json(report if report is not None else {"error": "报告不存在或仍在生成"}, status=200 if report is not None else 404)
+            elif path == "/api/tasks":
+                self._json({"tasks": dependencies.list_tasks()})
+            elif path == "/api/network-test":
+                self._json(dependencies.network_diagnostics.snapshot() if dependencies.network_diagnostics
+                           else {"running": False, "phase": "unavailable", "message": "网络检测不可用", "result": None})
             elif path.startswith("/static/"):
                 if not self._is_local_request():
                     self._forbidden()
@@ -133,8 +173,8 @@ def create_handler(dependencies):
                     return
                 self.send_response(200)
                 self.send_header("Content-Type", content_type)
-                # 静态资源缓存1小时（版本号变更时URL可加?v=参数强制刷新）
-                self.send_header("Cache-Control", "public, max-age=3600")
+                # Local assets can change between launches without a versioned URL.
+                self.send_header("Cache-Control", "no-cache")
                 self.end_headers()
                 self.wfile.write(content)
             else:
@@ -153,10 +193,14 @@ def create_handler(dependencies):
                     "running": download_snapshot["running"],
                     "phase": download_snapshot["phase"],
                     "generation": download_snapshot["generation"],
+                    "kind": download_snapshot.get("kind"),
                     "progress": dict(dependencies.app_state.progress_data),
                     "stats": dict(dependencies.app_state.batch_stats),
                     "archive_prompt": dependencies.app_state.archive_prompt,
                     "update": dependencies.updater.snapshot(),
+                    "live_watch": dependencies.list_live_watch_jobs(),
+                    "tasks": dependencies.list_tasks(),
+                    "network_test": dependencies.network_diagnostics.snapshot() if dependencies.network_diagnostics else None,
                 }}
             # 每个 SSE 连接使用有界队列；慢连接的丢旧保新策略由 AppState 统一执行。
             client_queue = queue.Queue(maxsize=256)
@@ -190,9 +234,6 @@ def create_handler(dependencies):
             if not self._is_authorized(parsed):
                 self._forbidden()
                 return
-            if self.headers.get_content_type() != "application/json":
-                self._json({"error": "Content-Type 必须为 application/json"}, status=415)
-                return
             try:
                 length = int(self.headers.get("Content-Length", 0))
             except ValueError:
@@ -204,6 +245,13 @@ def create_handler(dependencies):
             if length > 65536:
                 self.send_error(413, "Request body too large")
                 return
+            if self.headers.get_content_type() != "application/json":
+                # Drain a bounded authenticated request before closing. Leaving
+                # unread bytes can cause a Windows TCP reset to hide the 415.
+                if length:
+                    self.rfile.read(length)
+                self._json({"error": "Content-Type 必须为 application/json"}, status=415)
+                return
             try:
                 body = self.rfile.read(length).decode("utf-8") if length else "{}"
                 data = json.loads(body) if body else {}
@@ -213,7 +261,22 @@ def create_handler(dependencies):
             if not isinstance(data, dict):
                 self._json({"error": "JSON 请求体必须是对象"}, status=400)
                 return
-            if path == "/api/start":
+            if path.startswith("/api/network-test/"):
+                service = dependencies.network_diagnostics
+                if service is None:
+                    self._json({"error": "网络检测不可用"})
+                elif path == "/api/network-test/start":
+                    self._json(service.start())
+                elif path == "/api/network-test/cancel":
+                    self._json(service.cancel())
+                elif path == "/api/network-test/apply":
+                    mode = self._field(data, "mode", str, "")
+                    result_id = self._field(data, "result_id", str, "")
+                    if mode is not None and result_id is not None:
+                        self._json(service.apply(mode, result_id))
+                else:
+                    self.send_error(404)
+            elif path == "/api/start":
                 url = self._field(data, "url", str, "")
                 if url is None:
                     return
@@ -226,16 +289,61 @@ def create_handler(dependencies):
                 custom_args = self._custom_args(data)
                 if custom_args is None:
                     return
+                live_mode = data.get("live_mode")
+                if live_mode is not None and not isinstance(live_mode, str):
+                    self._json({"error": "字段 live_mode 类型错误"}, status=400)
+                    return
                 self._json(dependencies.start_download(
                     url,
                     bili_parts=bili_parts,
                     tc_password=tc_password,
                     custom_args=custom_args or None,
+                    live_mode=live_mode or None,
                 ))
             elif path == "/api/start-withny-archive":
                 self._json(dependencies.start_withny_archive())
             elif path == "/api/start-withny-live":
                 self._json(dependencies.start_withny_live())
+            elif path == "/api/live/watch-cancel":
+                job_id = self._field(data, "id", str, "")
+                if job_id is None:
+                    return
+                if not job_id:
+                    self._json({"error": "缺少等待任务 id"}, status=400)
+                    return
+                self._json(dependencies.cancel_live_watch(job_id))
+            elif path == "/api/live/comments-export":
+                job_id = self._field(data, "job_id", str, "")
+                values = self._field(data, "settings", dict, {})
+                if job_id is None or values is None:
+                    return
+                if not dependencies.export_live_comments:
+                    self._json({"error": "弹幕导出不可用"}, status=503)
+                    return
+                result = dependencies.export_live_comments(job_id, values)
+                self._json(result, status=400 if "error" in result else 200)
+            elif path == "/api/tasks/cancel":
+                task_id = self._field(data, "id", str, "")
+                if task_id is None:
+                    return
+                if not task_id:
+                    self._json({"error": "缺少任务 id"}, status=400)
+                    return
+                self._json(dependencies.cancel_task(task_id))
+            elif path == "/api/tasks/clear":
+                self._json(dependencies.clear_tasks())
+            elif path == "/api/live/inspect":
+                url = self._field(data, "url", str, "")
+                if url is None:
+                    return
+                if not url:
+                    self._json({"error": "缺少 url"}, status=400)
+                    return
+                live_mode = data.get("live_mode")
+                if live_mode is not None and not isinstance(live_mode, str):
+                    self._json({"error": "字段 live_mode 类型错误"}, status=400)
+                    return
+                self._json(dependencies.inspect_live_url(url, live_mode or None))
             elif path == "/api/archive-choice":
                 request_id = self._field(data, "request_id", str, "")
                 if request_id is None:
@@ -244,7 +352,14 @@ def create_handler(dependencies):
                 if not request_id or not isinstance(redownload, bool):
                     self._json({"error": "归档确认需要 request_id 和布尔值 redownload"}, status=400)
                     return
-                self._json(dependencies.submit_archive_choice(request_id, redownload))
+                task_id = data.get("task_id")
+                if task_id is not None and not isinstance(task_id, str):
+                    self._json({"error": "字段 task_id 类型错误"}, status=400)
+                    return
+                if task_id:
+                    self._json(dependencies.submit_task_archive_choice(task_id, request_id, redownload))
+                else:
+                    self._json(dependencies.submit_archive_choice(request_id, redownload))
             elif path == "/api/submit-password":
                 url = self._field(data, "url", str, "")
                 if url is None:
@@ -252,10 +367,30 @@ def create_handler(dependencies):
                 password = self._field(data, "password", str, "")
                 if password is None:
                     return
-                if not password.strip():
+                skip = data.get("skip", False)
+                if not isinstance(skip, bool):
+                    self._json({"error": "字段 skip 类型错误"}, status=400)
+                    return
+                if not password.strip() and not (skip and data.get("task_id")):
                     self._json({"error": "密码不能为空"}, status=400)
                     return
-                self._json(dependencies.submit_password(url, password))
+                task_id = data.get("task_id")
+                if task_id is not None and not isinstance(task_id, str):
+                    self._json({"error": "字段 task_id 类型错误"}, status=400)
+                    return
+                if task_id:
+                    item_id = data.get("item_id")
+                    request_id = data.get("request_id")
+                    if any(v is not None and not isinstance(v, str) for v in (item_id, request_id)):
+                        self._json({"error": "字段 item_id/request_id 类型错误"}, status=400)
+                        return
+                    if item_id or request_id:
+                        self._json(dependencies.submit_task_password(
+                            task_id, url, "" if skip else password, item_id=item_id, request_id=request_id))
+                    else:
+                        self._json(dependencies.submit_task_password(task_id, url, "" if skip else password))
+                else:
+                    self._json(dependencies.submit_password(url, password))
             elif path == "/api/start-urls":
                 urls = self._field(data, "urls", list, [])
                 if urls is None:
@@ -357,6 +492,24 @@ def create_handler(dependencies):
                 self._json(dependencies.clean_temp())
             elif path == "/api/gen-template":
                 self._json(dependencies.gen_url_template())
+            elif path == "/api/audio-stop":
+                self._json(dependencies.stop_audio_tool() if dependencies.stop_audio_tool
+                           else {"error": "音频工具未配置"})
+            elif path == "/api/audio-convert":
+                fields = {
+                    'dir': (str, ''), 'recursive': (bool, False),
+                    'output_format': (str, 'mp3'), 'del_src': (bool, False),
+                    'bitrate': ((str, int), '320k'),
+                    'compression_level': (int, 5), 'quality': ((int, float), 7),
+                }
+                values = {}
+                for key, (kind, default) in fields.items():
+                    values[key] = self._field(data, key, kind, default)
+                    if values[key] is None:
+                        return
+                directory = values.pop('dir')
+                self._json(dependencies.audio_convert(directory, **values) if dependencies.audio_convert
+                           else {"error": "音频转换工具未配置"})
             elif path == "/api/wav2mp3":
                 directory = self._field(data, "dir", str, "")
                 if directory is None:

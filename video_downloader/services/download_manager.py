@@ -38,7 +38,7 @@ class DownloadManager:
 
     def suspend(self):
         with self._lock:
-            if self._handle is not None:
+            if self._handle is not None or not self._accepting:
                 return False
             self._accepting = False
             self._phase = "suspended"
@@ -75,9 +75,10 @@ class DownloadManager:
                 return True
             return False
 
-    def request_stop(self):
+    def request_stop(self, *, kind_prefix=None):
         with self._lock:
-            if self._handle is None:
+            if self._handle is None or (kind_prefix is not None
+                                       and not self._handle.kind.startswith(kind_prefix)):
                 return StopTicket(None, False, self._generation)
             self._handle.cancel_event.set()
             self._phase = "stopping"

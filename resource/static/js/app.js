@@ -11,6 +11,24 @@ let lastUrlPlatform = "YouTube";
 let download_running = false;
 let downloadGeneration = null;
 let activeTaskYtdlpArgs = "";
+let liveWatchJobs = [];
+const liveRecordings = new Map();
+let tasksCache = [];
+let expandedTasks = new Set();
+let taskModeEnabled = true;
+let taskSnapshotVersion = 0;
+let taskLoadRequest = 0;
+const seenTaskPrompts = new Set();
+let networkPollTimer = null;
+let networkResultId = '';
+let networkApplying = false;
+let networkEventVersion = 0;
+let livePlatformModes = {};
+let liveCommentPlatforms = {};
+let liveCapabilities = null;
+let liveNoticeResolver = null;
+let liveNoticeKind = "";
+const LIVE_NOTICE_MUTE_KEY = 'video-dl-live-notice-muted';
 const SESSION_TOKEN = window.SESSION_TOKEN || "";
 
 const PLATFORMS = [
@@ -138,6 +156,8 @@ function init() {
   fillSelect('s_audiomode', [['0','不单独处理音频'],['1','分离音画输出'],['2','同时输出音频'],['3','只输出音频']]);
   fillSelect('s_audiofmt', [['m4a','m4a(原生)'],['mp3','MP3'],['wav','WAV']]);
   fillSelect('s_hwaccel', [['cpu','CPU软编码'],['h264_nvenc','N卡 NVENC'],['h264_qsv','Intel QSV'],['h264_amf','AMD AMF']]);
+  fillSelect('s_live_mode', [['auto','自动（推荐）'],['catch_up','追开播（条件）'],['live_edge','从当前时刻'],['wait','蹲开播（开播后自动录制）']]);
+  fillSelect('s_task_order', [['none','不排序（默认）'],['live_first','直播录制优先'],['download_first','下载任务优先']]);
   fillSelect('s_browser', [['chrome','Chrome'],['edge','Edge'],['firefox','Firefox'],['brave','Brave'],['opera','Opera']]);
   $('s_browser').addEventListener('change', onBrowserChanged);
   fillSelect('s_subtitle_lang_preset', SUBTITLE_LANG_PRESETS);
@@ -168,6 +188,12 @@ function init() {
   loadConfig();
   loadDeps();
   connectSSE();
+  loadLiveWatch();
+  api('/api/live/recordings').then(data => (data.recordings || []).reverse().forEach(renderLiveRecording)).catch(() => {});
+  loadTasks();
+  loadNetworkStatus();
+  initSettingsToc();
+  loadLiveCapabilities();
 
   // 页面关闭前提示用户下载仍在进行中
   window.addEventListener('beforeunload', (e) => {
@@ -186,6 +212,7 @@ function init() {
  */
 function fillSelect(id, opts) {
   const s = $(id);
+  s.innerHTML = '';
   opts.forEach(([v,l]) => { const o=document.createElement('option');o.value=v;o.textContent=l;s.appendChild(o); });
 }
 
@@ -211,7 +238,10 @@ function selectPlatform(name) {
 }
 
 /** 切换开关状态。 */
-function toggleSwitch(el) { el.classList.toggle('on'); }
+function toggleSwitch(el) {
+  el.classList.toggle('on');
+  if(el.getAttribute('role') === 'switch') el.setAttribute('aria-checked', String(el.classList.contains('on')));
+}
 /** 判断开关是否处于开启状态。 */
 function isOn(id) { return $(id).classList.contains('on'); }
 
@@ -294,9 +324,33 @@ function applyConfig(s) {
   onBrowserChanged();
   $('s_hwaccel').value = s.HWACCEL;
   if(s.LIVE_STREAM_METHOD !== undefined) $('s_live_stream_method').value = s.LIVE_STREAM_METHOD;
-  if(s.LIVE_RECORD_MODE !== undefined) $('s_live_record_mode').value = s.LIVE_RECORD_MODE;
-  if(s.LIVE_WATCH_INTERVAL !== undefined) $('s_live_watch_interval').value = s.LIVE_WATCH_INTERVAL;
-  onLiveRecordModeChange();
+  if(s.LIVE_MODE !== undefined) $('s_live_mode').value = s.LIVE_MODE;
+  if(s.LIVE_PLATFORM_MODES !== undefined) {
+    livePlatformModes = parseLivePlatformModes(s.LIVE_PLATFORM_MODES);
+    renderLivePlatformModes();
+  }
+  if(s.LIVE_DOWNLOAD_TIMEOUT !== undefined) $('s_live_timeout').value = s.LIVE_DOWNLOAD_TIMEOUT || 0;
+  setSwitch('sw_live_danmaku', s.LIVE_DANMAKU_ENABLED);
+  setSwitch('sw_live_danmaku_anon', s.LIVE_DANMAKU_ANONYMIZE);
+  $('s_live_danmaku_formats').value = s.LIVE_DANMAKU_FORMATS || 'srt,ass';
+  $('s_live_danmaku_offset').value = s.LIVE_DANMAKU_OFFSET_MS || 0;
+  try { liveCommentPlatforms = JSON.parse(s.LIVE_DANMAKU_PLATFORMS || '{}'); } catch(e) { liveCommentPlatforms = {}; }
+  renderLiveCommentPlatforms();
+  for(const [key, id] of Object.entries({LIVE_MAX_RETRIES:'s_live_retries', LIVE_WATCHDOG_SECONDS:'s_live_watchdog', LIVE_MIN_FREE_MB:'s_live_free_mb', LIVE_ESTIMATED_BITRATE_KBPS:'s_live_bitrate'})) {
+    if(s[key] !== undefined) $(id).value = s[key];
+  }
+  if(s.TASK_MODE !== undefined) {
+    taskModeEnabled = String(s.TASK_MODE) === '1';
+    setSwitch('sw_task_mode', s.TASK_MODE);
+    renderTasks(tasksCache);
+  }
+  if(s.TASK_MAX_PARALLEL !== undefined) $('s_task_parallel').value = s.TASK_MAX_PARALLEL;
+  if(s.TASK_LIVE_PARALLEL !== undefined) $('s_task_live_parallel').value = s.TASK_LIVE_PARALLEL;
+  setSwitch('sw_task_mixed', s.TASK_MIXED_PARALLEL === undefined ? 1 : s.TASK_MIXED_PARALLEL);
+  if(s.TASK_DOWNLOAD_PARALLEL !== undefined) $('s_task_download_parallel').value = s.TASK_DOWNLOAD_PARALLEL;
+  if(s.TASK_DOWNLOAD_SPEED_LIMIT !== undefined) $('s_task_download_speed').value = s.TASK_DOWNLOAD_SPEED_LIMIT;
+  onTaskMixedChange();
+  if(s.TASK_ORDER !== undefined) $('s_task_order').value = s.TASK_ORDER;
   setSwitch('sw_meta', s.EMBED_META);
   setSwitch('sw_thumb', s.DOWNLOAD_THUMB);
   setSwitch('sw_subtitles', s.DOWNLOAD_SUBTITLES);
@@ -307,14 +361,18 @@ function applyConfig(s) {
   setSwitch('sw_strict', s.STRICT_FILENAME);
   setSwitch('sw_nicocmt', s.NICO_COMMENTS);
   setSwitch('sw_nicorec', s.NICO_RECODE);
+  setSwitch('sw_tc_remember', s.TC_REMEMBER_PASSWORD);
+  setSwitch('sw_tc_xlsx', s.TC_SAVE_PASSWORD_XLSX);
+  onTcPasswordChange();
   setSwitch('sw_youtube_po_token', s.YOUTUBE_PO_TOKEN_ENABLED);
   $('s_ytdlp_default_args').value = s.YTDLP_DEFAULT_ARGS || '';
   setSwitch('sw_log', s.ENABLE_LOG);
   if(s.BILI_MULTIP_POLICY !== undefined) $('s_bili_policy').value = s.BILI_MULTIP_POLICY;
   // 音频输出格式设置（audio-convert.js 负责 UI 初始化）
   if(s.AUDIO_OUTPUT_FORMAT !== undefined && $('audioOutFormat')) $('audioOutFormat').value = s.AUDIO_OUTPUT_FORMAT;
-  setSwitch('sw_audioDelSrc', s.DEL_SRC_AFTER_CONVERT);
+  setSwitch('sw_audioDelSrc', false); // Destructive choice is explicit for each session.
   setSwitch('sw_audioRecursive', s.AUDIO_RECURSIVE);
+  if(typeof updateAudioQualityUI === 'function') updateAudioQualityUI();
   toggleCookieMode();
   paintRange($('s_threads'));
   paintRange($('s_speed'));
@@ -323,6 +381,7 @@ function applyConfig(s) {
 /** 根据值设置开关的开关状态。 */
 function setSwitch(id, val) {
   if(val) $(id).classList.add('on'); else $(id).classList.remove('on');
+  if($(id).getAttribute('role') === 'switch') $(id).setAttribute('aria-checked', String(!!val));
 }
 
 /** 音频模式切换时更新格式选择器的可用状态。 */
@@ -330,70 +389,6 @@ function onAudioModeChange() {
   const mode = $('s_audiomode').value;
   // 模式 0（不处理音频）和模式 1（分离音画）不需要音频输出格式选择
   $('s_audiofmt').disabled = (mode === '0' || mode === '1');
-}
-
-const LIVE_RECORD_MODE_LABELS = {
-  wait: '蹲开播',
-  from_start: '追开播',
-  current: '加入时开录',
-};
-
-function updateLiveRecordModeUI() {
-  const mode = $('s_live_record_mode');
-  const interval = $('s_live_watch_interval');
-  if(!mode || !interval) return;
-  const label = LIVE_RECORD_MODE_LABELS[mode.value] || LIVE_RECORD_MODE_LABELS.from_start;
-  const summary = $('liveRecordSummary');
-  if(summary) {
-    const seconds = parseInt(interval.value, 10);
-    summary.textContent = mode.value === 'wait' && Number.isFinite(seconds)
-      ? `${label} · 每${seconds}秒检测`
-      : label;
-  }
-  const hint = $('liveRecordModeHint');
-  if(hint) {
-    hint.textContent = mode.value === 'wait'
-      ? '蹲开播会持续检测未开播频道，检测到开播后自动开始录制。'
-      : mode.value === 'current'
-        ? '加入时开录不追溯历史分片，从提交链接时可获取的位置开始录制。'
-        : '追开播会尝试回溯直播起点；能否回溯取决于平台是否提供 DVR。';
-  }
-}
-
-/** 只有蹲开播模式会使用轮询间隔，其他模式保留设置但置灰。 */
-function onLiveRecordModeChange() {
-  const mode = $('s_live_record_mode');
-  const interval = $('s_live_watch_interval');
-  if(mode && interval) interval.disabled = mode.value !== 'wait';
-  updateLiveRecordModeUI();
-}
-
-function showLiveRecordSettings() {
-  onLiveRecordModeChange();
-  $('liveRecordOverlay').classList.add('show');
-  setTimeout(() => $('s_live_record_mode').focus(), 0);
-}
-
-function hideLiveRecordSettings() {
-  $('liveRecordOverlay').classList.remove('show');
-}
-
-function updateTaskYtdlpArgsUI() {
-  const hasArgs = !!$('task_ytdlp_args').value.trim();
-  $('taskYtdlpArgsIndicator').hidden = !hasArgs;
-  $('btnTaskYtdlpArgs').title = hasArgs ? '已设置，仅用于下一次下载' : '设置仅用于下一次下载的 yt-dlp 参数';
-}
-
-function showTaskYtdlpArgs() {
-  updateTaskYtdlpArgsUI();
-  $('taskYtdlpArgsOverlay').classList.add('show');
-  setTimeout(() => $('task_ytdlp_args').focus(), 0);
-}
-
-function hideTaskYtdlpArgs() {
-  updateTaskYtdlpArgsUI();
-  $('taskYtdlpArgsOverlay').classList.remove('show');
-  $('btnTaskYtdlpArgs').focus();
 }
 
 function applySubtitleLanguageValue(scope, value) {
@@ -448,6 +443,116 @@ function onBrowserChanged() {
 }
 
 
+function parseLivePlatformModes(value) {
+  if(value && typeof value === 'object') return value;
+  try {
+    const parsed = JSON.parse(value || '{}');
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch(e) { return {}; }
+}
+
+function renderLiveCommentPlatforms(preserve = false) {
+  const host = $('liveCommentPlatforms');
+  if(!host) return;
+  if(preserve) host.querySelectorAll('[data-live-comment-platform]').forEach(el => {
+    liveCommentPlatforms[el.dataset.liveCommentPlatform] = el.value;
+  });
+  const names = ['Bilibili','YouTube','Twitch','TwitCasting','NicoChannel','Niconico','Withny'];
+  host.innerHTML = names.map(name => `<label class="live-platform-row"><span class="lb">${name}</span>
+    <span class="sel"><select class="ctl" data-live-comment-platform="${name}" aria-label="${name} 弹幕默认">
+    <option value="inherit">跟随全局</option><option value="on">默认抓取</option><option value="off">默认不抓取</option>
+    </select></span></label>`).join('');
+  host.querySelectorAll('select').forEach(el => { el.value = liveCommentPlatforms[el.dataset.liveCommentPlatform] || 'inherit'; });
+}
+
+function renderLivePlatformModes() {
+  const host = $('livePlatformModes');
+  if(!host) return;
+  const caps = liveCapabilities || {
+    YouTube: {catch_up:'supported', live_edge:true},
+    Twitch: {catch_up:'supported', live_edge:true}
+  };
+  const rows = Object.entries(caps).filter(([name, c]) =>
+    c && ['supported','conditional'].includes(c.catch_up) && c.live_edge && ['YouTube','Twitch'].includes(name)
+  );
+  if(!rows.length) {
+    host.innerHTML = '<div class="live-platform-empty">当前没有同时支持追开播和当前录制的平台</div>';
+    return;
+  }
+  host.innerHTML = rows.map(([name]) => `
+    <label class="live-platform-row">
+      <span class="lb">${name}</span>
+      <span class="sel"><select class="ctl" data-live-platform="${name}">
+        <option value="auto">自动（条件允许时追开播）</option>
+        <option value="catch_up">追开播</option>
+        <option value="live_edge">从当前时刻</option>
+      </select><svg class="ico s14 cv"><use href="#i-chevron"></use></svg></span>
+    </label>`).join('');
+  host.querySelectorAll('select[data-live-platform]').forEach(select => {
+    select.value = livePlatformModes[select.dataset.livePlatform] || 'auto';
+  });
+}
+
+async function loadLiveCapabilities() {
+  try {
+    const r = await api('/api/live/capabilities');
+    if(r && r.platforms) {
+      liveCapabilities = r.platforms;
+      renderLivePlatformModes();
+      renderLiveCommentPlatforms(true);
+    }
+  } catch(e) { /* 使用静态兜底 */ }
+}
+
+function collectLivePlatformModes() {
+  const result = {};
+  document.querySelectorAll('#livePlatformModes select[data-live-platform]').forEach(select => {
+    result[select.dataset.livePlatform] = select.value;
+  });
+  return result;
+}
+
+function initSettingsToc() {
+  const toc = $('settingsToc');
+  if(!toc) return;
+  const items = Array.from(toc.querySelectorAll('.settings-toc-item'));
+  const sections = items.map(item => $(item.dataset.target)).filter(Boolean);
+  const setActive = target => {
+    items.forEach(item => item.classList.toggle('on', item.dataset.target === target));
+  };
+  items.forEach(item => {
+    item.onclick = () => {
+      const target = $(item.dataset.target);
+      if(!target) return;
+      setActive(item.dataset.target);
+      target.scrollIntoView({behavior:'smooth', block:'start'});
+    };
+  });
+  try {
+    if(localStorage.getItem('video-dl-settings-toc-collapsed') === '1') {
+      toc.classList.add('collapsed');
+    }
+  } catch(e) {}
+  const toggle = $('settingsTocToggle');
+  if(toggle) {
+    toggle.onclick = () => {
+      toc.classList.toggle('collapsed');
+      try {
+        localStorage.setItem('video-dl-settings-toc-collapsed', toc.classList.contains('collapsed') ? '1' : '0');
+      } catch(e) {}
+    };
+  }
+  // 页面自身就是滚动容器，用 IntersectionObserver 更新当前章节。
+  if('IntersectionObserver' in window) {
+    const observer = new IntersectionObserver(entries => {
+      const visible = entries.filter(entry => entry.isIntersecting)
+        .sort((a, b) => b.intersectionRatio - a.intersectionRatio)[0];
+      if(visible) setActive(visible.target.id);
+    }, {root: document.querySelector('.pad'), threshold:[0.15, 0.4, 0.7]});
+    sections.forEach(section => observer.observe(section));
+  }
+}
+
 /** 从设置表单中收集当前全部配置项。 */
 function collectCfg() {
   return {
@@ -470,8 +575,25 @@ function collectCfg() {
     BROWSER_PROFILE: $('s_profile').value,
     HWACCEL: $('s_hwaccel').value,
     LIVE_STREAM_METHOD: $('s_live_stream_method').value,
-    LIVE_RECORD_MODE: $('s_live_record_mode').value,
-    LIVE_WATCH_INTERVAL: parseInt($('s_live_watch_interval').value, 10),
+    LIVE_MODE: $('s_live_mode').value,
+    LIVE_PLATFORM_MODES: JSON.stringify(collectLivePlatformModes()),
+    LIVE_DOWNLOAD_TIMEOUT: parseInt($('s_live_timeout').value) || 0,
+    LIVE_DANMAKU_ENABLED: isOn('sw_live_danmaku') ? 1 : 0,
+    LIVE_DANMAKU_ANONYMIZE: isOn('sw_live_danmaku_anon') ? 1 : 0,
+    LIVE_DANMAKU_FORMATS: $('s_live_danmaku_formats').value,
+    LIVE_DANMAKU_OFFSET_MS: Number($('s_live_danmaku_offset').value),
+    LIVE_DANMAKU_PLATFORMS: JSON.stringify(Object.fromEntries(Array.from(document.querySelectorAll('[data-live-comment-platform]')).filter(el => el.value !== 'inherit').map(el => [el.dataset.liveCommentPlatform, el.value]))),
+    LIVE_MAX_RETRIES: Number($('s_live_retries').value),
+    LIVE_WATCHDOG_SECONDS: Number($('s_live_watchdog').value),
+    LIVE_MIN_FREE_MB: Number($('s_live_free_mb').value),
+    LIVE_ESTIMATED_BITRATE_KBPS: Number($('s_live_bitrate').value),
+    TASK_MODE: isOn('sw_task_mode') ? 1 : 0,
+    TASK_MAX_PARALLEL: Math.max(1, Math.min(5, parseInt($('s_task_parallel').value) || 2)),
+    TASK_MIXED_PARALLEL: isOn('sw_task_mixed') ? 1 : 0,
+    TASK_LIVE_PARALLEL: Math.max(2, Math.min(5, parseInt($('s_task_live_parallel').value) || 2)),
+    TASK_DOWNLOAD_PARALLEL: Math.max(1, Math.min(5, parseInt($('s_task_download_parallel').value) || 1)),
+    TASK_DOWNLOAD_SPEED_LIMIT: Math.max(0, Math.min(100000, parseFloat($('s_task_download_speed').value) || 0)),
+    TASK_ORDER: $('s_task_order').value,
     EMBED_META: isOn('sw_meta')?1:0,
     DOWNLOAD_THUMB: isOn('sw_thumb')?1:0,
     DOWNLOAD_SUBTITLES: isOn('sw_subtitles')?1:0,
@@ -481,6 +603,8 @@ function collectCfg() {
     STRICT_FILENAME: isOn('sw_strict')?1:0,
     NICO_COMMENTS: isOn('sw_nicocmt')?1:0,
     NICO_RECODE: isOn('sw_nicorec')?1:0,
+    TC_REMEMBER_PASSWORD: isOn('sw_tc_remember')?1:0,
+    TC_SAVE_PASSWORD_XLSX: isOn('sw_tc_remember') && isOn('sw_tc_xlsx')?1:0,
     YOUTUBE_PO_TOKEN_ENABLED: isOn('sw_youtube_po_token')?1:0,
     YTDLP_DEFAULT_ARGS: $('s_ytdlp_default_args').value.trim(),
     ENABLE_LOG: isOn('sw_log')?1:0,
@@ -509,12 +633,106 @@ async function resetSettings() {
   location.reload();
 }
 
+function onTaskMixedChange() {
+  const disabled = !isOn('sw_task_mixed');
+  $('s_task_live_parallel').disabled = disabled;
+  $('s_task_download_parallel').disabled = disabled;
+}
+
+function describeNetworkSettings(settings) {
+  const limit = settings.TASK_DOWNLOAD_SPEED_LIMIT;
+  return `${settings.TASK_MAX_PARALLEL} 个任务；每任务 ${settings.TASK_LIVE_PARALLEL} 路直播 + ${settings.TASK_DOWNLOAD_PARALLEL} 路视频；每链接 ${settings.THREADS} 分片线程；视频${limit ? '限速 ' + limit + ' MiB/s' : '不限速'}。全局限速设为不限。`;
+}
+
+function renderNetworkTest(data) {
+  if(!data) return;
+  clearTimeout(networkPollTimer);
+  $('btnNetworkTest').disabled = Boolean(data.running) || networkApplying;
+  $('btnNetworkCancel').disabled = !data.running;
+  $('networkTestStatus').textContent = data.message || '尚未检测';
+  const result = data.phase === 'completed' ? data.result : null;
+  networkResultId = result?.id || '';
+  $('networkProfiles').style.display = result ? '' : 'none';
+  $('networkTestMetrics').textContent = '';
+  $('networkTestNotes').textContent = '';
+  if(result) {
+    const m = result.metrics;
+    const fmt = (value, unit) => Number.isFinite(value) ? value + unit : '未测得';
+    $('networkTestMetrics').textContent = [
+      `线路：${result.route} · ${m.duration_seconds} 秒 · 下载 ${m.downloaded_mib} MiB · ${m.sample_count} 个 HTTP 样本`,
+      `吞吐观测区间：${fmt(m.download_low_mbps, ' Mbps')} – ${fmt(m.download_high_mbps, ' Mbps')}`,
+      `单连接：${fmt(m.single_mbps, ' Mbps')} · 多连接：${fmt(m.parallel_mbps, ' Mbps')}`,
+      `HTTP 首字节延迟（含握手）：${fmt(m.http_latency_ms, ' ms')} · 抖动：${fmt(m.http_jitter_ms, ' ms')}`,
+      `负载延迟：${fmt(m.loaded_latency_ms, ' ms')} · HTTP 请求失败率：${(m.request_failure_rate * 100).toFixed(1)}% · ${m.confidence === 'limited' ? '样本有限' : '样本正常'}`
+    ].join('\n');
+    $('networkTestNotes').textContent = (result.notes || []).join(' ');
+    for(const [mode, name] of [['performance','Performance'],['reliable','Reliable']]) {
+      const profile = result.profiles[mode];
+      $('network' + name + 'Summary').textContent = profile.summary;
+      $('network' + name + 'Settings').textContent = describeNetworkSettings(profile.settings);
+      $('btnNetwork' + name).disabled = networkApplying;
+    }
+  }
+  if(data.running) networkPollTimer = setTimeout(loadNetworkStatus, 700);
+}
+
+async function loadNetworkStatus() {
+  const version = networkEventVersion;
+  try {
+    const result = await api('/api/network-test');
+    if(version === networkEventVersion) renderNetworkTest(result);
+  } catch(e) {
+    $('networkTestStatus').textContent = '读取检测状态失败：' + e.message;
+    $('btnNetworkTest').disabled = false;
+  }
+}
+
+async function startNetworkTest() {
+  $('btnNetworkTest').disabled = true;
+  try {
+    await saveSettingsNoAlert();
+    const result = await api('/api/network-test/start', {method:'POST', body:'{}'});
+    if(result.error) showToast(result.error, 'error');
+    await loadNetworkStatus();
+  } catch(e) {
+    showToast('网络检测启动失败：' + e.message, 'error');
+    $('btnNetworkTest').disabled = false;
+  }
+}
+
+async function cancelNetworkTest() {
+  try {
+    await api('/api/network-test/cancel', {method:'POST', body:'{}'});
+    await loadNetworkStatus();
+  } catch(e) { showToast('取消检测失败：' + e.message, 'error'); }
+}
+
+async function applyNetworkProfile(mode) {
+  if(!networkResultId || networkApplying) return;
+  const resultId = networkResultId;
+  networkApplying = true;
+  $('btnNetworkPerformance').disabled = $('btnNetworkReliable').disabled = true;
+  $('btnNetworkTest').disabled = true;
+  try {
+    // Preserve unrelated edits; the server then patches only tuning fields and
+    // rejects recommendations measured with different proxy settings.
+    await saveSettingsNoAlert();
+    const result = await api('/api/network-test/apply', {method:'POST', body:JSON.stringify({mode, result_id:resultId})});
+    if(result.error) { showToast(result.error, 'error'); return; }
+    applyConfig(result.config);
+    showToast((mode === 'performance' ? '高性能' : '高可靠') + '配置已保存，将用于新任务', 'success');
+  } catch(e) { showToast('应用自动配置失败：' + e.message, 'error'); }
+  finally { networkApplying = false; loadNetworkStatus(); }
+}
+
 async function loadDeps() {
   const d = await api('/api/deps');
   const names = {'yt-dlp':'yt-dlp', ffmpeg:'ffmpeg', ffprobe:'ffprobe',
     fantiadl:'fantiadl', withny_dl:'withny-dl', nicochannel_plugin:'nicochannel 插件',
-    youtube_po_token:'YouTube PO Token Provider'};
-  const optional = {fantiadl:1, withny_dl:1, nicochannel_plugin:1, youtube_po_token:1};
+    youtube_po_token:'YouTube PO Token Provider', live_comment_export:'弹幕字幕导出',
+    live_comment_transport:'直播评论连接', live_comment_niconico:'Niconico 评论协议'};
+  const optional = {fantiadl:1, withny_dl:1, nicochannel_plugin:1, youtube_po_token:1,
+    live_comment_export:1, live_comment_transport:1, live_comment_niconico:1};
   $('depStatus').innerHTML = Object.entries(d).map(([k,v]) =>
     `<span class="dep${v?'':' miss'}">${icon(v?'check':'x','s14')}${names[k]||k}` +
     `<span class="st">${v ? '已就绪' : (optional[k] ? '可选 · 未安装' : '缺失')}</span></span>`
@@ -553,12 +771,17 @@ async function startDl() {
   // 按行拆分，每行一个链接，清理后过滤空行
   const urls = $('urlInput').value.split(/\r?\n/).map(cleanOneUrl).filter(Boolean);
   if(urls.length === 0) { showToast('请输入链接', 'error'); return; }
-  activeTaskYtdlpArgs = $('task_ytdlp_args').value.trim();
+  const taskArgs = $('task_ytdlp_args').value.trim();
+  activeTaskYtdlpArgs = taskArgs;
 
   // 多链接：走批量下载（每行一个），跳过单条 Bilibili 分P 选择
   if(urls.length > 1) {
+    if($('s_live_mode').value === 'wait') {
+      showToast('蹲开播仅支持单条链接，请逐条添加', 'error');
+      return;
+    }
     try { await saveSettingsNoAlert(); } catch(e) { showToast('设置保存失败: ' + e.message, 'error'); return; }
-    doStartUrls(urls, activeTaskYtdlpArgs);
+    doStartUrls(urls, taskArgs);
     return;
   }
 
@@ -569,9 +792,8 @@ async function startDl() {
   // 自动识别 Bilibili 链接（无需手动切换平台按钮）
   const isBiliUrl = isBilibiliUrl(url);
   const isNicoChannelLiveUrl = isNicoChannelLive(url);
-  if(isBiliUrl && currentPlatform !== 'Bilibili') selectPlatform('Bilibili');
-  // NicoChannel 直播不是 Bilibili 分P任务：明确切换平台，避免沿用上一次平台的提示。
   if(isNicoChannelLiveUrl && currentPlatform !== 'NicoChannel') selectPlatform('NicoChannel');
+  if(isBiliUrl && currentPlatform !== 'Bilibili') selectPlatform('Bilibili');
   // 先保存设置
   try { await saveSettingsNoAlert(); } catch(e) { showToast('设置保存失败: ' + e.message, 'error'); return; }
   // Bilibili 多P选择策略（基于 URL 检测，而非平台按钮状态）
@@ -584,7 +806,7 @@ async function startDl() {
       if(pl.note) { addLog({time: nowTime(), msg: '[分P检测] ' + pl.note, level: 'info'}); }
       if(pl.parts && pl.parts.length > 1) {
         addLog({time: nowTime(), msg: `[分P检测] 检测到 ${pl.total} 个分P，等待选择…`, level: 'info'});
-        pendingPartCallback = (parts) => doStartDl(url, parts, undefined, activeTaskYtdlpArgs);
+        pendingPartCallback = (parts) => doStartDl(url, parts, undefined, taskArgs);
         showPartSelector(pl.parts);
         return;
       }
@@ -593,7 +815,7 @@ async function startDl() {
       setStatus('就绪', 'idle');
     }
   }
-  doStartDl(url, undefined, undefined, activeTaskYtdlpArgs);
+  doStartDl(url, undefined, undefined, taskArgs);
 }
 
 function nowTime(){ return new Date().toTimeString().slice(0,8); }
@@ -602,6 +824,7 @@ async function startWithnyArchive() {
   $('btnStart').disabled = true;
   $('btnWithnyLive').disabled = true;
   try {
+    await saveSettingsNoAlert();
     const result = await api('/api/start-withny-archive', {method:'POST', body:'{}'});
     if(result.error) {
       showToast(result.error, 'error');
@@ -614,7 +837,11 @@ async function startWithnyArchive() {
       $('btnWithnyLive').disabled = false;
       return;
     }
-    markStarted('1');
+    if(result.task) {
+      $('btnStart').disabled = false;
+      $('btnWithnyLive').disabled = false;
+      loadTasks();
+    } else markStarted('1');
   } catch(e) {
     showToast('Withny 下载启动失败: ' + e.message, 'error');
     $('btnStart').disabled = false;
@@ -626,6 +853,7 @@ async function startWithnyLive() {
   $('btnStart').disabled = true;
   $('btnWithnyLive').disabled = true;
   try {
+    await saveSettingsNoAlert();
     const result = await api('/api/start-withny-live', {method:'POST', body:'{}'});
     if(result.error) {
       showToast(result.error, 'error');
@@ -638,7 +866,11 @@ async function startWithnyLive() {
       $('btnWithnyLive').disabled = false;
       return;
     }
-    markStarted('1');
+    if(result.task) {
+      $('btnStart').disabled = false;
+      $('btnWithnyLive').disabled = false;
+      loadTasks();
+    } else markStarted('1');
   } catch(e) {
     showToast('Withny 直播录制启动失败: ' + e.message, 'error');
     $('btnStart').disabled = false;
@@ -663,14 +895,6 @@ function isBilibiliUrl(url) {
  * @param {string} url - 待检测链接。
  * @returns {boolean} 是否为 Bilibili 直播链接。
  */
-function isBilibiliLive(url) {
-  try { return new URL(url).hostname.includes('live.bilibili.com'); } catch(e) { return false; }
-}
-
-/**
- * 判断是否为 NicoChannel 直播详情链接。
- * NicoChannel 的 /live/ 路径不应触发 Bilibili 分P检测。
- */
 function isNicoChannelLive(url) {
   try {
     const parsed = new URL(url);
@@ -679,6 +903,10 @@ function isNicoChannelLive(url) {
     return (host === 'nicochannel.jp' || host.endsWith('.nicochannel.jp')) &&
       segments.length === 3 && segments[1].toLowerCase() === 'live' && /^sm\w+$/i.test(segments[2]);
   } catch(e) { return false; }
+}
+
+function isBilibiliLive(url) {
+  try { return new URL(url).hostname.includes('live.bilibili.com'); } catch(e) { return false; }
 }
 
 /** 任务启动后统一重置按钮与统计。 */
@@ -694,20 +922,31 @@ function markStarted(total) {
 }
 
 function clearStartedTaskArgs(value) {
-  if($('task_ytdlp_args').value.trim() === value) {
-    $('task_ytdlp_args').value = '';
-    updateTaskYtdlpArgsUI();
-  }
+  if($('task_ytdlp_args').value.trim() === value) $('task_ytdlp_args').value = '';
 }
 
 async function doStartDl(url, biliParts, tcPassword, customArgs) {
+  const liveMode = await prepareLiveTask(url);
+  if(liveMode === false) return;
   const body = {url};
+  if(liveMode) body.live_mode = liveMode;
   if(biliParts) body.bili_parts = biliParts;
   if(tcPassword) body.tc_password = tcPassword;
   const taskArgs = customArgs === undefined ? activeTaskYtdlpArgs : customArgs;
   if(taskArgs) body.custom_args = taskArgs;
   const r = await api('/api/start', {method:'POST', body:JSON.stringify(body)});
   if(r.error) { showToast(r.error, 'error'); return; }
+  if(r.waiting) {
+    showToast('已加入等待开播列表', 'success');
+    loadLiveWatch();
+    return;
+  }
+  if(r.task) {
+    showToast('已加入任务队列', 'success');
+    loadTasks();
+    clearStartedTaskArgs(taskArgs);
+    return;
+  }
   clearStartedTaskArgs(taskArgs);
   // SSE owns task state: preparation may already have failed or been stopped
   // before this response arrives. Do not overwrite that newer state here.
@@ -718,6 +957,10 @@ async function doStartUrls(urls, customArgs) {
   if(customArgs) body.custom_args = customArgs;
   const r = await api('/api/start-urls', {method:'POST', body:JSON.stringify(body)});
   if(r.error) { showToast(r.error, 'error'); return; }
+  if(r.task) {
+    showToast('已加入任务队列', 'success');
+    loadTasks();
+  }
   clearStartedTaskArgs(customArgs || '');
 }
 
@@ -735,6 +978,10 @@ async function doStartBatch(biliPartsMap, customArgs) {
   if(customArgs) body.custom_args = customArgs;
   const r = await api('/api/batch-txt', {method:'POST', body:JSON.stringify(body)});
   if(r.error) { showToast(r.error, 'error'); return; }
+  if(r.task) {
+    showToast('批量任务已加入队列', 'success');
+    loadTasks();
+  }
   clearStartedTaskArgs(customArgs || '');
 }
 
@@ -752,6 +999,9 @@ async function stopDl() {
     $('btnStart').disabled = true;
     $('btnStop').disabled = true;
     setStatus('正在停止…', 'live');
+  } else if(r.cancelled !== undefined) {
+    showToast('已取消活跃任务', 'success');
+    loadTasks();
   }
 }
 
@@ -1023,6 +1273,464 @@ async function startCoverDownload() {
   }
 }
 
+// ========== 蹲开播任务 ==========
+const LIVE_WATCH_LABELS = {
+  probing: '探测中', waiting: '等待开播', waiting_near: '临近开播',
+  starting: '启动录制', triggered: '已触发录制', error: '探测错误',
+  expired: '已结束/超时', cancelled: '已取消'
+};
+const LIVE_WATCH_TERMINAL = new Set(['triggered', 'expired', 'cancelled']);
+
+function fmtWatchTime(ts) {
+  if(!ts) return '';
+  const d = new Date(ts * 1000);
+  return d.toLocaleTimeString('zh-CN', {hour12:false});
+}
+
+function renderLiveWatch(jobs) {
+  liveWatchJobs = Array.isArray(jobs) ? jobs : [];
+  const sect = $('liveWatchSect');
+  const list = $('liveWatchList');
+  if(!sect || !list) return;
+  if(!liveWatchJobs.length) {
+    sect.style.display = 'none';
+    list.innerHTML = '';
+    return;
+  }
+  sect.style.display = '';
+  const active = liveWatchJobs.filter(j => !LIVE_WATCH_TERMINAL.has(j.status));
+  $('liveWatchCount').textContent = active.length
+    ? `等待中 ${active.length} 个 · 共 ${liveWatchJobs.length} 个`
+    : `共 ${liveWatchJobs.length} 个`;
+  list.innerHTML = liveWatchJobs.slice(0, 12).map(job => {
+    const status = LIVE_WATCH_LABELS[job.status] || job.status;
+    const title = job.probe && job.probe.title ? job.probe.title : job.url;
+    const next = job.status === 'waiting' || job.status === 'waiting_near'
+      ? `下次探测 ${fmtWatchTime(job.next_probe_at)}`
+      : (job.last_error || '');
+    const blip = job.status === 'triggered' ? 'ok'
+      : (job.status === 'error' || job.status === 'expired') ? 'err'
+      : (job.status === 'waiting' || job.status === 'waiting_near' || job.status === 'probing') ? 'live' : 'idle';
+    const esc = s => { const d = document.createElement('div'); d.textContent = s == null ? '' : String(s); return d.innerHTML; };
+    const canCancel = !LIVE_WATCH_TERMINAL.has(job.status);
+    return `<div class="srow" style="gap:10px;align-items:center;flex-wrap:wrap">
+      <span class="st"><span class="blip ${blip}"></span>${esc(job.platform)} · ${esc(title)}</span>
+      <span class="dim">${esc(status)}${next ? ' · ' + esc(next) : ''}</span>
+      ${canCancel ? `<button class="btn sm gh" data-cancel="${esc(job.id)}">取消</button>` : ''}
+    </div>`;
+  }).join('');
+  list.querySelectorAll('button[data-cancel]').forEach(btn => {
+    btn.onclick = () => cancelLiveWatch(btn.dataset.cancel);
+  });
+}
+
+async function loadLiveWatch() {
+  try {
+    const r = await api('/api/live/watch-jobs');
+    renderLiveWatch(r.jobs || []);
+  } catch(e) { /* 保持静默，避免影响下载页 */ }
+}
+
+async function cancelLiveWatch(jobId) {
+  try {
+    const r = await api('/api/live/watch-cancel', {method:'POST', body:JSON.stringify({id:jobId})});
+    if(r.error) { showToast(r.error, 'error'); return; }
+    showToast('已取消等待', 'success');
+    loadLiveWatch();
+  } catch(e) { showToast('取消等待失败: ' + e.message, 'error'); }
+}
+
+// ========== 多任务列表 ==========
+const TASK_STATUS_LABELS = {
+  queued: '排队中', running: '运行中', completed: '已完成',
+  failed: '失败', cancelled: '已取消', waiting: '等待开播',
+  stopped: '已停止（已收尾）', timed_out: '已到录制时限', partial: '部分录制，请查看报告'
+};
+
+function escapeTaskText(value) {
+  const div = document.createElement('div');
+  div.textContent = value == null ? '' : String(value);
+  return div.innerHTML;
+}
+
+function taskStatusLabel(status) {
+  return TASK_STATUS_LABELS[status] || status;
+}
+
+function toggleTask(taskId) {
+  if(expandedTasks.has(taskId)) expandedTasks.delete(taskId);
+  else expandedTasks.add(taskId);
+  renderTasks(tasksCache);
+}
+
+async function loadTasks() {
+  const version = taskSnapshotVersion;
+  const request = ++taskLoadRequest;
+  try {
+    const r = await api('/api/tasks');
+    if(version === taskSnapshotVersion && request === taskLoadRequest) renderTasks(r.tasks || []);
+  } catch(e) { /* 保持页面安静 */ }
+}
+
+async function cancelTask(taskId) {
+  try {
+    const r = await api('/api/tasks/cancel', {method:'POST', body:JSON.stringify({id:taskId})});
+    if(r.error) { showToast(r.error, 'error'); return; }
+    showToast('已请求取消任务', 'success');
+    loadTasks();
+  } catch(e) { showToast('取消任务失败: ' + e.message, 'error'); }
+}
+
+async function clearFinishedTasks() {
+  try {
+    const r = await api('/api/tasks/clear', {method:'POST', body:'{}'});
+    if(r.error) { showToast(r.error, 'error'); return; }
+    loadTasks();
+  } catch(e) { showToast('清理任务失败: ' + e.message, 'error'); }
+}
+
+function renderTasks(tasks) {
+  const focusKey = document.activeElement?.dataset?.taskFocus;
+  const logScrolls = new Map(Array.from(document.querySelectorAll('[data-task-log]')).map(log => [
+    log.dataset.taskLog, {top:log.scrollTop, atBottom:log.scrollHeight - log.scrollTop - log.clientHeight < 8}
+  ]));
+  const passwordInputs = Array.from(document.querySelectorAll('.task-password')).map(input => ({
+    id: input.id, value: input.value, focused: document.activeElement === input,
+    start: input.selectionStart, end: input.selectionEnd
+  }));
+  tasksCache = Array.isArray(tasks) ? tasks : [];
+  const taskIds = new Set(tasksCache.map(task => task.id));
+  for(const id of expandedTasks) if(!taskIds.has(id)) expandedTasks.delete(id);
+  const promptIds = new Set(tasksCache.flatMap(task => (task.prompts || []).map(prompt => prompt.request_id)));
+  for(const id of seenTaskPrompts) if(!promptIds.has(id)) seenTaskPrompts.delete(id);
+  tasksCache.forEach(task => (task.prompts || []).forEach(prompt => {
+    if(!seenTaskPrompts.has(prompt.request_id)) {
+      seenTaskPrompts.add(prompt.request_id);
+      expandedTasks.add(task.id);
+    }
+  }));
+  const panel = $('taskModePanel');
+  const host = $('taskList');
+  $('legacyDownloadStatus').style.display = taskModeEnabled && !download_running ? 'none' : '';
+  if(!panel || !host) return;
+  if(!tasksCache.length) {
+    panel.style.display = taskModeEnabled ? '' : 'none';
+    host.innerHTML = taskModeEnabled
+      ? '<div class="task-empty">暂无任务。每次点击「开始下载」会在这里创建一个任务。</div>'
+      : '';
+    $('taskCount').textContent = '';
+    if(!download_running) $('btnStop').disabled = true;
+    return;
+  }
+  panel.style.display = '';
+  const active = tasksCache.filter(t => t.status === 'queued' || t.status === 'running');
+  $('taskCount').textContent = active.length
+    ? `运行/排队 ${active.length} 个 · 共 ${tasksCache.length} 个`
+    : `共 ${tasksCache.length} 个`;
+  if(active.length) $('btnStop').disabled = false;
+  else if(!download_running) $('btnStop').disabled = true;
+  if(!download_running) {
+    const totals = tasksCache.reduce((sum, task) => {
+      for(const key of ['ok','fail','skipped','total']) sum[key] += Number(task.stats?.[key] || 0);
+      return sum;
+    }, {ok:0, fail:0, skipped:0, total:0});
+    setStatValue('statOk', totals.ok);
+    setStatValue('statFail', totals.fail);
+    setStatValue('statSkip', totals.skipped);
+    setStatValue('statTotal', totals.total);
+    updateStatsVisibility();
+  }
+
+  host.innerHTML = tasksCache.map(task => {
+    const status = task.status || 'queued';
+    const pct = Math.max(0, Math.min(100, Number(task.progress) || 0));
+    const open = expandedTasks.has(task.id);
+    const rowClass = ['task-row', status, task.indeterminate ? 'indeterminate' : '', open ? 'open' : ''].join(' ');
+    const statusText = taskStatusLabel(status);
+    const meta = [
+      statusText,
+      task.speed ? task.speed : '',
+      task.eta ? 'ETA ' + task.eta : '',
+      task.kind === 'live' ? '直播' : '下载',
+      task.prompts?.length ? '等待确认' : ''
+    ].filter(Boolean).join(' · ');
+    const percentText = task.indeterminate ? '进行中' : `${Math.round(pct)}%`;
+    const canCancel = status === 'queued' || status === 'running';
+    const urls = (task.items || []).map(item =>
+      `<div class="tdline"><span class="tdlabel">${escapeTaskText(taskStatusLabel(item.status))}</span><span class="tdurl">${escapeTaskText(item.urls[0])}<br>${escapeTaskText(item.message)} · ${item.indeterminate ? '录制中' : Math.round(item.progress) + '%'}${item.speed ? ' · ' + escapeTaskText(item.speed) : ''}</span></div>`
+    ).join('');
+    const prompts = (task.prompts || []).map(prompt => {
+      if(prompt.type === 'archive_choice_required') {
+        const remaining = Math.max(0, Math.ceil((prompt.expires_at - Date.now()) / 1000));
+        return `<div class="task-prompt"><p>${escapeTaskText(prompt.url)} 已有归档记录。${remaining} 秒后默认跳过。</p>
+          <button class="btn sm gh" data-task-focus="${prompt.request_id}-skip" onclick="submitTaskArchive('${task.id}','${prompt.request_id}',false)">跳过</button>
+          <button class="btn sm" data-task-focus="${prompt.request_id}-retry" onclick="submitTaskArchive('${task.id}','${prompt.request_id}',true)">重新下载</button></div>`;
+      }
+      return `<div class="task-prompt"><p>${escapeTaskText(prompt.url)}：${prompt.reason === 'retry' ? '密码可能不正确，请重试' : '请输入访问密码'}</p>
+        <input class="ctl task-password" type="password" autocomplete="off" id="task-password-${prompt.request_id}" aria-label="访问密码">
+        <button class="btn sm" data-task-focus="${prompt.request_id}-submit" onclick="submitTaskPassword('${task.id}','${prompt.request_id}',false)">提交</button>
+        <button class="btn sm gh" data-task-focus="${prompt.request_id}-skip" onclick="submitTaskPassword('${task.id}','${prompt.request_id}',true)">跳过</button></div>`;
+    }).join('');
+    const stats = task.stats || {};
+    const histories = (task.history || []).slice(-6).map(item =>
+      `<div class="tdline"><span class="tdlabel">${escapeTaskText(item.status)}</span><span>${escapeTaskText(item.title || item.url || '')}</span></div>`
+    ).join('');
+    const logs = (task.logs || []).slice(-20).map(line => {
+      const cls = line.level === 'error' ? 'le' : (line.level === 'warn' ? 'lw' : '');
+      return `<div class="${cls}">[${escapeTaskText(line.time)}] ${escapeTaskText(line.msg)}</div>`;
+    }).join('');
+    const errorLine = task.error
+      ? `<div class="tdline"><span class="tdlabel">错误</span><span class="txt-err">${escapeTaskText(task.error)}</span></div>` : '';
+    return `<div class="${rowClass}" style="--p:${pct}%">
+      <div class="task-summary" data-task-focus="${task.id}" role="button" tabindex="0" aria-expanded="${open}" onclick="toggleTask('${task.id}')" onkeydown="if(event.target===this && (event.key==='Enter' || event.key===' ')){event.preventDefault();toggleTask('${task.id}')}">
+        <span class="tname">${escapeTaskText(task.label || task.title || '任务')}</span>
+        <span class="tmeta">${escapeTaskText(meta)}</span>
+        <span class="tpct">${percentText}</span>
+        ${canCancel ? `<button class="btn sm gh task-cancel" data-task-focus="${task.id}-cancel" onclick="event.stopPropagation();cancelTask('${task.id}')">取消</button>` : ''}
+        <span class="tchev">›</span>
+      </div>
+      <div class="task-detail">
+        <div class="tdline"><span class="tdlabel">状态</span><span>${escapeTaskText(task.message || statusText)}</span></div>
+        ${errorLine}
+        <div class="tdline"><span class="tdlabel">链接统计</span><span>成功 ${stats.ok || 0} · 失败 ${stats.fail || 0} · 跳过 ${stats.skipped || 0} · 共 ${stats.total || task.url_count}</span></div>
+        ${prompts}
+        ${urls}
+        ${histories}
+        ${logs ? `<div class="task-log" data-task-log="${task.id}">${logs}</div>` : ''}
+      </div>
+    </div>`;
+  }).join('');
+  passwordInputs.forEach(saved => {
+    const input = $(saved.id);
+    if(!input) return;
+    input.value = saved.value;
+    if(saved.focused) {
+      input.focus({preventScroll:true});
+      input.setSelectionRange(saved.start, saved.end);
+    }
+  });
+  if(focusKey) host.querySelector(`[data-task-focus="${CSS.escape(focusKey)}"]`)?.focus({preventScroll:true});
+  host.querySelectorAll('[data-task-log]').forEach(log => {
+    const saved = logScrolls.get(log.dataset.taskLog);
+    log.scrollTop = !saved || saved.atBottom ? log.scrollHeight : saved.top;
+  });
+}
+
+async function submitTaskArchive(taskId, requestId, redownload) {
+  try {
+    const result = await api('/api/archive-choice', {method:'POST', body:JSON.stringify({task_id:taskId, request_id:requestId, redownload})});
+    if(result.error) showToast(result.error, 'error');
+    loadTasks();
+  } catch(e) { showToast('归档选择提交失败: ' + e.message, 'error'); }
+}
+
+async function submitTaskPassword(taskId, requestId, skip) {
+  const prompt = tasksCache.find(t => t.id === taskId)?.prompts?.find(p => p.request_id === requestId);
+  if(!prompt) return;
+  const password = $('task-password-' + requestId)?.value || '';
+  if(!skip && !password.trim()) { showToast('请输入密码', 'error'); return; }
+  try {
+    const result = await api('/api/submit-password', {method:'POST', body:JSON.stringify({
+      task_id:taskId, item_id:prompt.item_id, request_id:requestId, url:prompt.url, password, skip
+    })});
+    if(result.error) showToast(result.error, 'error');
+    else if($('task-password-' + requestId)) $('task-password-' + requestId).value = '';
+    loadTasks();
+  } catch(e) { showToast('密码提交失败: ' + e.message, 'error'); }
+}
+
+// ========== 直播任务检查与提醒 ==========
+function getMutedLiveNotices() {
+  try { return JSON.parse(localStorage.getItem(LIVE_NOTICE_MUTE_KEY) || '{}') || {}; }
+  catch(e) { return {}; }
+}
+
+function isLiveNoticeMuted(kind) {
+  return Boolean(getMutedLiveNotices()[kind]);
+}
+
+function setLiveNoticeMuted(kind) {
+  try {
+    const muted = getMutedLiveNotices();
+    muted[kind] = true;
+    localStorage.setItem(LIVE_NOTICE_MUTE_KEY, JSON.stringify(muted));
+  } catch(e) {}
+}
+
+function clearLiveNoticeMutes() {
+  try { localStorage.removeItem(LIVE_NOTICE_MUTE_KEY); } catch(e) {}
+  showToast('已恢复全部直播提醒', 'success');
+}
+
+function formatLiveDateTime(ts) {
+  if(!ts) return '';
+  return new Date(ts * 1000).toLocaleString('zh-CN', {hour12:false});
+}
+
+function formatLiveElapsed(seconds) {
+  if(seconds == null) return '';
+  const s = Math.max(0, Math.floor(seconds));
+  const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = s % 60;
+  return h > 0 ? `${h} 小时 ${m} 分` : (m > 0 ? `${m} 分 ${sec} 秒` : `${sec} 秒`);
+}
+
+/** 只有明显的直播入口才做探测；否则普通 VOD 不走直播检查。 */
+function isLiveCandidateUrl(url) {
+  try {
+    const u = new URL(url);
+    const host = u.hostname.toLowerCase();
+    const path = u.pathname.toLowerCase();
+    const segs = path.split('/').filter(Boolean);
+    if(host === 'live.bilibili.com' || host.endsWith('.live.bilibili.com')) return true;
+    if(host === 'b23.tv' || host.endsWith('.b23.tv')) return true;
+    if(host.includes('youtube.com') && (path.endsWith('/live') || path.startsWith('/live/'))) return true;
+    if(host.includes('twitch.tv') && segs.length === 1 && !['videos','clips','directory'].includes(segs[0])) return true;
+    if(host.includes('live.nicovideo.jp')) return true;
+    if(host.includes('nicochannel.jp') && segs.length >= 3 && segs[1] === 'live') return true;
+    if(host.includes('twitcasting.tv') && (segs.length === 1 || (segs.length >= 3 && segs[1] === 'movie'))) return true;
+    if((host.includes('x.com') || host.includes('twitter.com')) && path.startsWith('/i/spaces/')) return true;
+  } catch(e) {}
+  return $('s_live_mode') && $('s_live_mode').value === 'wait';
+}
+
+function closeLiveNotice() {
+  const overlay = $('liveNoticeOverlay');
+  if(overlay) overlay.classList.remove('show');
+}
+
+function resolveLiveNotice(value) {
+  const resolver = liveNoticeResolver;
+  const kind = liveNoticeKind;
+  if($('liveNoticeMute') && $('liveNoticeMute').checked && kind) setLiveNoticeMuted(kind);
+  liveNoticeResolver = null;
+  liveNoticeKind = "";
+  closeLiveNotice();
+  if(resolver) resolver(value);
+}
+
+function onLiveNoticeModeChange() {
+  const select = $('liveNoticeMode');
+  const warning = $('liveNoticeWarning');
+  if(!select || !warning) return;
+  const option = select.options[select.selectedIndex];
+  warning.style.display = option && option.dataset.reason ? '' : 'none';
+  if(option && option.dataset.reason) warning.textContent = option.dataset.reason;
+}
+
+function confirmLiveNotice() {
+  const kind = liveNoticeKind;
+  if($('liveNoticeMute') && $('liveNoticeMute').checked && kind) setLiveNoticeMuted(kind);
+  let value = false;
+  if(kind === 'wait_offer') value = 'wait';
+  else if(kind === 'live_started') value = $('liveNoticeMode').value || 'auto';
+  resolveLiveNotice(value);
+}
+
+/** 显示一次直播提醒；返回选择结果（wait/模式名/false）。 */
+function showLiveNotice(opts) {
+  return new Promise(resolve => {
+    liveNoticeResolver = resolve;
+    liveNoticeKind = opts.kind || '';
+    $('liveNoticeTitle').textContent = opts.title || '直播任务';
+    $('liveNoticeSummary').textContent = opts.summary || '';
+    $('liveNoticeMeta').textContent = opts.meta || '';
+    const modeRow = $('liveNoticeModeRow');
+    const modeSelect = $('liveNoticeMode');
+    const warning = $('liveNoticeWarning');
+    const modes = (opts.modes || []).filter(mode => mode.available);
+    if(modes.length) {
+      modeRow.style.display = '';
+      modeSelect.innerHTML = modes.map(mode =>
+        `<option value="${mode.value}" data-reason="${(mode.reason || '').replace(/"/g, '&quot;')}">${mode.label}</option>`
+      ).join('');
+      const preferred = modes.some(mode => mode.value === opts.recommended)
+        ? opts.recommended : modes[0].value;
+      modeSelect.value = preferred;
+      onLiveNoticeModeChange();
+    } else {
+      modeRow.style.display = 'none';
+      modeSelect.innerHTML = '';
+    }
+    warning.style.display = opts.warning ? '' : 'none';
+    warning.textContent = opts.warning || '';
+    $('liveNoticeMute').checked = isLiveNoticeMuted(opts.kind);
+    $('btnLiveNoticeConfirm').textContent = opts.confirmLabel || '继续';
+    $('liveNoticeOverlay').classList.add('show');
+  });
+}
+
+/** 任务开始前检查；返回 null=普通下载，false=取消，字符串=要使用的直播模式。 */
+async function prepareLiveTask(url) {
+  const selectedMode = ($('s_live_mode') && $('s_live_mode').value) || 'auto';
+  if(!isLiveCandidateUrl(url) && selectedMode !== 'wait') return null;
+  let data;
+  try {
+    data = await api('/api/live/inspect', {method:'POST', body:JSON.stringify({url, live_mode:selectedMode})});
+  } catch(e) {
+    showToast('直播状态检查失败: ' + e.message, 'error');
+    return false;
+  }
+  if(!data.is_live_target) return null;
+  if(data.status === 'ended') {
+    showToast('直播已结束，将按普通视频下载', 'warn');
+    return null;
+  }
+  if(data.error) {
+    if(isLiveNoticeMuted('live_error')) { showToast(data.error, 'error'); return false; }
+    await showLiveNotice({
+      kind: 'live_error', title: '无法开始直播任务',
+      summary: data.error, meta: data.platform ? `平台：${data.platform}` : '',
+      confirmLabel: '知道了'
+    });
+    return false;
+  }
+  const title = `${data.platform || ''} · ${data.title || url}`;
+  if(data.status === 'offline' || data.status === 'upcoming') {
+    if(!data.can_wait) {
+      const message = `直播尚未开始，且该平台不支持蹲开播${data.wait_reason ? '：' + data.wait_reason : ''}`;
+      if(isLiveNoticeMuted('live_error')) { showToast(message, 'error'); return false; }
+      await showLiveNotice({
+        kind: 'live_error', title: '暂不能开始录制',
+        summary: message, meta: title, confirmLabel: '知道了'
+      });
+      return false;
+    }
+    if(isLiveNoticeMuted('wait_offer')) return 'wait';
+    const scheduled = data.scheduled_start ? `预约开始：${formatLiveDateTime(data.scheduled_start)}` : '';
+    const choice = await showLiveNotice({
+      kind: 'wait_offer', title: '直播尚未开始',
+      summary: '是否以蹲开播方式等待？开播后将自动开始录制。',
+      meta: [title, scheduled].filter(Boolean).join(' · '),
+      confirmLabel: '蹲开播'
+    });
+    return choice === 'wait' ? 'wait' : false;
+  }
+  if(data.status === 'live') {
+    if(isLiveNoticeMuted('live_started')) {
+      return data.recommended_mode || data.effective_mode || 'auto';
+    }
+    const started = data.started_at ? `开播于 ${formatLiveDateTime(data.started_at)}` : '已开播';
+    const elapsed = data.live_duration_seconds != null ? ` · 已开播 ${formatLiveElapsed(data.live_duration_seconds)}` : '';
+    const choice = await showLiveNotice({
+      kind: 'live_started', title: '直播已开始',
+      summary: '请选择本次录制方式。',
+      meta: `${title} · ${started}${elapsed}`,
+      modes: data.modes || [],
+      recommended: data.recommended_mode || data.effective_mode || 'auto',
+      warning: data.warning || '',
+      confirmLabel: '开始录制'
+    });
+    return choice || false;
+  }
+  const message = data.error || `无法确认直播状态（${data.status || 'unknown'}）`;
+  if(isLiveNoticeMuted('live_error')) { showToast(message, 'error'); return false; }
+  await showLiveNotice({
+    kind: 'live_error', title: '无法开始直播任务',
+    summary: message, meta: title, confirmLabel: '知道了'
+  });
+  return false;
+}
+
 // ========== SSE ==========
 let sseRetryDelay = 1000;
 const SSE_MAX_RETRY = 16000;
@@ -1038,10 +1746,16 @@ function connectSSE() {
     const evt = JSON.parse(e.data);
     if(evt.type === 'log') {
       addLog(evt.data);
+    } else if(evt.type === 'audio_tool_result') {
+      showToolStatus(evt.data.message, evt.data.level === 'success' ? 'success' : 'error');
+      showToast(evt.data.message, evt.data.level);
     } else if(evt.type === 'progress') {
+      if(evt.task_id) return;
       renderProgress(evt.data);
     } else if(evt.type === 'download_state') {
+      if(evt.task_id) return;
       const d = evt.data;
+      syncAudioToolState(d);
       download_running = Boolean(d.running);
       downloadGeneration = d.generation;
       $('btnStart').disabled = download_running || d.phase === 'suspended';
@@ -1051,7 +1765,9 @@ function connectSSE() {
       if($('btnCoverDownload')) $('btnCoverDownload').disabled = download_running || d.phase === 'suspended';
       if(!download_running) $('topline').style.width = '0';
       if(!download_running) closeArchiveChoice();
+      renderTasks(tasksCache);
     } else if(evt.type === 'stats') {
+      if(evt.task_id) return;
       const d = evt.data;
       if(d.ok !== undefined) setStatValue('statOk', d.ok);
       if(d.fail !== undefined) setStatValue('statFail', d.fail);
@@ -1059,35 +1775,57 @@ function connectSSE() {
       if(d.total !== undefined) setStatValue('statTotal', d.total);
       updateStatsVisibility();
     } else if(evt.type === 'archive_choice_required') {
+      if(evt.task_id) return;
       showArchiveChoice(evt.data);
     } else if(evt.type === 'archive_choice_closed') {
+      if(evt.task_id) return;
       closeArchiveChoice(evt.data.request_id);
     } else if(evt.type === 'password_required') {
+      if(evt.task_id) return;
       const d = evt.data;
       // 仅 TwitCasting 平台显示密码弹窗，其他平台忽略
       if(d.platform !== 'TwitCasting') return;
       pendingTcUrl = d.url;
+      pendingTcTaskId = evt.task_id || '';
       showTcPasswordPrompt(d.reason === 'retry');
     } else if(evt.type === 'history') {
       if(evt.data && evt.data.length && !$('page-history').classList.contains('active')) setHistoryDot(true);
       renderHistory(evt.data);
+    } else if(evt.type === 'live_recording') {
+      renderLiveRecording(evt.data || {});
+    } else if(evt.type === 'live_watch') {
+      renderLiveWatch(evt.data && evt.data.jobs ? evt.data.jobs : []);
+    } else if(evt.type === 'task_snapshot') {
+      taskSnapshotVersion++;
+      renderTasks(evt.data && evt.data.tasks ? evt.data.tasks : []);
+    } else if(evt.type === 'network_test') {
+      networkEventVersion++;
+      renderNetworkTest(evt.data);
     } else if(evt.type === 'ready') {
+      taskSnapshotVersion++;
       const readyData = Array.isArray(evt.data) ? {logs:evt.data, running:false} : evt.data;
+      syncAudioToolState(readyData);
       downloadGeneration = readyData.generation;
       (readyData.logs || []).forEach(e => addLog(e));
       download_running = Boolean(readyData.running);
       $('btnStart').disabled = download_running || readyData.phase === 'suspended';
-      $('btnWithnyLive').disabled = download_running || readyData.phase === 'suspended';
       $('btnStop').disabled = !download_running || readyData.phase === 'stopping';
       if($('btnSubtitleDownload')) $('btnSubtitleDownload').disabled = download_running || readyData.phase === 'suspended';
       if($('btnCoverDownload')) $('btnCoverDownload').disabled = download_running || readyData.phase === 'suspended';
       if(readyData.progress) renderProgress(readyData.progress);
+      if(Array.isArray(readyData.live_watch)) renderLiveWatch(readyData.live_watch);
+      api('/api/live/recordings').then(data => (data.recordings || []).reverse().forEach(renderLiveRecording)).catch(() => {});
       if(readyData.stats) {
         $('statOk').textContent = readyData.stats.ok || 0;
         $('statFail').textContent = readyData.stats.fail || 0;
         $('statSkip').textContent = readyData.stats.skipped || 0;
         $('statTotal').textContent = readyData.stats.total || 0;
         updateStatsVisibility();
+      }
+      if(Array.isArray(readyData.tasks)) renderTasks(readyData.tasks);
+      if(readyData.network_test) {
+        networkEventVersion++;
+        renderNetworkTest(readyData.network_test);
       }
       if(readyData.archive_prompt) showArchiveChoice(readyData.archive_prompt);
       else closeArchiveChoice();
@@ -1219,14 +1957,45 @@ function syncHistoryViewButtons() {
 function thumbHtml(h) {
   const ok = h.status === 'success';
   const skipped = h.status === 'skipped';
-  const color = ok ? 'var(--ok)' : skipped ? 'var(--fg3)' : 'var(--err)';
+  const labels = {stopped:'已停止（已收尾）', timeout:'已到时限', gaps:'有缺口', earliest:'最早可用'};
+  const label = ok ? '成功' : skipped ? '跳过' : labels[h.status] || '失败';
+  const color = ok ? 'var(--ok)' : skipped || labels[h.status] ? 'var(--fg3)' : 'var(--err)';
   const cover = h.filepath
     ? `<img loading="lazy" alt="封面"
            src="/api/cover?path=${encodeURIComponent(h.filepath)}&token=${encodeURIComponent(SESSION_TOKEN)}"
            onload="this.classList.add('show')" onerror="this.remove()" onclick="openCover(this.src)">`
     : '';
   return `<div class="thumb">${icon('alert','s20')}${cover}` +
-         `<span class="hstat"><span class="pd" style="background:${color}"></span>${ok?'成功':skipped?'跳过':'失败'}</span></div>`;
+         `<span class="hstat"><span class="pd" style="background:${color}"></span>${label}</span></div>`;
+}
+
+function renderLiveRecording(data) {
+  if(!data.job_id) return;
+  liveRecordings.set(data.job_id, {...(liveRecordings.get(data.job_id) || {}), ...data});
+  while(liveRecordings.size > 20) liveRecordings.delete(liveRecordings.keys().next().value);
+  $('liveRecordingSect').style.display = '';
+  const conclusions = {complete:'文件验证通过', from_earliest_available:'平台最早可用内容', gaps:'有缺口或边界诊断，请检查报告', failed:'录制或文件验证失败', cancelled_before_recording:'未开始录制，已停止等待'};
+  $('liveRecordingList').innerHTML = Array.from(liveRecordings.values()).reverse().map(job => {
+    const state = job.conclusion ? conclusions[job.conclusion] || job.conclusion : `录制中 · 分段 ${job.part || 1}`;
+    const reason = {user:'已停止（已收尾）', timeout:'已到录制时限', crash:'进程崩溃', disk_full:'磁盘不足'}[job.stop_reason] || '';
+    const reportLink = job.report ? `<p><a target="_blank" rel="noopener" href="/api/live/report?job_id=${encodeURIComponent(job.job_id)}&token=${encodeURIComponent(SESSION_TOKEN)}">查看完整性报告</a></p>` : '';
+    const commentLabels = {exported:'弹幕已导出', partial:'弹幕已保留；同步估算或采集缺口请查看报告', empty:'本次未收到可导出的弹幕', failed:'弹幕导出失败，媒体保留', unavailable:'弹幕来源不可用'};
+    const comments = commentLabels[job.comments?.status] || '';
+    const sync = job.comments?.sync;
+    const syncText = sync && (sync.clock_verified_count || sync.clock_estimated_count || sync.unmapped_count) ? (sync.clock_verified_count > 0 ? `弹幕时间轴：已校准 ${sync.clock_verified_count} 条，估算 ${sync.clock_estimated_count || 0} 条` : '弹幕同步精度尚未确认，请查看报告') : '';
+    const exportButton = job.conclusion && job.comments?.status && job.comments.status !== 'disabled' ? `<button class="btn sm" data-comment-export="${escHtml(job.job_id)}">按当前格式和偏移重新导出弹幕</button>` : '';
+    return `<div class="notice"><b>${escHtml(job.engine || '直播')} ${job.degraded ? '· 已降级' : ''}</b><p>${escHtml(reason ? reason + ' · ' + state : state)}</p>${job.reason ? `<p>${escHtml(job.reason)}</p>` : ''}${comments ? `<p>${escHtml(comments)}</p>` : ''}${syncText ? `<p>${escHtml(syncText)}</p>` : ''}<small class="mono">${escHtml(job.report || job.report_dir || '')}</small>${reportLink}${exportButton}</div>`;
+  }).join('');
+  $('liveRecordingList').querySelectorAll('[data-comment-export]').forEach(button => button.addEventListener('click', async () => {
+    button.disabled = true;
+    try {
+      const result = await api('/api/live/comments-export', {method:'POST', body:JSON.stringify({job_id:button.dataset.commentExport, settings:{LIVE_DANMAKU_FORMATS:$('s_live_danmaku_formats').value, LIVE_DANMAKU_OFFSET_MS:Number($('s_live_danmaku_offset').value)}})});
+      if(result.error) { showToast(result.error, 'error'); return; }
+      renderLiveRecording({job_id:button.dataset.commentExport, comments:result.comments});
+      showToast('弹幕重新导出完成', 'success');
+    } catch(e) { showToast('弹幕导出失败：' + e.message, 'error'); }
+    finally { button.disabled = false; }
+  }));
 }
 
 function platformHtml(name) {
@@ -1386,6 +2155,7 @@ async function doUpdateNow() {
 // ========== Bilibili 分P 选择 ==========
 let pendingPartCallback = null;
 let pendingTcUrl = null;
+let pendingTcTaskId = '';
 
 function showPartSelector(parts) {
   const list = $('partList');
@@ -1480,7 +2250,8 @@ async function chooseArchiveRedownload(redownload) {
   $('btnArchiveRedownload').disabled = true;
   try {
     const result = await api('/api/archive-choice', {method:'POST', body:JSON.stringify({
-      request_id: choice.request_id, redownload
+      request_id: choice.request_id, redownload,
+      ...(choice.task_id ? {task_id: choice.task_id} : {})
     })});
     if(result.error) showToast(result.error, 'error');
     closeArchiveChoice(choice.request_id);
@@ -1500,6 +2271,15 @@ document.addEventListener('keydown', e => {
   }
 });
 
+function onTcPasswordChange() {
+  const enabled = isOn('sw_tc_remember');
+  const control = $('sw_tc_xlsx');
+  if(!enabled) setSwitch('sw_tc_xlsx', 0);
+  control.setAttribute('aria-disabled', enabled ? 'false' : 'true');
+  control.tabIndex = enabled ? 0 : -1;
+  control.style.opacity = enabled ? '' : '0.45';
+}
+
 // ========== TwitCasting 密码 ==========
 function showTcPasswordPrompt(isRetry) {
   $('tcPasswordInput').value = '';
@@ -1513,17 +2293,21 @@ function showTcPasswordPrompt(isRetry) {
 function closeTcPasswordPrompt() {
   $('tcPasswordOverlay').classList.remove('show');
   pendingTcUrl = null;
+  pendingTcTaskId = '';
 }
 
 function confirmTcPassword() {
   const pw = $('tcPasswordInput').value.trim();
   if(!pw) { showToast('请输入密码', 'error'); return; }
   const url = pendingTcUrl;
+  const taskId = pendingTcTaskId;
   closeTcPasswordPrompt();
   if(!url) return;
-  // 批量下载运行中 → 提交密码到等待中的批量线程；否则启动新的单链接下载
-  if(download_running) {
-    api('/api/submit-password', {method:'POST', body:JSON.stringify({url: url, password: pw})});
+  // 批量下载/任务运行中 → 提交密码到等待中的执行器；否则启动新的单链接下载
+  if(download_running || taskId) {
+    api('/api/submit-password', {method:'POST', body:JSON.stringify({
+      url: url, password: pw, ...(taskId ? {task_id: taskId} : {})
+    })});
   } else {
     doStartDl(url, null, pw);
   }

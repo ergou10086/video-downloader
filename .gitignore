@@ -45,16 +45,26 @@ dist/
 release-output/
 release-assets/
 *.spec
-temp/
+/temp/
 
-# 依赖工具
-dependency/*.exe
-dependency/.venv/
-dependency/node_modules/
-dependency/package.json
-dependency/package-lock.json
-dependency/bgutil-ytdlp-pot-provider/
-dependency/development/
+# 下载/安装的依赖仅保留根目录的许可证；源码插件和锁文件在 resource 中维护。
+/dependency/*
+!/dependency/*.LICENSE
+
+# 只跟踪可复现安装、构建、发布和仓库校验所需脚本，临时脚本留在本地。
+/scripts/*
+!/scripts/install_bililive.py
+!/scripts/install_live_dependencies.py
+!/scripts/build_withny_dependency.py
+!/scripts/check_live_release.py
+!/scripts/check_repository_layout.py
+!/scripts/withny_patch/
+/scripts/withny_patch/*
+!/scripts/withny_patch/chat.go
+!/scripts/withny_patch/chat_protocol.go
+!/scripts/withny_patch/lifecycle.go
+!/scripts/withny_patch/probe_windows.go
+!/scripts/withny_patch/remux_windows.go
 yt-dlp.exe
 ffmpeg.exe
 ffprobe.exe

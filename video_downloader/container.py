@@ -19,14 +19,24 @@ from .core.constants import DEFAULT_CONFIG, IDLE_TIMEOUT, VERSION
 from .core.command import build_ytdlp_cmd as _build_ytdlp_cmd
 from .core.paths import AppPaths
 from .core.platform import detect_platform, is_live_url
+from .live.inspect import LiveInspector
+from .live.modes import CAPABILITIES
+from .live.preferences import resolve_platform_mode
+from .live.probe import ProbeService
+from .live.wait import LiveWatchService, WatchJobStore
+from .live.session import RecordingStore, recover_interrupted
+from .live.danmaku.preferences import SOURCES as COMMENT_SOURCES
 from .state.app_state import AppState
 from .services.download_executor import DownloadExecutor
+from .services.download_archive import TaskArchiveSession
 from .services.nicochannel_auth import NicochannelAuthService
 from .services.download_manager import DownloadManager
+from .services.network_diagnostics import NetworkDiagnostics
 from .services.po_token_provider import PoTokenProviderService
 from .services.storage import StorageService
 from .services.tools import ToolService
 from .services.updater import UpdaterService
+from .tasks import TaskManager
 from .web.handler import HttpHandlerDependencies, HttpService, create_handler
 from .web.rendering import render_html_page, serve_static_file
 
@@ -54,6 +64,8 @@ class AppContainer:
         self._exe_suffix = exe_suffix
         self._paths = AppPaths(tool_dir)
         self._paths.ensure_runtime_dirs()
+        recover_interrupted(self._paths.download_dir / ".live-jobs")
+        self._recordings = RecordingStore(self._paths.download_dir / ".live-jobs")
         self._log_dir = self._paths.log_dir
 
     def wire(self) -> WiredApp:
@@ -84,6 +96,8 @@ class AppContainer:
 
         # ---- 空闲计时器 ----
         idle_timer: threading.Timer | None = None
+        live_watch_service: LiveWatchService | None = None
+        task_manager: TaskManager | None = None
 
         def cancel_idle_timer() -> None:
             nonlocal idle_timer
@@ -94,11 +108,19 @@ class AppContainer:
         def start_idle_timer() -> None:
             nonlocal idle_timer
             cancel_idle_timer()
-            if download_manager.snapshot()["running"] or app_state.has_sse_clients():
+            if (download_manager.snapshot()["running"] or not download_manager.snapshot()["accepting"]
+                    or app_state.has_sse_clients()):
+                return
+            if live_watch_service is not None and live_watch_service.has_active_jobs():
+                return
+            if task_manager is not None and task_manager.has_active():
                 return
 
             def do_idle_exit() -> None:
-                if not download_manager.snapshot()["running"] and not app_state.has_sse_clients():
+                if (not download_manager.snapshot()["running"] and not app_state.has_sse_clients()
+                        and download_manager.snapshot()["accepting"]
+                        and not live_watch_service.has_active_jobs()
+                        and not task_manager.has_active()):
                     add_log(f"[系统] 浏览器已关闭，{IDLE_TIMEOUT}秒无活动，自动退出", "warn")
                     request_exit()
 
@@ -156,6 +178,7 @@ class AppContainer:
 
         # ---- 命令构建 ----
         def build_command(url: str, *, is_live: bool = False,
+                          live_mode: str | None = None,
                           platform_override: str | None = None,
                           config_override: dict | None = None,
                           bili_parts: str | None = None,
@@ -179,6 +202,7 @@ class AppContainer:
             return _build_ytdlp_cmd(
                 url, cfg, tool_dir, exe_suffix,
                 is_live=is_live,
+                live_mode=live_mode,
                 platform_override=platform_override,
                 cookie_file=cookie_file if cookie_file.exists() else None,
                 bili_parts=bili_parts,
@@ -235,6 +259,7 @@ class AppContainer:
             broadcast_download_state=broadcast_download_state,
             cancel_idle_timer=cancel_idle_timer,
             start_idle_timer=start_idle_timer,
+            has_active_downloads=lambda: task_manager is not None and task_manager.has_active(),
         )
 
         # ---- 下载执行器 ----
@@ -260,29 +285,195 @@ class AppContainer:
             forget_twitcasting_password=storage.forget_twitcasting_password,
         )
 
+        # ---- 多任务队列 ----
+        def make_task_executor(task, task_state, manager, callbacks, on_finished):
+            archives = TaskArchiveSession(tool_dir)
+
+            def task_command(*args, **kwargs):
+                return archives.prepare(build_command(*args, **kwargs))
+
+            def finished(handle):
+                try:
+                    archives.finish()
+                except Exception as exc:
+                    callbacks.log(f"[归档] 合并任务归档失败: {exc}", "error")
+                    task_state.publish({"type": "stats", "data": {"fail": 1}})
+                finally:
+                    on_finished(handle)
+
+            return DownloadExecutor(
+                tool_dir=tool_dir,
+                exe_suffix=exe_suffix,
+                app_state=task_state,
+                download_manager=manager,
+                build_command=task_command,
+                log=callbacks.log,
+                update_progress=callbacks.update_progress,
+                broadcast_download_state=callbacks.broadcast_download_state,
+                add_history=callbacks.add_history,
+                cancel_idle_timer=callbacks.cancel_idle_timer,
+                start_idle_timer=callbacks.start_idle_timer,
+                emit_event=callbacks.emit_event,
+                pick_withny_archive=lambda: dict(task.selection),
+                pick_withny_live_config=lambda: dict(task.selection),
+                ensure_po_token_provider=po_token_provider.ensure_running,
+                on_finished=finished,
+                get_twitcasting_password=storage.get_twitcasting_password,
+                save_twitcasting_password=storage.save_twitcasting_password,
+                forget_twitcasting_password=storage.forget_twitcasting_password,
+            )
+
+        task_manager = TaskManager(
+            base_app_state=app_state,
+            executor_factory=make_task_executor,
+            max_parallel_getter=lambda: app_state.config_snapshot().get("TASK_MAX_PARALLEL", 2),
+            order_getter=lambda: app_state.config_snapshot().get("TASK_ORDER", "none"),
+            publish=app_state.publish,
+            cancel_idle_timer=cancel_idle_timer,
+            start_idle_timer=start_idle_timer,
+            add_history=add_history,
+            accepting_getter=lambda: (download_manager.snapshot()["accepting"]
+                                     and not download_manager.snapshot()["running"]),
+        )
+
+        def task_mode_enabled() -> bool:
+            try:
+                return int(app_state.config_snapshot().get("TASK_MODE", 1)) == 1
+            except (TypeError, ValueError):
+                return True
+
+        # ---- 直播 WAIT 服务 ----
+        probe_service = ProbeService(
+            str(self._paths.executable("yt-dlp", exe_suffix)),
+            plugin_dirs=[str(path) for path in self._paths.plugin_dirs()],
+            command_context=lambda target: build_command(target.url, is_live=True, live_mode="live_edge",
+                                                         platform_override=target.platform, include_subtitles=False),
+        )
+        watch_store = WatchJobStore(
+            self._paths.download_dir / ".live-jobs" / "jobs.sqlite",
+        )
+        live_inspector = LiveInspector(probe_service)
+
+        def on_live_watch(job, probe) -> dict:
+            add_log(
+                f"[蹲开播] 检测到开播: {probe.platform} {job.url}，开始录制",
+                "success",
+            )
+            if task_mode_enabled():
+                return task_manager.submit([job.url], kind="live", live_mode=job.record_mode)
+            return task_manager.start_exclusive(download_executor.start_download, job.url, live_mode=job.record_mode)
+
+        live_watch_service = LiveWatchService(
+            store=watch_store,
+            probe_service=probe_service,
+            on_live=on_live_watch,
+            publish=app_state.publish,
+            max_wait_hours=72.0,
+            start_thread=False,
+        )
+
         def start_download(url: str, bili_parts: str | None = None,
                            tc_password: str | None = None,
-                           custom_args: str | None = None) -> dict:
-            return download_executor.start_download(
+                           custom_args: str | None = None,
+                           live_mode: str | None = None) -> dict:
+            config = app_state.config_snapshot()
+            platform = detect_platform(url) or config.get("PLATFORM", "")
+            requested = live_mode if live_mode is not None else resolve_platform_mode(
+                platform, config.get("LIVE_MODE", "auto"), config.get("LIVE_PLATFORM_MODES", "{}"),
+            )
+            requested_value = str(getattr(requested, "value", requested)).lower()
+            if requested_value == "wait":
+                record_mode = resolve_platform_mode(
+                    platform, "auto", config.get("LIVE_PLATFORM_MODES", "{}"),
+                )
+                if record_mode == "wait":
+                    record_mode = "auto"
+                return live_watch_service.add(url, record_mode=record_mode)
+            if task_mode_enabled():
+                kind = "live" if is_live_url(url, detect_platform(url)) else "download"
+                result = task_manager.submit(
+                    [url],
+                    kind=kind,
+                    live_mode=requested,
+                    bili_parts=bili_parts,
+                    tc_password=tc_password,
+                    custom_args=custom_args,
+                )
+                if result.get("ok"):
+                    add_log(f"[任务] 已加入队列: {url}", "info")
+                return result
+            return task_manager.start_exclusive(download_executor.start_download,
                 url,
                 bili_parts=bili_parts,
                 tc_password=tc_password,
                 custom_args=custom_args,
+                live_mode=requested,
             )
 
+        def inspect_live_url(url: str, live_mode: str | None = None) -> dict:
+            config = app_state.config_snapshot()
+            platform = detect_platform(url) or config.get("PLATFORM", "")
+            requested = live_mode if live_mode is not None else resolve_platform_mode(
+                platform, config.get("LIVE_MODE", "auto"), config.get("LIVE_PLATFORM_MODES", "{}"),
+            )
+            return live_inspector.inspect(url, requested_mode=requested)
+
+        def live_capabilities() -> dict:
+            return {
+                name: {
+                    "catch_up": capability.catch_up.value,
+                    "catch_up_reason": capability.catch_up_reason,
+                    "live_edge": capability.live_edge,
+                    "wait": capability.wait,
+                    "comments": {"supported":name in COMMENT_SOURCES, "source":COMMENT_SOURCES.get(name, "")},
+                }
+                for name, capability in CAPABILITIES.items()
+            }
+
         def submit_password(url: str, password: str) -> dict:
-            return download_executor.submit_password(url, password)
+            return task_manager.start_exclusive(download_executor.submit_password, url, password)
 
         def start_withny_archive() -> dict:
-            return download_executor.start_withny_archive()
+            if task_mode_enabled():
+                selection = tool_service.pick_withny_archive()
+                if selection.get("error") or selection.get("cancelled"):
+                    return selection
+                return task_manager.submit([selection["output_path"]], operation="withny_archive", selection=selection)
+            return task_manager.start_exclusive(download_executor.start_withny_archive)
 
         def start_withny_live() -> dict:
-            return download_executor.start_withny_live()
+            if task_mode_enabled():
+                selection = tool_service.pick_withny_live_config()
+                if selection.get("error") or selection.get("cancelled"):
+                    return selection
+                return task_manager.submit([selection["config_path"]], kind="live", operation="withny_live", selection=selection)
+            return task_manager.start_exclusive(download_executor.start_withny_live)
 
         def stop_download() -> dict:
-            return download_executor.stop_download()
+            tasks_result = task_manager.cancel_all()
+            result = download_executor.stop_download()
+            if tasks_result["cancelled"]:
+                result["cancelled"] = tasks_result["cancelled"]
+            return result
+
+        def list_tasks() -> list[dict]:
+            return task_manager.list_tasks()
+
+        def cancel_task(task_id: str) -> dict:
+            return task_manager.cancel(task_id)
+
+        def clear_tasks() -> dict:
+            return task_manager.clear_finished()
+
+        def submit_task_password(task_id: str, url: str, password: str, item_id=None, request_id=None) -> dict:
+            return task_manager.submit_password(task_id, url, password, item_id=item_id, request_id=request_id)
+
+        def submit_task_archive_choice(task_id: str, request_id: str, redownload: bool) -> dict:
+            return task_manager.submit_archive_choice(task_id, request_id, redownload)
 
         def get_current_command() -> dict:
+            if task_manager.has_active():
+                return task_manager.get_current_command()
             return download_executor.get_current_ytdlp_command()
 
         def fetch_bili_playlist(url: str) -> dict:
@@ -298,6 +489,7 @@ class AppContainer:
             log=add_log,
             broadcast_download_state=broadcast_download_state,
             kill_process_tree=_kill_proc_tree,
+            has_active_downloads=task_manager.has_active,
         )
 
         check_deps = tool_service.check_deps
@@ -316,11 +508,20 @@ class AppContainer:
         def batch_txt_download(bili_parts_map: dict | None = None,
                                custom_args: str | None = None) -> dict:
             """从 urls.txt 批量下载（混合平台）。"""
+            if str(app_state.config_snapshot().get("LIVE_MODE", "auto")).lower() == "wait":
+                return {"error": "蹲开播仅支持单条链接，请逐条添加"}
             urls, err = read_urls_file()
             if err:
                 return {"error": err}
             save_config()
-            return download_executor.batch_download(
+            if task_mode_enabled():
+                result = task_manager.submit(
+                    urls, bili_parts_map=bili_parts_map, custom_args=custom_args,
+                )
+                if result.get("ok"):
+                    add_log(f"[任务] 已加入队列: {len(urls)} 个链接", "info")
+                return result
+            return task_manager.start_exclusive(download_executor.batch_download,
                 urls,
                 bili_parts_map=bili_parts_map,
                 custom_args=custom_args,
@@ -328,17 +529,39 @@ class AppContainer:
 
         def start_urls_download(urls: list, custom_args: str | None = None) -> dict:
             """从输入框的多行文本批量下载（每行一个链接）。"""
+            if str(app_state.config_snapshot().get("LIVE_MODE", "auto")).lower() == "wait":
+                return {"error": "蹲开播仅支持单条链接，请逐条添加"}
             save_config()
-            return download_executor.batch_download(urls, custom_args=custom_args)
+            if task_mode_enabled():
+                result = task_manager.submit(urls, custom_args=custom_args)
+                if result.get("ok"):
+                    add_log(f"[任务] 已加入队列: {len(urls)} 个链接", "info")
+                return result
+            return task_manager.start_exclusive(download_executor.batch_download, urls, custom_args=custom_args)
+
+        def list_live_watch_jobs() -> list[dict]:
+            return live_watch_service.list_jobs()
+
+        def cancel_live_watch(job_id: str) -> dict:
+            return live_watch_service.cancel(job_id)
 
         def request_exit() -> None:
-            ticket = download_manager.request_stop()
-            _kill_proc_tree(ticket.process)
+            download_executor.stop_download()
+            network_diagnostics.stop()
+            live_watch_service.stop()
+            task_manager.stop()
+            download_executor.wait_for_live_finalization()
             po_token_provider.stop()
             app_state.publish({"type": "exit"})
             exit_event.set()
 
         # ---- HTTP 服务 ----
+        network_diagnostics = NetworkDiagnostics(
+            app_state=app_state, save_config=save_config,
+            begin_guard=tool_service._begin_maintenance,
+            end_guard=tool_service._end_maintenance, publish=app_state.publish,
+        )
+
         def create_http_service() -> HttpService:
             deps = HttpHandlerDependencies(
                 session_token=session_token,
@@ -355,6 +578,13 @@ class AppContainer:
                 cancel_idle_timer=cancel_idle_timer,
                 start_idle_timer=start_idle_timer,
                 start_download=start_download,
+                list_live_watch_jobs=list_live_watch_jobs,
+                cancel_live_watch=cancel_live_watch,
+                inspect_live_url=inspect_live_url,
+                live_capabilities=live_capabilities,
+                list_tasks=list_tasks,
+                cancel_task=cancel_task,
+                clear_tasks=clear_tasks,
                 start_withny_archive=start_withny_archive,
                 start_withny_live=start_withny_live,
                 batch_txt_download=batch_txt_download,
@@ -364,7 +594,9 @@ class AppContainer:
                 stop_download=stop_download,
                 get_current_command=get_current_command,
                 submit_password=submit_password,
+                submit_task_password=submit_task_password,
                 submit_archive_choice=download_executor.submit_archive_choice,
+                submit_task_archive_choice=submit_task_archive_choice,
                 fetch_bili_playlist=fetch_bili_playlist,
                 save_preset=save_preset,
                 load_preset=load_preset,
@@ -379,9 +611,15 @@ class AppContainer:
                 clean_temp=clean_temp,
                 gen_url_template=gen_url_template,
                 wav_to_mp3=wav_to_mp3,
+                audio_convert=tool_service.audio_convert,
+                stop_audio_tool=tool_service.stop_audio_tool,
                 audio_loudnorm=audio_loudnorm,
                 audio_volume=audio_volume,
                 request_exit=request_exit,
+                network_diagnostics=network_diagnostics,
+                list_live_recordings=self._recordings.recent,
+                get_live_report=self._recordings.report,
+                export_live_comments=self._recordings.export_comments,
             )
             return HttpService(lambda: create_handler(deps), port=0)
 
@@ -400,6 +638,7 @@ class AppContainer:
                 add_log("[提示] yt-dlp: github.com/yt-dlp/yt-dlp/releases", "warn")
                 add_log("[提示] ffmpeg: www.gyan.dev/ffmpeg/builds/ (full_build)", "warn")
             config = app_state.config_snapshot()
+            live_watch_service.start()
 
             url = http_service.start()
             start_idle_timer()
@@ -424,6 +663,8 @@ class AppContainer:
                 request_exit()
             print("\n正在关闭服务器...", flush=True)
             http_service.stop()
+            live_watch_service.stop()
+            task_manager.stop()
             print("已退出。", flush=True)
 
         return WiredApp(

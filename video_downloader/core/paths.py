@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import shutil
+import sys
 import tempfile
 from pathlib import Path
 
@@ -34,9 +35,6 @@ LEGACY_DEPENDENCY_ITEMS = (
     "nicochannel.zip",
     "yt-dlp-plugins",
     "bgutil-ytdlp-pot-provider",
-    "node_modules",
-    "package.json",
-    "package-lock.json",
 )
 
 LEGACY_DOWNLOAD_DIRS = (*DOWNLOAD_PLATFORM_DIRS, "converted", "logs")
@@ -214,8 +212,19 @@ class AppPaths:
         roots = []
         if any(path.exists() for path in canonical_markers):
             roots.append(self.dependency_dir)
+            if canonical_markers[0].is_dir():
+                roots.append(canonical_markers[0])
         if any(path.exists() for path in legacy_markers):
             roots.append(self.app_dir)
+            if legacy_markers[0].is_dir():
+                roots.append(legacy_markers[0])
+        # Application-authored plugins are source assets, not downloaded runtime
+        # dependencies. Keep the same discovery root in portable/frozen builds.
+        resource_root = (Path(sys._MEIPASS) if getattr(sys, '_MEIPASS', None)
+                         else self.app_dir / 'resource')
+        bundled_plugins = resource_root / 'yt-dlp-plugins'
+        if bundled_plugins.is_dir() and bundled_plugins not in roots:
+            roots.append(bundled_plugins)
         return tuple(roots or (self.dependency_dir,))
 
     def subprocess_env(self, base: dict[str, str] | None = None) -> dict[str, str]:

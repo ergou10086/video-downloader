@@ -26,6 +26,18 @@ class StorageService:
     _XLSX_PACKAGE_REL_NS = "http://schemas.openxmlformats.org/package/2006/relationships"
     _XLSX_XML_NS = "http://www.w3.org/XML/1998/namespace"
 
+    @staticmethod
+    def _migrate_task_limits(config):
+        config = dict(config)
+        for key, low in (("TASK_MAX_PARALLEL", 1), ("TASK_LIVE_PARALLEL", 2)):
+            try:
+                value = int(config[key])
+                if 1 <= value <= 8:
+                    config[key] = max(low, min(5, value))
+            except (KeyError, TypeError, ValueError, OverflowError):
+                pass
+        return config
+
     def __init__(self, tool_dir, app_state, validate_config, log, emit_event):
         self._tool_dir = tool_dir
         self._paths = AppPaths(tool_dir)
@@ -52,6 +64,7 @@ class StorageService:
         self._preset_lock = threading.RLock()
         self._history_lock = threading.RLock()
         self._tc_password_lock = threading.RLock()
+        self._tc_password_memory = {}
 
     def load_config(self):
         with self._app_state.config_lock, self._config_lock:
@@ -64,6 +77,10 @@ class StorageService:
                     with open(self._config_file, "r", encoding="utf-8") as file:
                         parser.read_file(file)
                     if parser.has_section("settings"):
+                        section = parser["settings"]
+                        if "live_mode" not in section and "live_record_mode" in section:
+                            migrated, _ = self._validate_config({"LIVE_RECORD_MODE": section["live_record_mode"]})
+                            config["LIVE_MODE"] = migrated["LIVE_MODE"]
                         for key, value in parser["settings"].items():
                             name = key.upper()
                             if name not in DEFAULT_CONFIG:
@@ -79,7 +96,7 @@ class StorageService:
                 except Exception as exc:
                     config = dict(DEFAULT_CONFIG)
                     self._log(f"[配置] settings.ini 无法解析，已回退默认设置: {exc}", "warn")
-            validated, _ = self._validate_config(config)
+            validated, _ = self._validate_config(self._migrate_task_limits(config))
             self._app_state.replace_config(validated)
             return self._app_state.config_snapshot()
 
@@ -160,7 +177,7 @@ class StorageService:
             try:
                 with self._app_state.config_lock:
                     previous = self._app_state.config_snapshot()
-                    validated, errors = self._validate_config(presets[name], previous)
+                    validated, errors = self._validate_config(self._migrate_task_limits(presets[name]), previous)
                     if errors:
                         return {"error": f"预设包含无效设置: {', '.join(errors)}"}
                     self._app_state.replace_config(validated)
@@ -766,22 +783,31 @@ class StorageService:
                 pass
             raise
 
-    def get_twitcasting_password(self, url):
+    def get_twitcasting_password(self, url, *, persist=True):
         """按链接读取已验证的 TwitCasting 密码。"""
         key = clean_url(url)
         if not key:
             return None
         with self._tc_password_lock:
+            if key in self._tc_password_memory:
+                return self._tc_password_memory[key]
+            if not persist:
+                return None
             row = self._load_tc_password_rows().get(key)
+            if row:
+                self._tc_password_memory[key] = row["password"]
             return row["password"] if row else None
 
-    def save_twitcasting_password(self, url, password):
+    def save_twitcasting_password(self, url, password, *, persist=True):
         """保存已验证密码及时间；同一链接只保留最新一条。"""
         key = clean_url(url)
         password = str(password or "")
         if not key or not password:
             return {"error": "TwitCasting 链接或密码为空"}
         with self._tc_password_lock:
+            self._tc_password_memory[key] = password
+            if not persist:
+                return {"ok": True}
             rows = self._load_tc_password_rows()
             rows[key] = {
                 "url": key,
@@ -795,12 +821,15 @@ class StorageService:
                 self._log(f"[TwitCasting] 密码保存失败: {exc}", "warn")
                 return {"error": str(exc)}
 
-    def forget_twitcasting_password(self, url):
+    def forget_twitcasting_password(self, url, *, persist=True):
         """删除链接对应的失效密码。"""
         key = clean_url(url)
         if not key:
             return {"ok": True}
         with self._tc_password_lock:
+            self._tc_password_memory.pop(key, None)
+            if not persist:
+                return {"ok": True}
             rows = self._load_tc_password_rows()
             if key not in rows:
                 return {"ok": True}

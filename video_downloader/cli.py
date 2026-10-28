@@ -130,6 +130,7 @@ def _cmd_download(url):
             exe_suffix,
             is_live=is_live_url(url, platform),
             platform_override=platform,
+            live_mode=config.get("LIVE_MODE", "auto"),
         )
     except Exception as exc:
         print(f"错误: 命令构建失败 - {exc}")

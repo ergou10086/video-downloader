@@ -10,6 +10,17 @@ import os
 import sys
 from pathlib import Path
 
+if __name__ == "__main__" and sys.argv[1:] == ["--live-self-test"]:
+    import json
+    from video_downloader.live.danmaku.dependencies import self_check
+    checks = self_check()
+    print(json.dumps(checks), flush=True)
+    sys.exit(0 if all(checks.values()) else 1)
+
+if __name__ == "__main__" and len(sys.argv) == 3 and sys.argv[1] == "--live-comment-worker":
+    from video_downloader.live.danmaku.worker import main as comment_worker
+    sys.exit(comment_worker(sys.argv[2]))
+
 from video_downloader.container import AppContainer
 from video_downloader.core.constants import VERSION
 

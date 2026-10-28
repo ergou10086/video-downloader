@@ -9,12 +9,13 @@ from .constants import (
     FORMAT_OPTIONS,
     HWACCEL_OPTIONS,
     LIVE_STREAM_METHOD_OPTIONS,
-    LIVE_RECORD_MODE_OPTIONS,
+    LIVE_MODE_OPTIONS,
     MP3_BITRATE_OPTIONS,
     PLATFORM_INFO,
     PROXY_TYPE_OPTIONS,
     RESOLUTION_OPTIONS,
     SUBTITLE_TYPE_OPTIONS,
+    TASK_ORDER_OPTIONS,
 )
 
 # 校验错误的中文说明（key → 错误详情映射）
@@ -28,9 +29,24 @@ _ERROR_REASONS = {
     "BROWSER_NAME": "浏览器选项无效",
     "HWACCEL": "硬件加速选项无效",
     "BILI_MULTIP_POLICY": "B站多P策略选项无效",
-    "LIVE_STREAM_METHOD": "直播下载方式仅支持 yt-dlp",
-    "LIVE_RECORD_MODE": "直播录制策略无效",
-    "LIVE_WATCH_INTERVAL": "蹲开播检测间隔需在 5-600 秒之间",
+    "LIVE_STREAM_METHOD": "直播下载方式仅支持 auto/yt-dlp/bililive-recorder",
+    "LIVE_MAX_RETRIES": "直播重试次数需在 0-5 之间",
+    "LIVE_WATCHDOG_SECONDS": "直播看门狗告警时间需在 10-600 秒之间",
+    "LIVE_MIN_FREE_MB": "直播磁盘安全余量需在 64-102400 MiB 之间",
+    "LIVE_ESTIMATED_BITRATE_KBPS": "直播预估码率需在 128-100000 Kbps 之间",
+    "LIVE_MODE": "直播模式仅支持 auto/catch_up/live_edge/wait",
+    "LIVE_DANMAKU_ENABLED": "直播弹幕开关仅支持 0 或 1",
+    "LIVE_DANMAKU_ANONYMIZE": "弹幕匿名化开关仅支持 0 或 1",
+    "LIVE_DANMAKU_FORMATS": "直播弹幕格式仅支持 srt、ass 或 srt,ass",
+    "LIVE_DANMAKU_PLATFORMS": "平台弹幕默认值需为已支持平台的 inherit/on/off JSON 对象",
+    "LIVE_DANMAKU_OFFSET_MS": "弹幕时间微调需在 -600000 到 600000 毫秒之间",
+    "LIVE_PLATFORM_MODES": "平台直播设置为 JSON，长度不能超过 2000 字符",
+    "TASK_ORDER": "任务排序仅支持 none/live_first/download_first",
+    "TASK_MAX_PARALLEL": "并行任务数需在 1-5 之间",
+    "TASK_LIVE_PARALLEL": "任务内直播并行数需在 2-5 之间",
+    "TASK_DOWNLOAD_PARALLEL": "任务内下载并行数需在 1-5 之间",
+    "TASK_MIXED_PARALLEL": "任务内并行开关仅支持 0 或 1",
+    "TASK_DOWNLOAD_SPEED_LIMIT": "普通下载限速需在 0-100000 MiB/s 之间",
     "AUDIO_MODE": "音频模式选项无效",
     "AUDIO_FORMAT": "音频格式选项无效",
     "THREADS": "线程数需在 1-32 之间",
@@ -52,6 +68,8 @@ _ERROR_REASONS = {
     "NICO_COMMENTS": "Niconico弹幕仅支持 0 或 1",
     "NICO_RECODE": "Niconico重编码仅支持 0 或 1",
     "TC_PASSWORD": "TwitCasting密码长度不能超过 200 字符",
+    "TC_REMEMBER_PASSWORD": "TwitCasting 记住密码仅支持 0 或 1",
+    "TC_SAVE_PASSWORD_XLSX": "TwitCasting 保存密码到 XLSX 仅支持 0 或 1",
     "ENABLE_LOG": "日志开关仅支持 0 或 1",
     "DEL_WAV_AFTER_CONVERT": "删除WAV仅支持 0 或 1",
     "YOUTUBE_PO_TOKEN_ENABLED": "YouTube PO Token 开关仅支持 0 或 1",
@@ -69,10 +87,19 @@ def _err(key):
 def validate_config(values, base=None):
     result = dict(DEFAULT_CONFIG if base is None else base)
     errors = []
+    # Import the upstream name once; the live domain remains the only executor.
+    values = dict(values)
+    if "LIVE_RECORD_MODE" in values and "LIVE_MODE" not in values:
+        legacy = {"from_start": "catch_up", "current": "live_edge", "wait": "wait"}
+        mode = str(values["LIVE_RECORD_MODE"]).strip().lower()
+        if mode in legacy:
+            values["LIVE_MODE"] = legacy[mode]
+        else:
+            errors.append("LIVE_RECORD_MODE：直播录制策略无效")
     proxy_enabled = values.get("PROXY_ENABLED", result["PROXY_ENABLED"])
     try:
         proxy_enabled = int(proxy_enabled) == 1
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         proxy_enabled = bool(result["PROXY_ENABLED"])
     enums = {
         "PLATFORM": [item["name"] for item in PLATFORM_INFO],
@@ -86,8 +113,11 @@ def validate_config(values, base=None):
         "BILI_MULTIP_POLICY": BILI_POLICY_OPTIONS,
         "AUDIO_MODE": AUDIO_MODE_OPTIONS,
         "AUDIO_FORMAT": AUDIO_FORMAT_OPTIONS,
+        "AUDIO_OUTPUT_FORMAT": ["mp3", "aac", "wav", "flac", "ogg", "opus", "wma", "ac3", "alac"],
         "LIVE_STREAM_METHOD": LIVE_STREAM_METHOD_OPTIONS,
-        "LIVE_RECORD_MODE": LIVE_RECORD_MODE_OPTIONS,
+        "LIVE_MODE": LIVE_MODE_OPTIONS,
+        "LIVE_DANMAKU_FORMATS": ["srt", "ass", "srt,ass"],
+        "TASK_ORDER": TASK_ORDER_OPTIONS,
         "SUBTITLE_TYPE": SUBTITLE_TYPE_OPTIONS,
     }
     integer_ranges = {
@@ -96,13 +126,23 @@ def validate_config(values, base=None):
         "COOKIE_MODE": (1, 2),
         "MP3_BITRATE": (min(MP3_BITRATE_OPTIONS), max(MP3_BITRATE_OPTIONS)),
         "LIVE_DOWNLOAD_TIMEOUT": (0, 1440),
-        "LIVE_WATCH_INTERVAL": (5, 600),
+        "LIVE_DANMAKU_OFFSET_MS": (-600000, 600000),
+        "LIVE_MAX_RETRIES": (0, 5),
+        "LIVE_WATCHDOG_SECONDS": (10, 600),
+        "LIVE_MIN_FREE_MB": (64, 102400),
+        "LIVE_ESTIMATED_BITRATE_KBPS": (128, 100000),
+        "TASK_MODE": (0, 1),
+        "TASK_MAX_PARALLEL": (1, 5),
+        "TASK_LIVE_PARALLEL": (2, 5),
+        "TASK_DOWNLOAD_PARALLEL": (1, 5),
     }
     booleans = {
         "MERGE_MODE", "PROXY_ENABLED", "USE_COOKIES", "EMBED_META",
         "DOWNLOAD_THUMB", "DOWNLOAD_SUBTITLES", "WIN_FILENAMES", "STRICT_FILENAME",
         "NICO_COMMENTS", "NICO_RECODE", "ENABLE_LOG", "DEL_WAV_AFTER_CONVERT",
-        "YOUTUBE_PO_TOKEN_ENABLED",
+        "YOUTUBE_PO_TOKEN_ENABLED", "TC_REMEMBER_PASSWORD", "TC_SAVE_PASSWORD_XLSX",
+        "TASK_MIXED_PARALLEL", "AUDIO_RECURSIVE",
+        "LIVE_DANMAKU_ENABLED", "LIVE_DANMAKU_ANONYMIZE",
     }
     for key, value in values.items():
         if key not in DEFAULT_CONFIG:
@@ -111,6 +151,11 @@ def validate_config(values, base=None):
             if key in enums:
                 value = str(value)
                 if value not in enums[key]:
+                    raise ValueError
+            elif key == "TASK_DOWNLOAD_SPEED_LIMIT":
+                import math
+                value = float(value)
+                if not math.isfinite(value) or not 0 <= value <= 100000:
                     raise ValueError
             elif key in integer_ranges:
                 value = int(value)
@@ -141,12 +186,24 @@ def validate_config(values, base=None):
                 value = str(value).strip()
                 if len(value) > 4000:
                     raise ValueError
+            elif key == "LIVE_DANMAKU_PLATFORMS":
+                import json
+                from video_downloader.live.danmaku.preferences import platform_defaults
+                value = json.dumps(platform_defaults(value), ensure_ascii=False, sort_keys=True)
+            elif key == "LIVE_PLATFORM_MODES":
+                import json
+                value = str(value).strip() or "{}"
+                if len(value) > 2000:
+                    raise ValueError
+                parsed = json.loads(value)
+                if not isinstance(parsed, dict):
+                    raise ValueError
             else:
                 value = str(value).strip()
                 if len(value) > 200:
                     raise ValueError
             result[key] = value
-        except (TypeError, ValueError):
+        except (TypeError, ValueError, OverflowError):
             errors.append(_err(key))
     if result["HWACCEL"] != "cpu" and result["OUTPUT_FORMAT"] == "webm":
         result["HWACCEL"] = "cpu"

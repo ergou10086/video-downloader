@@ -13,9 +13,10 @@ from video_downloader.core.constants import LEGACY_ALL_SUBTITLE_LANGS, RECOMMEND
 from video_downloader.core.platform import clean_url, detect_platform, is_live_url, safe_decode
 from video_downloader.core.paths import AppPaths
 from video_downloader.core.subtitles import classify_subtitle_result
-from video_downloader.services.download_archive import (
-    archived_video_id, forget_archived_videos, redownload_command,
-)
+from video_downloader.live import LiveModeError, decide_live
+from video_downloader.live.preferences import resolve_platform_mode
+from video_downloader.live.runner import LiveRunner
+from video_downloader.services.download_archive import archived_video_id, forget_archived_videos, redownload_command
 from video_downloader.services.withny_archive import WithnyArchiveError, build_ffmpeg_command, load_and_select, redact_line
 
 
@@ -62,6 +63,7 @@ class DownloadExecutor:
         pick_withny_archive=None,
         pick_withny_live_config=None,
         ensure_po_token_provider=None,
+        on_finished=None,
         get_twitcasting_password=None,
         save_twitcasting_password=None,
         forget_twitcasting_password=None,
@@ -82,9 +84,16 @@ class DownloadExecutor:
         self._pick_withny_archive = pick_withny_archive
         self._pick_withny_live_config = pick_withny_live_config
         self._ensure_po_token_provider = ensure_po_token_provider
+        self._on_finished = on_finished
         self._get_twitcasting_password_cb = get_twitcasting_password
         self._save_twitcasting_password_cb = save_twitcasting_password
         self._forget_twitcasting_password_cb = forget_twitcasting_password
+        self._tc_config = None
+        self._finish_lock = threading.Lock()
+        self._finished_generations = set()
+        self._password_attempts = 0
+        self._password_url = None
+        self._password_request_id = None
         # 批量下载密码阻塞等待机制
         self._password_event = threading.Event()
         self._password_value: str | None = None
@@ -94,6 +103,12 @@ class DownloadExecutor:
         self._current_ytdlp_command = None
         self._archive_choice_lock = threading.Lock()
         self._archive_choice = None
+        self._live_runner = None
+        self._withny_live_active = False
+        self._live_config = None
+        self._effective_live_mode = None
+        self._live_finished = threading.Event()
+        self._live_finished.set()
 
     def submit_archive_choice(self, request_id, redownload):
         with self._archive_choice_lock:
@@ -108,7 +123,6 @@ class DownloadExecutor:
             choice["redownload"] = redownload
             choice["event"].set()
         return {"ok": True}
-
 
     def _wait_for_archive_choice(self, handle, url, platform, video_ids):
         if self._download_manager.is_cancelled(handle):
@@ -152,74 +166,11 @@ class DownloadExecutor:
                     self._app_state.archive_prompt = None
             self._emit_event("archive_choice_closed", {"request_id": data["request_id"]})
 
-
     def _record_archive_skip(self, url, title, platform, stats):
         stats["skipped"] = stats.get("skipped", 0) + 1
         self._log("[跳过] 已保留归档记录，未重新下载", "info")
         self._update_progress(1, "已跳过（下载归档）", "", "")
         self._add_history(url, title, platform, "skipped")
-
-
-    def _prepare_download(self, handle, config_snapshot, platforms, run, args):
-        """Keep cold starts off HTTP threads and inside the managed task lifetime."""
-        self._app_state.download_thread_context.task_id = handle.generation
-        try:
-            if self._download_manager.is_cancelled(handle):
-                return
-            result = self._start_po_token_provider_if_needed(config_snapshot, platforms, handle)
-            if self._download_manager.is_cancelled(handle) or result.get("cancelled"):
-                return
-            if result.get("error"):
-                raise RuntimeError(result["error"])
-            run(handle, *args, po_token_base_url=result.get("base_url"))
-        except Exception as exc:
-            if not self._download_manager.is_cancelled(handle):
-                self._log(f"[准备失败] {exc}", "error")
-                self._update_progress(0, "下载准备失败", "", "")
-                stats = self._app_state.batch_stats
-                stats["fail"] = stats["total"]
-                self._app_state.publish({"type": "stats", "data": dict(stats)})
-        finally:
-            if self._download_manager.is_current(handle):
-                self._finish(handle, None)
-
-
-    def _build_and_run_single(self, handle, url, effective_platform, is_live_download,
-                              config_snapshot, bili_parts, verbose, custom_args,
-                              po_token_base_url=None):
-        build_kwargs = {
-            "is_live": is_live_download,
-            "platform_override": effective_platform,
-            "config_override": config_snapshot,
-            "bili_parts": bili_parts,
-        }
-        if custom_args:
-            build_kwargs["custom_args"] = custom_args
-        if po_token_base_url:
-            build_kwargs["po_token_base_url"] = po_token_base_url
-        cmd = self._build_command(url, **build_kwargs, include_subtitles=False)
-        subtitle_cmd = None
-        if config_snapshot.get("DOWNLOAD_SUBTITLES", 0):
-            subtitle_cmd = self._build_command(url, **build_kwargs, subtitle_only=True)
-        if verbose:
-            cmd += ["--verbose"]
-        if self._download_manager.is_cancelled(handle):
-            return
-        self._update_progress(0, "正在连接直播..." if is_live_download else "正在下载...")
-        if is_live_download and self._live_record_mode(config_snapshot) == "wait":
-            self._run_single_wait_for_live(
-                handle, cmd, url, effective_platform, is_live_download,
-                config_snapshot.get("AUDIO_MODE", "0"),
-                config_snapshot.get("AUDIO_FORMAT", "mp3"), verbose, subtitle_cmd,
-                config_snapshot,
-            )
-            return
-        self._run_single(
-            handle, cmd, url, effective_platform, is_live_download,
-            config_snapshot.get("AUDIO_MODE", "0"),
-            config_snapshot.get("AUDIO_FORMAT", "mp3"), verbose, subtitle_cmd,
-        )
-
 
     def _remember_ytdlp_command(self, command):
         with self._command_lock:
@@ -340,72 +291,6 @@ class DownloadExecutor:
             "invalid cookies from browser arguments",
         ))
 
-    @staticmethod
-    def _is_live_from_start_unavailable(line):
-        """识别 yt-dlp 无法从直播起点回溯的明确错误。
-
-        部分直播提取器（例如 BiliLive）会在传入 ``--live-from-start``
-        时直接退出，而不是回退到当前分片。该错误可以安全地改用当前
-        时刻重新提取；其他格式、鉴权或网络错误不应触发此兜底。
-        """
-        lowered = line.lower()
-        if "--live-from-start" not in lowered:
-            return False
-        return any(signature in lowered for signature in (
-            "no formats that can be downloaded from the start",
-            "there are no formats that can be downloaded from the start",
-            "use --no-live-from-start",
-            "cannot download from the start",
-        ))
-
-    @staticmethod
-    def _without_live_from_start(cmd):
-        """移除命令中的 ``--live-from-start``，供当前分片重试使用。"""
-        if not cmd:
-            return cmd
-        return [item for item in cmd if item != "--live-from-start"]
-
-    @staticmethod
-    def _remove_ytdl_sidecar(output_path):
-        """Remove yt-dlp's resume metadata after a completed output is verified."""
-        if not output_path:
-            return False
-        sidecar = Path(str(output_path) + ".ytdl")
-        try:
-            sidecar.unlink()
-        except FileNotFoundError:
-            return False
-        except OSError:
-            return False
-        return True
-
-    @staticmethod
-    def _without_twitcasting_parallel(cmd):
-        """移除并发 HLS 插件参数，保留 FFmpeg 串行下载回退。"""
-        if not cmd:
-            return cmd
-        result = []
-        index = 0
-        while index < len(cmd):
-            item = cmd[index]
-            if item == "--enable-file-urls":
-                index += 1
-                continue
-            if item == "--use-postprocessor" and index + 1 < len(cmd):
-                spec = str(cmd[index + 1])
-                if spec.startswith("TwitCastingParallelHls:"):
-                    index += 2
-                    continue
-            result.append(item)
-            index += 1
-        return result
-
-    @staticmethod
-    def _is_twitcasting_parallel_plugin_error(line):
-        """识别插件未注册导致的 yt-dlp KeyError。"""
-        lowered = str(line or "").lower()
-        return "keyerror" in lowered and "twitcastingparallelhlspp" in lowered
-
     def _twitcasting_recovery(self, cmd, *, m3u8_400, access_error,
                               direct_tried, firefox_tried):
         """返回 TwitCasting 下一条受控恢复命令；每种兜底最多执行一次。"""
@@ -439,6 +324,84 @@ class DownloadExecutor:
                 "请使用已登录 TwitCasting 的 Firefox，或重新导出 cookies.txt",
                 "warn",
             )
+
+    @staticmethod
+    def _command_video_password(cmd):
+        """返回命令中传给 TwitCasting 的密码；不存在或为空时返回 None。"""
+        if not cmd:
+            return None
+        from ..live.danmaku.transport import option
+        return option(cmd, "--video-password") or None
+
+    @staticmethod
+    def _is_twitcasting_parallel_plugin_error(line):
+        """识别插件未注册导致的 yt-dlp KeyError。"""
+        lowered = str(line or "").lower()
+        return "keyerror" in lowered and "twitcastingparallelhlspp" in lowered
+
+    def _password_policy(self, config=None):
+        config = config if config is not None else self._tc_config
+        if config is None:
+            config = self._app_state.config_snapshot()
+        config = config if isinstance(config, dict) else {}
+        remember = str(config.get("TC_REMEMBER_PASSWORD", 0)) == "1"
+        return remember, remember and str(config.get("TC_SAVE_PASSWORD_XLSX", 0)) == "1"
+
+    def _saved_twitcasting_password(self, url, platform, config):
+        remember, persist = self._password_policy(config)
+        if platform == "TwitCasting" and remember and self._get_twitcasting_password_cb:
+            return self._get_twitcasting_password_cb(url, persist=persist)
+        return None
+
+    def _remember_twitcasting_password(self, url, platform, cmd, config=None):
+        remember, persist = self._password_policy(config)
+        password = self._command_video_password(cmd)
+        if platform == "TwitCasting" and remember and password and self._save_twitcasting_password_cb:
+            self._save_twitcasting_password_cb(url, password, persist=persist)
+
+    def _forget_twitcasting_password(self, url, platform, config=None):
+        remember, persist = self._password_policy(config)
+        if platform == "TwitCasting" and remember and self._forget_twitcasting_password_cb:
+            self._forget_twitcasting_password_cb(url, persist=persist)
+
+    @staticmethod
+    def _has_twitcasting_parallel(cmd):
+        return any(str(value).startswith("TwitCastingParallelHls:") for value in (cmd or []))
+
+    @classmethod
+    def _without_twitcasting_parallel(cls, cmd):
+        if cmd is None:
+            return None
+        result, index = [], 0
+        while index < len(cmd):
+            if cmd[index] == "--enable-file-urls":
+                index += 1
+                continue
+            if (cmd[index] == "--use-postprocessor" and index + 1 < len(cmd)
+                    and str(cmd[index + 1]).startswith("TwitCastingParallelHls:")):
+                index += 2
+                continue
+            result.append(cmd[index])
+            index += 1
+        # The fork uses the plugin on its first native-HLS attempt. Removing it
+        # must explicitly select FFmpeg, without re-registering the failed plugin.
+        if not any(value == "--downloader" and result[i + 1] == "m3u8:ffmpeg"
+                   for i, value in enumerate(result[:-1])):
+            result = cls._replace_pair_options(result, {"--downloader"}, ["--downloader", "m3u8:ffmpeg"])
+        args = "ffmpeg_i:-http_persistent 1 -http_multiple 1"
+        if args not in result:
+            result += ["--downloader-args", args]
+        return result
+
+    @staticmethod
+    def _remove_ytdl_sidecar(output_path):
+        if not output_path or not Path(output_path).is_file():
+            return False
+        try:
+            Path(str(output_path) + ".ytdl").unlink()
+        except OSError:
+            return False
+        return True
 
     def _with_ffmpeg_downloader(self, cmd):
         """为单条下载补齐 TwitCasting 并发预取与 FFmpeg 兜底参数（幂等）。
@@ -486,312 +449,6 @@ class DownloadExecutor:
         except ValueError as exc:
             return str(exc)
 
-    @staticmethod
-    def _live_record_mode(config):
-        """返回规范化的直播策略，旧配置默认保持追开播行为。"""
-        mode = str((config or {}).get("LIVE_RECORD_MODE", "from_start")).strip().lower()
-        return mode if mode in {"wait", "from_start", "current"} else "from_start"
-
-    # ``build_command`` also adds output, archive, format and post-processing
-    # options.  A live-state probe must retain access/authentication options,
-    # while avoiding anything that can write files or execute a postprocessor.
-    _LIVE_PROBE_PAIR_OPTIONS = {
-        "--plugin-dirs",
-        "--proxy",
-        "--cookies",
-        "--cookies-from-browser",
-        "--username",
-        "--password",
-        "--video-password",
-        "--extractor-args",
-        "--add-header",
-        "--referer",
-        "--user-agent",
-        "--impersonate",
-        "--source-address",
-        "--geo-bypass-country",
-        "--compat-options",
-        "--socket-timeout",
-        "--retries",
-        "--fragment-retries",
-        "--retry-sleep",
-    }
-    _LIVE_PROBE_FLAG_OPTIONS = {
-        "--no-check-certificates",
-        "--legacy-server-connect",
-        "--geo-bypass",
-        "--verbose",
-    }
-
-    @classmethod
-    def _probe_access_options(cls, command, url):
-        """Extract safe access options from a normal yt-dlp command.
-
-        The command builder is the single source of truth for cookies, proxy,
-        plugin directories, NicoChannel credentials, PO-token extractor args
-        and TwitCasting passwords.  Keep only options that affect extraction
-        or authentication so a probe cannot create output files or run custom
-        postprocessors.
-        """
-        if not command:
-            return []
-        source = list(command)
-        executable = source[0]
-        result = [executable]
-        index = 1
-        while index < len(source):
-            item = source[index]
-            # The recording URL can be followed by --verbose when a password
-            # retry is in progress; remove every exact URL occurrence and add
-            # one canonical URL after the probe flags below.
-            if item == url:
-                index += 1
-                continue
-            if item in cls._LIVE_PROBE_PAIR_OPTIONS:
-                if index + 1 < len(source) and source[index + 1] != url:
-                    result.extend((item, source[index + 1]))
-                    index += 2
-                    continue
-                index += 1
-                continue
-            if item in cls._LIVE_PROBE_FLAG_OPTIONS:
-                result.append(item)
-            index += 1
-        return result
-
-    def _live_probe_command(
-        self,
-        url,
-        config,
-        platform=None,
-        source_command=None,
-        custom_args=None,
-        po_token_base_url=None,
-    ):
-        """构建轻量 yt-dlp 直播状态探测命令。
-
-        探测命令复用录制命令生成的鉴权/平台参数，但只读取元数据，避免蹲
-        开播时创建空文件、写入归档或触发音视频后处理。
-        """
-        effective_platform = platform or config.get("PLATFORM")
-        source = source_command
-        if source is None:
-            # Batch waiting happens before its final per-item command is built.
-            # Build the same command here so platform plugins and credentials
-            # are still available to the probe.
-            try:
-                build_kwargs = {
-                    "is_live": True,
-                    "platform_override": effective_platform,
-                    "config_override": config,
-                    "include_subtitles": False,
-                }
-                if custom_args:
-                    build_kwargs["custom_args"] = custom_args
-                if po_token_base_url:
-                    build_kwargs["po_token_base_url"] = po_token_base_url
-                source = self._build_command(url, **build_kwargs)
-            except Exception:
-                source = None
-
-        if source:
-            command = self._probe_access_options(source, url)
-        else:
-            # Keep a conservative fallback for tests/legacy integrations whose
-            # command callback is unavailable.
-            command = [str(self._paths.executable("yt-dlp", self._exe_suffix))]
-            if config.get("USE_COOKIES"):
-                if int(config.get("COOKIE_MODE", 1)) == 1:
-                    cookie_file = self._tool_dir / "cookies.txt"
-                    if cookie_file.is_file():
-                        command += ["--cookies", str(cookie_file)]
-                else:
-                    browser = str(config.get("BROWSER_NAME") or "").strip()
-                    profile = str(config.get("BROWSER_PROFILE") or "").strip()
-                    if browser:
-                        if browser.lower() == "firefox" and profile.lower() == "default":
-                            profile = ""
-                        command += [
-                            "--cookies-from-browser",
-                            f"{browser}:{profile}" if profile else browser,
-                        ]
-            if config.get("PROXY_ENABLED"):
-                proxy = (
-                    f"{config.get('PROXY_TYPE', 'http')}://"
-                    f"{config.get('PROXY_ADDR', '127.0.0.1')}:"
-                    f"{config.get('PROXY_PORT', 7890)}"
-                )
-            else:
-                proxy = ""
-            command += ["--proxy", proxy]
-
-        # The production builder always emits these options, but retaining the
-        # fallback makes the probe compatible with lightweight integrations that
-        # return only an executable from ``build_command``.
-        if "--proxy" not in command:
-            if config.get("PROXY_ENABLED"):
-                proxy = (
-                    f"{config.get('PROXY_TYPE', 'http')}://"
-                    f"{config.get('PROXY_ADDR', '127.0.0.1')}:"
-                    f"{config.get('PROXY_PORT', 7890)}"
-                )
-            else:
-                proxy = ""
-            command += ["--proxy", proxy]
-        if config.get("USE_COOKIES") and not {
-            "--cookies", "--cookies-from-browser"
-        }.intersection(command):
-            if int(config.get("COOKIE_MODE", 1)) == 1:
-                cookie_file = self._tool_dir / "cookies.txt"
-                if cookie_file.is_file():
-                    command += ["--cookies", str(cookie_file)]
-            else:
-                browser = str(config.get("BROWSER_NAME") or "").strip()
-                profile = str(config.get("BROWSER_PROFILE") or "").strip()
-                if browser:
-                    if browser.lower() == "firefox" and profile.lower() == "default":
-                        profile = ""
-                    command += [
-                        "--cookies-from-browser",
-                        f"{browser}:{profile}" if profile else browser,
-                    ]
-        if (
-            effective_platform == "TwitCasting"
-            and config.get("TC_PASSWORD")
-            and "--video-password" not in command
-        ):
-            command += ["--video-password", str(config["TC_PASSWORD"])]
-        if (
-            effective_platform == "YouTube"
-            and po_token_base_url
-            and not any(
-                value == "--extractor-args"
-                and index + 1 < len(command)
-                and "youtubepot-bgutilhttp:" in str(command[index + 1])
-                for index, value in enumerate(command)
-            )
-        ):
-            command += [
-                "--extractor-args",
-                f"youtubepot-bgutilhttp:base_url={po_token_base_url}",
-            ]
-
-        # Place probe-only flags after retained options so they override the
-        # recording command's output/format behavior if yt-dlp sees duplicates.
-        command += [
-            "--dump-single-json",
-            "--skip-download",
-            "--no-warnings",
-            "--no-playlist",
-            "--socket-timeout", "15",
-            url,
-        ]
-        return command
-
-    def _probe_live_status(
-        self,
-        url,
-        config,
-        cancel_event=None,
-        platform=None,
-        source_command=None,
-        custom_args=None,
-        po_token_base_url=None,
-    ):
-        """探测直播状态，返回 yt-dlp 的 live_status 值或 ``unknown``。
-
-        使用可轮询的 Popen 而不是阻塞 communicate，使停止按钮在网络超时期间
-        仍能及时终止蹲开播任务。
-        """
-        command = self._live_probe_command(
-            url,
-            config,
-            platform=platform,
-            source_command=source_command,
-            custom_args=custom_args,
-            po_token_base_url=po_token_base_url,
-        )
-        process = None
-        try:
-            process = self._spawn(command)
-            deadline = time.monotonic() + 20
-            while process.poll() is None:
-                if cancel_event is not None and cancel_event.is_set():
-                    self.kill_process_tree(process)
-                    return "cancelled"
-                if time.monotonic() >= deadline:
-                    self.kill_process_tree(process)
-                    return "unknown"
-                time.sleep(0.2)
-            try:
-                raw = process.communicate(timeout=1)[0]
-            except Exception:
-                raw = b""
-            if isinstance(raw, bytes):
-                raw = safe_decode(raw)
-            for line in reversed(str(raw or "").splitlines()):
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    payload = json.loads(line)
-                except (TypeError, ValueError):
-                    continue
-                if isinstance(payload, dict):
-                    status = str(payload.get("live_status") or "").strip().lower()
-                    if status:
-                        return status
-                    if payload.get("is_live") is True:
-                        return "is_live"
-            return "unknown"
-        except (OSError, subprocess.SubprocessError, ValueError):
-            return "unknown"
-        finally:
-            if process is not None:
-                try:
-                    process.stdout.close()
-                except Exception:
-                    pass
-
-    def _wait_for_live(
-        self,
-        handle,
-        url,
-        platform,
-        config,
-        probe_command=None,
-        custom_args=None,
-        po_token_base_url=None,
-    ):
-        """蹲开播：轮询直播状态，直到开播或用户停止任务。"""
-        interval = int(config.get("LIVE_WATCH_INTERVAL", 30) or 30)
-        interval = max(5, min(interval, 600))
-        self._log(f"[{platform}] 蹲开播已启动，每 {interval} 秒检测一次", "info")
-        while not handle.cancel_event.is_set():
-            status = self._probe_live_status(
-                url,
-                config,
-                handle.cancel_event,
-                platform=platform,
-                source_command=probe_command,
-                custom_args=custom_args,
-                po_token_base_url=po_token_base_url,
-            )
-            if status == "is_live":
-                self._log(f"[{platform}] 检测到已开播，开始录制", "success")
-                self._update_progress(-1, "已开播，开始录制...")
-                return True
-            if status == "cancelled" or handle.cancel_event.is_set():
-                return False
-            if status in {"post_live", "was_live"}:
-                self._log(f"[{platform}] 直播已结束，蹲开播任务停止", "warn")
-                self._update_progress(0, "直播已结束")
-                return False
-            self._update_progress(-1, f"等待开播中 · 下次检测 {interval} 秒后")
-            if handle.cancel_event.wait(interval):
-                return False
-        return False
-
     def _start_po_token_provider_if_needed(self, config_snapshot, platforms, handle):
         if not config_snapshot.get("YOUTUBE_PO_TOKEN_ENABLED", 0):
             return {}
@@ -801,31 +458,30 @@ class DownloadExecutor:
         result = self._ensure_po_token_provider(cancel_event=handle.cancel_event)
         return result if isinstance(result, dict) else {}
 
-    @staticmethod
-    def _command_video_password(cmd):
-        """返回命令中传给 TwitCasting 的密码；不存在或为空时返回 None。"""
-        if not cmd:
-            return None
+    def _prepare_download(self, handle, config_snapshot, platforms, run, args):
+        """Keep cold starts off HTTP threads and inside the managed task lifetime."""
+        self._app_state.download_thread_context.task_id = handle.generation
         try:
-            index = cmd.index("--video-password") + 1
-        except (ValueError, IndexError):
-            return None
-        if index >= len(cmd):
-            return None
-        value = str(cmd[index])
-        return value or None
+            if self._download_manager.is_cancelled(handle):
+                return
+            result = self._start_po_token_provider_if_needed(config_snapshot, platforms, handle)
+            if self._download_manager.is_cancelled(handle) or result.get("cancelled"):
+                return
+            if result.get("error"):
+                raise RuntimeError(result["error"])
+            run(handle, *args, po_token_base_url=result.get("base_url"))
+        except Exception as exc:
+            if not self._download_manager.is_cancelled(handle):
+                self._log(f"[准备失败] {exc}", "error")
+                self._update_progress(0, "下载准备失败", "", "")
+                stats = self._app_state.batch_stats
+                stats["fail"] = stats["total"]
+                self._app_state.publish({"type": "stats", "data": dict(stats)})
+        finally:
+            self._finish(handle, None)
 
-    def _remember_twitcasting_password(self, url, platform, cmd):
-        password = self._command_video_password(cmd)
-        if platform == "TwitCasting" and password and self._save_twitcasting_password_cb:
-            self._save_twitcasting_password_cb(url, password)
-
-    def _forget_twitcasting_password(self, url, platform):
-        if platform == "TwitCasting" and self._forget_twitcasting_password_cb:
-            self._forget_twitcasting_password_cb(url)
-
-
-    def start_download(self, url, bili_parts=None, tc_password=None, custom_args=None):
+    def start_download(self, url, bili_parts=None, tc_password=None, custom_args=None, live_mode=None,
+                       is_live_override=None):
         url = clean_url(url)
         if not url:
             return {"error": "请输入有效的视频链接"}
@@ -837,23 +493,32 @@ class DownloadExecutor:
             config_snapshot = dict(config_snapshot, TC_PASSWORD=tc_password)
         detected = detect_platform(url)
         effective_platform = detected if detected else config_snapshot["PLATFORM"]
-        if (
-            effective_platform == "TwitCasting"
-            and not tc_password
-            and self._get_twitcasting_password_cb is not None
-        ):
-            tc_password = self._get_twitcasting_password_cb(url)
+        if not tc_password:
+            tc_password = self._saved_twitcasting_password(url, effective_platform, config_snapshot)
             if tc_password:
                 config_snapshot = dict(config_snapshot, TC_PASSWORD=tc_password)
-                self._log("[TwitCasting] 已尝试使用此链接保存的密码", "info")
-        # 已保存密码和弹窗输入密码都只在本次命令中使用；详细日志会遮盖密码值。
-        verbose = bool(tc_password)
+        self._tc_config = config_snapshot
         if detected:
             self._log(f"[自动识别] 检测到{detected}链接", "info")
         else:
             self._log(f"[提示] 未识别平台，使用: {config_snapshot['PLATFORM']}", "warn")
 
-        is_live_download = is_live_url(url, detected)
+        is_live_download = is_live_url(url, detected) if is_live_override is None else bool(is_live_override)
+        requested_live_mode = live_mode if live_mode is not None else resolve_platform_mode(
+            effective_platform,
+            config_snapshot.get("LIVE_MODE", "auto"),
+            config_snapshot.get("LIVE_PLATFORM_MODES", "{}"),
+        )
+        try:
+            live_decision = decide_live(effective_platform, requested_live_mode, is_live_download)
+        except LiveModeError as exc:
+            return {"error": str(exc)}
+        if live_decision.is_live:
+            self._log(
+                f"[直播] 模式: {live_decision.mode.value}（请求: {live_decision.requested_mode.value}）",
+                "info",
+            )
+        effective_live_mode = live_decision.mode.value if live_decision.is_live else None
 
         missing = self._missing_dependency(platform=detected, config=config_snapshot, is_live=is_live_download)
         if missing:
@@ -884,7 +549,7 @@ class DownloadExecutor:
                 target=self._prepare_download,
                 args=(handle, config_snapshot, {effective_platform}, self._build_and_run_single,
                       (url, effective_platform, is_live_download, config_snapshot,
-                       bili_parts, verbose, custom_args)),
+                       bili_parts, verbose, custom_args, effective_live_mode)),
                 daemon=True,
             ).start()
         except Exception as exc:
@@ -894,28 +559,36 @@ class DownloadExecutor:
             return {"error": f"下载线程启动失败: {exc}"}
         return {"ok": True}
 
-
-    def _run_single_wait_for_live(self, handle, cmd, url, effective_platform,
-                                  is_live_download, audio_mode, audio_fmt, verbose,
-                                  subtitle_cmd, config_snapshot):
-        """蹲开播单链接包装器：等待开播后交给普通直播执行流程。"""
-        self._app_state.download_thread_context.task_id = handle.generation
-        if not self._wait_for_live(
-            handle,
-            url,
-            effective_platform,
-            config_snapshot,
-            probe_command=cmd,
-        ):
-            if handle.cancel_event.is_set():
-                self._log("[停止] 蹲开播任务已取消", "warn")
-                self._update_progress(0, "已停止", "", "")
-            # _run_single 尚未接管任务时由包装器负责释放句柄。
-            self._finish(handle, None)
+    def _build_and_run_single(self, handle, url, effective_platform, is_live_download,
+                              config_snapshot, bili_parts, verbose, custom_args, live_mode=None,
+                              po_token_base_url=None):
+        build_kwargs = {
+            "is_live": is_live_download,
+            "live_mode": live_mode,
+            "platform_override": effective_platform,
+            "config_override": config_snapshot,
+            "bili_parts": bili_parts,
+        }
+        if custom_args:
+            build_kwargs["custom_args"] = custom_args
+        if po_token_base_url:
+            build_kwargs["po_token_base_url"] = po_token_base_url
+        cmd = self._build_command(url, **build_kwargs, include_subtitles=False)
+        subtitle_cmd = None
+        if config_snapshot.get("DOWNLOAD_SUBTITLES", 0):
+            subtitle_cmd = self._build_command(url, **build_kwargs, subtitle_only=True)
+        if verbose:
+            cmd += ["--verbose"]
+        if self._download_manager.is_cancelled(handle):
             return
+        self._tc_config = config_snapshot
+        self._live_config = dict(config_snapshot, _custom_live_args=custom_args or "")
+        self._effective_live_mode = live_mode
+        self._update_progress(0, "正在连接直播..." if is_live_download else "正在下载...")
         self._run_single(
             handle, cmd, url, effective_platform, is_live_download,
-            audio_mode, audio_fmt, verbose, subtitle_cmd,
+            config_snapshot.get("AUDIO_MODE", "0"),
+            config_snapshot.get("AUDIO_FORMAT", "mp3"), verbose, subtitle_cmd,
         )
 
     def start_withny_archive(self):
@@ -1042,6 +715,8 @@ class DownloadExecutor:
             return {"ok": True, "cancelled": True}
 
         executable = self._paths.executable("withny-dl-windows-amd64", self._exe_suffix)
+        from ..live.engines.withnydl import managed_binary
+        executable = managed_binary(self._paths.dependency_dir) or executable
         if not executable.is_file():
             return {"error": f"缺少依赖: {executable.name}"}
         try:
@@ -1063,6 +738,7 @@ class DownloadExecutor:
         self._update_progress(-1, "正在启动 Withny 直播监控...")
         self._log(f"[Withny 直播] 已加载配置: {config_path.name}", "info")
         command = [str(executable), "watch", "--config", str(config_path), "--pprof.listen-address", "127.0.0.1:0"]
+        self._withny_live_active = True
         try:
             threading.Thread(
                 target=self._run_withny_live,
@@ -1070,6 +746,7 @@ class DownloadExecutor:
                 daemon=True,
             ).start()
         except Exception as exc:
+            self._withny_live_active = False
             self._download_manager.finish(handle)
             self._broadcast_download_state()
             self._start_idle_timer()
@@ -1077,50 +754,13 @@ class DownloadExecutor:
         return {"ok": True}
 
     def _run_withny_live(self, handle, command, working_dir):
-        self._app_state.download_thread_context.task_id = handle.generation
-        stats = self._app_state.batch_stats
-        proc = None
+        self._withny_live_active = True
+        self._live_config = dict(self._app_state.config_snapshot(), _withny_config_path=command[command.index("--config") + 1])
+        self._effective_live_mode = "live_edge"
         try:
-            proc = self._spawn(command, cwd=working_dir)
-            if not self._download_manager.publish_process(handle, proc):
-                self.kill_process_tree(proc)
-                return
-            self._broadcast_download_state()
-            line_q, read_done = self._start_reader(proc)
-            self._update_progress(-1, "Withny 直播监控运行中")
-            while not read_done.is_set() or not line_q.empty():
-                if handle.cancel_event.is_set():
-                    break
-                try:
-                    line = line_q.get(timeout=0.5).strip()
-                except queue.Empty:
-                    continue
-                if not line:
-                    continue
-                cleaned = self._sanitize_withny_live_line(line)
-                if cleaned:
-                    level = "error" if any(word in cleaned.lower() for word in ("error", "panic", "fatal")) else "info"
-                    self._log(f"[withny-dl] {cleaned[:500]}", level)
-                    if "download" in cleaned.lower() or "stream" in cleaned.lower():
-                        self._update_progress(-1, "Withny 直播录制中")
-            self._close_process(proc)
-            rc = proc.returncode if proc.returncode is not None else -1
-            if handle.cancel_event.is_set():
-                self._log("[Withny 直播] 监控和录制已停止", "warn")
-                self._update_progress(0, "已停止", "", "")
-            else:
-                stats["fail"] = 1
-                self._app_state.publish({"type": "stats", "data": dict(stats)})
-                self._log(f"[Withny 直播] 进程意外退出，退出码: {rc}", "error")
-                self._update_progress(0, f"失败 (退出码 {rc})", "", "")
-        except Exception as exc:
-            stats["fail"] = 1
-            self._app_state.publish({"type": "stats", "data": dict(stats)})
-            self._log(f"[Withny 直播] 异常: {self._sanitize_withny_live_line(str(exc))}", "error")
-            self._update_progress(0, "异常终止", "", "")
-            self.kill_process_tree(proc)
+            self._run_live(handle, command, "withny://configured-channels", "Withny")
         finally:
-            self._finish(handle, proc)
+            self._withny_live_active = False
 
     @staticmethod
     def _sanitize_withny_live_line(line):
@@ -1129,13 +769,17 @@ class DownloadExecutor:
         cleaned = re.sub(r'(?i)(["\']?(?:authorization|token|password|passcode|secret|encryptionkey)["\']?\s*[=:]\s*["\']?)[^\s,;"\']+', r"\1[已隐藏]", cleaned)
         return cleaned
 
-    def submit_password(self, url: str, password: str) -> dict:
+    def submit_password(self, url: str, password: str, request_id=None) -> dict:
         """处理密码提交：批量下载等待中则唤醒线程，否则启动新的单链接下载（密码重试）。"""
         with self._password_lock:
-            if self._waiting_for_password:
+            if (self._waiting_for_password and self._password_url == url
+                    and (request_id is None or request_id == self._password_request_id)
+                    and not self._password_event.is_set()):
                 self._password_value = password
                 self._password_event.set()
                 return {"ok": True, "mode": "batch_retry"}
+            if self._on_finished is not None:
+                return {"error": "此密码确认已结束，请以当前任务状态为准"}
         # 无批量下载在等待 → 当作单链接密码重试，启动新下载任务
         return self.start_download(url, tc_password=password)
 
@@ -1145,22 +789,32 @@ class DownloadExecutor:
         platform: str,
         timeout: float = 120.0,
         reason: str = "retry",
+        handle=None,
     ) -> str | None:
         """阻塞等待用户通过前端弹窗提供密码。返回密码或 None（超时/取消）。"""
         with self._password_lock:
+            if handle is not None and self._download_manager.is_cancelled(handle):
+                return None
             self._waiting_for_password = True
+            self._password_url = url
+            self._password_request_id = uuid.uuid4().hex
             self._password_value = None
             self._password_event.clear()
         self._emit_event("password_required", {
             "url": url,
             "platform": platform,
             "reason": reason,
+            "request_id": self._password_request_id,
+            "expires_at": (time.time() + timeout) * 1000,
         })
         received = self._password_event.wait(timeout)
         with self._password_lock:
             self._waiting_for_password = False
+            self._password_url = None
+            self._password_request_id = None
             pw = self._password_value
             self._password_value = None
+        self._emit_event("password_closed", {"url": url, "platform": platform})
         if not received:
             self._log(f"[{platform}] 等待密码超时，跳过此链接", "warn")
         return pw if received else None
@@ -1297,7 +951,6 @@ class DownloadExecutor:
                 except OSError:
                     pass
         return succeeded
-
 
     def fetch_bili_playlist(self, url):
         """获取 Bilibili 视频的分P列表。
@@ -1453,8 +1106,13 @@ class DownloadExecutor:
 
     def _run_single(self, handle, cmd, url, effective_platform, is_live_download,
                     audio_mode="0", audio_fmt="mp3", verbose=False, subtitle_cmd=None,
-                    tc_direct_tried=False, tc_firefox_tried=False, archive_retry=False,
-                    tc_parallel_tried=False):
+                    tc_direct_tried=False, tc_firefox_tried=False, archive_retry=False):
+        if is_live_download:
+            try:
+                self._run_live(handle, cmd, url, effective_platform)
+            finally:
+                self._finish(handle, None)
+            return
         # 线程局部代际会随进度回调传递，旧工作线程无法覆盖新任务界面状态。
         self._app_state.download_thread_context.task_id = handle.generation
         stats = self._app_state.batch_stats
@@ -1496,8 +1154,11 @@ class DownloadExecutor:
             tc_m3u8_400 = False
             tc_access_error = False
             tc_cookie_error = False
-            live_from_start_error = False
             parallel_plugin_error = False
+            live_timeout = (int(self._app_state.config_snapshot().get("LIVE_DOWNLOAD_TIMEOUT", 0)) * 60
+                            if is_live_download and effective_platform == "Niconico" else 0)
+            deadline = time.monotonic() + live_timeout if live_timeout else None
+            timed_out = False
 
             def fmt_live_status():
                 elapsed = int(time.time() - live_start_time)
@@ -1510,6 +1171,10 @@ class DownloadExecutor:
 
             while not read_done.is_set() or not line_q.empty():
                 if handle.cancel_event.is_set():
+                    break
+                if deadline is not None and time.monotonic() >= deadline:
+                    timed_out = True
+                    self.kill_process_tree(proc)
                     break
                 try:
                     line = line_q.get(timeout=0.5)
@@ -1531,10 +1196,7 @@ class DownloadExecutor:
                     live_start_time = time.time()
                     self._update_progress(-1, "直播录制中...", stage=current_stage)
 
-                parallel_plugin_error = (
-                    parallel_plugin_error
-                    or self._is_twitcasting_parallel_plugin_error(line)
-                )
+                parallel_plugin_error = parallel_plugin_error or self._is_twitcasting_parallel_plugin_error(line)
                 is_error = "ERROR" in line or parallel_plugin_error
                 is_warning = "WARNING" in line
                 # 密码保护期：yt-dlp 提示需要 --video-password 时，标记以便结束后弹窗索取密码。
@@ -1554,8 +1216,6 @@ class DownloadExecutor:
                     tc_m3u8_400 = tc_m3u8_400 or self._is_twitcasting_m3u8_400(line)
                     tc_access_error = tc_access_error or self._is_twitcasting_access_error(line)
                     tc_cookie_error = tc_cookie_error or self._is_browser_cookie_error(line)
-                if is_error and self._is_live_from_start_unavailable(line):
-                    live_from_start_error = True
                 has_pct = bool(re.search(r"\d+(?:\.\d+)?%", line))
                 has_ffmpeg_progress = bool(
                     re.search(r"(?:size|Lsize)=\s*\S+", line)
@@ -1641,6 +1301,13 @@ class DownloadExecutor:
 
             self._close_process(proc)
             self._download_manager.clear_process(handle, proc)
+            if timed_out:
+                stats["fail"] = 1
+                self._log("[直播] 达到录制时限，已保留下载部分并继续队列", "warn")
+                self._update_progress(0, "录制超时，已保留下载部分")
+                self._add_history(url, video_title, effective_platform, "timeout", output_path)
+                update_stats()
+                return
             rc = proc.returncode if proc.returncode is not None else -1
             if archived_ids and not archive_retry and not self._download_manager.is_cancelled(handle):
                 retry = self._wait_for_archive_choice(handle, url, effective_platform, archived_ids)
@@ -1663,7 +1330,6 @@ class DownloadExecutor:
                 self._log("[停止] 下载已取消", "warn")
                 self._update_progress(0, "已停止", "", "")
             elif rc == 0:
-                self._remember_twitcasting_password(url, effective_platform, cmd)
                 # 模式 2（同时输出音频）：下载完成后用 ffmpeg 从合并文件提取音频
                 if audio_mode == "2" and output_path and os.path.isfile(output_path):
                     self._extract_audio_from_video(output_path, audio_fmt, handle=handle, overwrite=archive_retry)
@@ -1679,60 +1345,26 @@ class DownloadExecutor:
                         self._update_progress(0, "已停止", "", "", stage="subtitle")
                         update_stats()
                         return
-                self._remove_ytdl_sidecar(output_path)
+                if output_path and os.path.isfile(output_path):
+                    self._remember_twitcasting_password(url, effective_platform, cmd)
+                    self._remove_ytdl_sidecar(output_path)
                 stats["ok"] = 1
                 self._log("[完成] 下载成功！", "success")
                 self._update_progress(1, "下载完成", "", "")
                 self._add_history(url, video_title, effective_platform, "success", output_path)
                 update_stats()
             else:
-                if (
-                    parallel_plugin_error
-                    and effective_platform == "TwitCasting"
-                    and not tc_parallel_tried
-                ):
-                    self._log(
-                        "[TwitCasting] 并发 HLS 插件不可用，改用 FFmpeg 串行下载重试",
-                        "warn",
-                    )
+                if (parallel_plugin_error and effective_platform == "TwitCasting"
+                        and self._has_twitcasting_parallel(cmd)):
+                    self._log("[TwitCasting] 并发插件不可用，改用 FFmpeg 重试一次", "warn")
                     self._run_single(
-                        handle,
-                        self._without_twitcasting_parallel(cmd),
-                        url,
-                        effective_platform,
-                        is_live_download,
-                        audio_mode,
-                        audio_fmt,
-                        verbose,
-                        subtitle_cmd,
-                        tc_direct_tried,
-                        tc_firefox_tried,
-                        archive_retry=archive_retry,
-                        tc_parallel_tried=True,
-                    )
+                        handle, self._without_twitcasting_parallel(cmd), url, effective_platform,
+                        is_live_download, audio_mode, audio_fmt, verbose,
+                        self._without_twitcasting_parallel(subtitle_cmd), tc_direct_tried,
+                        tc_firefox_tried, archive_retry=archive_retry)
                     return
-                if live_from_start_error and "--live-from-start" in cmd:
-                    retry_cmd = self._without_live_from_start(cmd)
-                    retry_subtitle_cmd = self._without_live_from_start(subtitle_cmd)
-                    self._log(
-                        f"[{effective_platform}] 当前无法从直播起点回溯，改为从当前分片录制并重试",
-                        "warn",
-                    )
-                    self._run_single(
-                        handle,
-                        retry_cmd,
-                        url,
-                        effective_platform,
-                        is_live_download,
-                        audio_mode,
-                        audio_fmt,
-                        verbose,
-                        retry_subtitle_cmd,
-                        tc_direct_tried,
-                        tc_firefox_tried,
-                        archive_retry=archive_retry,
-                    )
-                    return
+                if password_required or password_retry:
+                    self._forget_twitcasting_password(url, effective_platform)
                 recovery = self._twitcasting_recovery(
                     cmd,
                     m3u8_400=tc_m3u8_400,
@@ -1790,14 +1422,34 @@ class DownloadExecutor:
                         access_error=tc_access_error,
                         cookie_error=tc_cookie_error,
                     )
+                if (password_required or password_retry) and self._on_finished is not None:
+                    if self._password_attempts < 2:
+                        self._password_attempts += 1
+                        pw = self._wait_for_password(
+                            url, effective_platform, reason="retry" if password_retry else "missing",
+                            handle=handle,
+                        )
+                        if self._download_manager.is_cancelled(handle):
+                            return
+                        if pw:
+                            retry_cmd = list(cmd)
+                            if "--video-password" in retry_cmd:
+                                index = retry_cmd.index("--video-password")
+                                del retry_cmd[index:index + 2]
+                            retry_cmd[1:1] = ["--video-password", pw]
+                            self._run_single(
+                                handle, retry_cmd, url, effective_platform, is_live_download,
+                                audio_mode, audio_fmt, True, subtitle_cmd,
+                                tc_direct_tried, tc_firefox_tried, archive_retry,
+                            )
+                            return
                 stats["fail"] = 1
                 self._log(f"[错误] 下载结束，退出码: {rc}", "error")
                 self._update_progress(0, f"失败 (退出码 {rc})", "", "")
                 self._add_history(url, video_title, effective_platform, "fail")
                 update_stats()
                 # 密码保护/会员限定内容：通知前端弹窗索取密码后重试本条下载。
-                if password_required or password_retry:
-                    self._forget_twitcasting_password(url, effective_platform)
+                if (password_required or password_retry) and self._on_finished is None:
                     if password_retry:
                         self._log(f"[{effective_platform}] 下载失败，密码可能不正确，请重新输入密码", "warn")
                     else:
@@ -1820,8 +1472,88 @@ class DownloadExecutor:
         finally:
             self._finish(handle, proc)
 
+    def _run_live(self, handle, cmd, url, platform):
+        self._app_state.download_thread_context.task_id = handle.generation
+        self._remember_ytdlp_command(cmd)
+        runner = LiveRunner(
+            self._paths, self._exe_suffix, log=self._log, progress=self._update_progress,
+            publish_process=lambda proc: self._download_manager.publish_process(handle, proc),
+            clear_process=lambda proc: self._download_manager.clear_process(handle, proc),
+            force_kill=self.kill_process_tree, emit_event=self._emit_event)
+        self._live_runner = runner
+        self._live_finished.clear()
+        try:
+            direct_tried = firefox_tried = ffmpeg_tried = plugin_tried = False
+            password_attempts = 0
+            while True:
+                self._remember_ytdlp_command(cmd)
+                result = runner.run(cmd, url=url, platform=platform,
+                                    mode=self._effective_live_mode or "live_edge",
+                                    config=self._live_config or self._app_state.config_snapshot(),
+                                    cancel=handle.cancel_event)
+                if (platform != "TwitCasting" or result["status"] != "fail" or result.get("output")
+                        or handle.cancel_event.is_set()):
+                    break
+                lines = result.get("error_lines", [])
+                if not plugin_tried and any(self._is_twitcasting_parallel_plugin_error(line) for line in lines):
+                    plugin_tried = True
+                    cmd = self._without_twitcasting_parallel(cmd)
+                    continue
+                recovery = self._twitcasting_recovery(
+                    cmd, m3u8_400=any(self._is_twitcasting_m3u8_400(line) for line in lines),
+                    access_error=any(self._is_twitcasting_access_error(line) for line in lines),
+                    direct_tried=direct_tried, firefox_tried=firefox_tried)
+                if recovery:
+                    cmd, direct_tried, firefox_tried, strategy = recovery
+                    self._log(f"[TwitCasting 直播] 启动前恢复：{strategy}", "warn")
+                    continue
+                if not ffmpeg_tried and any("Initialization fragment found after media fragments" in line for line in lines):
+                    ffmpeg_tried = True
+                    cmd = self._with_ffmpeg_downloader(cmd)
+                    continue
+                password_required = any("--video-password" in line for line in lines)
+                password_retry = any("format is not available" in line.lower() for line in lines)
+                if not (password_required or password_retry):
+                    break
+                self._forget_twitcasting_password(url, platform, self._live_config)
+                if self._on_finished is None:
+                    self._emit_event("password_required", {"url": url, "platform": platform,
+                                                          "reason": "retry" if password_retry else "missing"})
+                    break
+                if password_attempts >= 2:
+                    break
+                password_attempts += 1
+                password = self._wait_for_password(url, platform, reason="retry" if password_retry else "missing", handle=handle)
+                if not password or handle.cancel_event.is_set():
+                    break
+                cmd = self._replace_pair_options(cmd, {"--video-password"}, ["--video-password", password])
+            labels = {"success": "直播录制完成（文件验证通过）", "stopped": "已停止（已收尾）",
+                      "timeout": "已到录制时限（已收尾）", "gaps": "录制有缺口，请查看完整性报告",
+                      "earliest": "已录制平台最早可用内容，请查看报告", "fail": "直播录制失败，请查看报告"}
+            status = result["status"]
+            verified_media = status == 'success' or (status in {'stopped', 'timeout', 'gaps', 'earliest'} and
+                result.get('conclusion') in {'complete', 'gaps', 'from_earliest_available'})
+            if verified_media and result.get("output") and Path(result["output"]).is_file():
+                self._remember_twitcasting_password(url, platform, cmd, self._live_config)
+                self._remove_ytdl_sidecar(result["output"])
+            self._update_progress(1 if status == "success" else 0, labels[status], "", "")
+            self._log(f"[直播] {labels[status]}；报告：{result['report']}", "success" if status == "success" else "warn")
+            stats = self._app_state.batch_stats
+            if status == "success":
+                stats["ok"] = stats.get("ok", 0) + 1
+            elif status not in {"stopped", "timeout", "earliest"}:
+                stats["fail"] = stats.get("fail", 0) + 1
+            self._add_history(url, result["title"], platform, status, result["output"])
+            self._app_state.publish({"type": "stats", "data": dict(stats)})
+            return result
+        finally:
+            self._live_runner = None
+            self._live_finished.set()
 
-    def batch_download(self, urls, bili_parts_map=None, custom_args=None):
+    def wait_for_live_finalization(self, timeout=45):
+        return self._live_finished.wait(timeout)
+
+    def batch_download(self, urls, bili_parts_map=None, custom_args=None, live_mode=None):
         urls = [url for raw_url in urls if (url := clean_url(raw_url))]
         if not urls:
             return {"error": "没有有效的视频链接"}
@@ -1829,6 +1561,7 @@ class DownloadExecutor:
         if missing:
             return {"error": f"缺少依赖: {missing}"}
         config_snapshot = self._app_state.config_snapshot()
+        requested_live_mode = live_mode
         custom_args_error = self._validate_custom_args(config_snapshot, custom_args)
         if custom_args_error:
             return {"error": custom_args_error}
@@ -1851,7 +1584,8 @@ class DownloadExecutor:
             threading.Thread(
                 target=self._prepare_download,
                 args=(handle, config_snapshot, effective_platforms, self._run_batch,
-                      (urls, config_snapshot, stats, bili_parts_map or {}, audio_mode, audio_fmt, custom_args)),
+                      (urls, config_snapshot, stats, bili_parts_map or {}, audio_mode, audio_fmt, custom_args,
+                       requested_live_mode)),
                 daemon=True,
             ).start()
         except Exception as exc:
@@ -1861,8 +1595,7 @@ class DownloadExecutor:
             return {"error": f"下载线程启动失败: {exc}"}
         return {"ok": True, "total": len(urls)}
 
-
-    def _run_batch(self, handle, urls, config_snapshot, stats, bili_parts_map=None, audio_mode="0", audio_fmt="mp3", custom_args=None, po_token_base_url=None):
+    def _run_batch(self, handle, urls, config_snapshot, stats, bili_parts_map=None, audio_mode="0", audio_fmt="mp3", custom_args=None, requested_live_mode="auto", po_token_base_url=None):
         # 批量统计与进度共用任务代际，避免停止后迟到事件污染下一任务。
         self._app_state.download_thread_context.task_id = handle.generation
         stopped = False
@@ -1892,6 +1625,31 @@ class DownloadExecutor:
                 else:
                     self._log(f"[{index}/{len(urls)}] 未识别平台，使用: {config_snapshot['PLATFORM']}", "warn")
                 self._log(f"[{index}/{len(urls)}] 下载: {url}", "info")
+                requested_for_url = requested_live_mode
+                if requested_for_url is None:
+                    requested_for_url = resolve_platform_mode(
+                        effective_platform,
+                        config_snapshot.get("LIVE_MODE", "auto"),
+                        config_snapshot.get("LIVE_PLATFORM_MODES", "{}"),
+                    )
+                try:
+                    live_decision = decide_live(
+                        effective_platform,
+                        requested_for_url,
+                        is_live_url(url, detected),
+                    )
+                except LiveModeError as exc:
+                    self._log(f"[{index}/{len(urls)}] 直播模式不可用: {exc}", "error")
+                    stats["fail"] += 1
+                    update_stats()
+                    continue
+                is_live_for_url = live_decision.is_live
+                live_mode_for_url = live_decision.mode.value if live_decision.is_live else None
+                if live_decision.is_live:
+                    self._log(
+                        f"[{index}/{len(urls)}] [直播] 模式: {live_mode_for_url}",
+                        "info",
+                    )
                 current_stage = "audio" if audio_mode == "3" else "video"
                 self._update_progress(
                     0,
@@ -1900,35 +1658,9 @@ class DownloadExecutor:
                 )
                 bili_parts_for_url = (bili_parts_map or {}).get(url)
 
-                is_live_download = is_live_url(url, detected)
-                live_record_mode = self._live_record_mode(config_snapshot)
-                if is_live_download and live_record_mode == "wait":
-                    if not self._wait_for_live(
-                        handle,
-                        url,
-                        effective_platform,
-                        config_snapshot,
-                        custom_args=custom_args,
-                        po_token_base_url=po_token_base_url,
-                    ):
-                        if handle.cancel_event.is_set():
-                            stopped = True
-                            break
-                        stats["fail"] += 1
-                        self._add_history(url, "", effective_platform, "fail")
-                        update_stats()
-                        continue
-
                 # 密码重试循环（最多 2 次额外尝试）
-                tc_password = last_tc_password if effective_platform == "TwitCasting" else None
-                if (
-                    effective_platform == "TwitCasting"
-                    and not tc_password
-                    and self._get_twitcasting_password_cb is not None
-                ):
-                    tc_password = self._get_twitcasting_password_cb(url)
-                    if tc_password:
-                        self._log(f"[{effective_platform}] 已尝试使用此链接保存的密码", "info")
+                tc_password = (self._saved_twitcasting_password(url, effective_platform, config_snapshot)
+                               or last_tc_password) if effective_platform == "TwitCasting" else None
                 if tc_password:
                     self._log(f"[{effective_platform}] 自动尝试上一个已输入的密码", "info")
                 max_password_attempts = 3  # 初始 + 2 次重试
@@ -1936,11 +1668,10 @@ class DownloadExecutor:
                 url_done = False
                 # TwitCasting fMP4 多初始化片段时切换到 FFmpeg 下载 m3u8 的标记。
                 use_ffmpeg_for_hls = False
+                parallel_plugin_tried = False
                 tc_direct_tried = False
                 tc_firefox_tried = False
                 archive_retry = False
-                live_from_start_disabled = False
-                parallel_plugin_tried = False
 
                 while pw_attempt < max_password_attempts and not url_done:
                     if handle.cancel_event.is_set():
@@ -1954,9 +1685,8 @@ class DownloadExecutor:
                     tc_m3u8_400 = False
                     tc_access_error = False
                     tc_cookie_error = False
-                    archived_ids = set()
-                    live_from_start_error = False
                     parallel_plugin_error = False
+                    archived_ids = set()
                     try:
                         cmd_config = dict(config_snapshot)
                         # 避免基础配置中的旧密码绕过本次任务的失效处理。
@@ -1964,7 +1694,8 @@ class DownloadExecutor:
                         if effective_platform == "TwitCasting" and tc_password:
                             cmd_config["TC_PASSWORD"] = tc_password
                         build_kwargs = {
-                            "is_live": is_live_download,
+                            "is_live": is_live_for_url,
+                            "live_mode": live_mode_for_url,
                             "platform_override": effective_platform,
                             "config_override": cmd_config,
                             "bili_parts": bili_parts_for_url,
@@ -1980,16 +1711,13 @@ class DownloadExecutor:
                             cmd = self._with_direct_connection(cmd)
                         if tc_firefox_tried:
                             cmd = self._with_firefox_cookies(cmd)
-                        if live_from_start_disabled:
-                            cmd = self._without_live_from_start(cmd)
                         if archive_retry:
                             cmd = redownload_command(cmd)
-                        if parallel_plugin_tried:
-                            cmd = self._without_twitcasting_parallel(cmd)
                         subtitle_cmd = None
                         if cmd_config.get("DOWNLOAD_SUBTITLES", 0):
                             subtitle_kwargs = {
-                                "is_live": is_live_download,
+                                "is_live": is_live_for_url,
+                                "live_mode": live_mode_for_url,
                                 "platform_override": effective_platform,
                                 "config_override": cmd_config,
                                 "bili_parts": bili_parts_for_url,
@@ -2005,8 +1733,15 @@ class DownloadExecutor:
                                 direct_tried=tc_direct_tried,
                                 firefox_tried=tc_firefox_tried,
                             )
-                            if live_from_start_disabled:
-                                subtitle_cmd = self._without_live_from_start(subtitle_cmd)
+                        if parallel_plugin_tried:
+                            cmd = self._without_twitcasting_parallel(cmd)
+                            subtitle_cmd = self._without_twitcasting_parallel(subtitle_cmd)
+                        if is_live_for_url:
+                            self._live_config = dict(cmd_config, _custom_live_args=custom_args or "")
+                            self._effective_live_mode = live_mode_for_url
+                            self._run_live(handle, cmd, url, effective_platform)
+                            url_done = True
+                            continue
                         self._remember_ytdlp_command(cmd)
                         proc = self._spawn(cmd)
                         if not self._download_manager.publish_process(handle, proc):
@@ -2018,7 +1753,7 @@ class DownloadExecutor:
                         # yt-dlp 会无限等待新分片。通过 LIVE_DOWNLOAD_TIMEOUT 限制单链接
                         # 最长下载时间，超时后自动终止并跳到下一个链接。
                         nico_live_dl = (effective_platform == "Niconico"
-                                        and is_live_download)
+                                        and is_live_for_url)
                         live_timeout_min = int(config_snapshot.get("LIVE_DOWNLOAD_TIMEOUT", 0))
                         download_start = time.time()
                         download_timed_out = False
@@ -2056,10 +1791,7 @@ class DownloadExecutor:
                             if archived_id:
                                 archived_ids.add(archived_id)
                             # === 日志输出（保持用户可见） ===
-                            parallel_plugin_error = (
-                                parallel_plugin_error
-                                or self._is_twitcasting_parallel_plugin_error(line)
-                            )
+                            parallel_plugin_error = parallel_plugin_error or self._is_twitcasting_parallel_plugin_error(line)
                             is_error = "ERROR" in line or parallel_plugin_error
                             if is_error:
                                 self._log(f"  {line}", "error")
@@ -2073,8 +1805,6 @@ class DownloadExecutor:
                                     tc_m3u8_400 = tc_m3u8_400 or self._is_twitcasting_m3u8_400(line)
                                     tc_access_error = tc_access_error or self._is_twitcasting_access_error(line)
                                     tc_cookie_error = tc_cookie_error or self._is_browser_cookie_error(line)
-                                if self._is_live_from_start_unavailable(line):
-                                    live_from_start_error = True
                             elif "WARNING" in line:
                                 self._log(f"  {line}", "warn")
                             else:
@@ -2178,7 +1908,6 @@ class DownloadExecutor:
                                 update_stats()
                                 continue
                         if rc == 0:
-                            self._remember_twitcasting_password(url, effective_platform, cmd)
                             if audio_mode == "2" and output_path and os.path.isfile(output_path):
                                 self._extract_audio_from_video(
                                     output_path,
@@ -2198,33 +1927,18 @@ class DownloadExecutor:
                                     stopped = True
                                     self._log(f"[{index}/{len(urls)}] ✗ 已取消", "warn")
                                     break
-                            self._remove_ytdl_sidecar(output_path)
+                            if output_path and os.path.isfile(output_path):
+                                self._remember_twitcasting_password(url, effective_platform, cmd, config_snapshot)
+                                self._remove_ytdl_sidecar(output_path)
                             stats["ok"] += 1
                             self._log(f"[{index}/{len(urls)}] ✓ 完成", "success")
                             self._add_history(url, "", effective_platform, "success", output_path)
                             url_done = True
                         else:
-                            if (
-                                parallel_plugin_error
-                                and effective_platform == "TwitCasting"
-                                and not parallel_plugin_tried
-                            ):
+                            if (parallel_plugin_error and effective_platform == "TwitCasting"
+                                    and not parallel_plugin_tried and self._has_twitcasting_parallel(cmd)):
                                 parallel_plugin_tried = True
-                                self._log(
-                                    f"[{effective_platform}] 并发 HLS 插件不可用，改用 FFmpeg 串行下载重试",
-                                    "warn",
-                                )
-                                continue
-                            if (
-                                live_from_start_error
-                                and not live_from_start_disabled
-                                and "--live-from-start" in cmd
-                            ):
-                                live_from_start_disabled = True
-                                self._log(
-                                    f"[{effective_platform}] 当前无法从直播起点回溯，改为从当前分片录制并重试",
-                                    "warn",
-                                )
+                                self._log("[TwitCasting] 并发插件不可用，改用 FFmpeg 重试一次", "warn")
                                 continue
                             recovery = self._twitcasting_recovery(
                                 cmd,
@@ -2248,7 +1962,7 @@ class DownloadExecutor:
                                 continue
                             # TwitCasting 密码保护：阻塞等待密码后重试
                             if (password_required or password_retry) and effective_platform == "TwitCasting":
-                                self._forget_twitcasting_password(url, effective_platform)
+                                self._forget_twitcasting_password(url, effective_platform, config_snapshot)
                                 pw_attempt += 1
                                 if pw_attempt < max_password_attempts:
                                     reused_password_failed = bool(tc_password)
@@ -2272,6 +1986,7 @@ class DownloadExecutor:
                                         url,
                                         effective_platform,
                                         reason=reason,
+                                        handle=handle,
                                     )
                                     if pw:
                                         tc_password = pw
@@ -2323,7 +2038,6 @@ class DownloadExecutor:
         finally:
             self._finish(handle, None)
 
-
     def stop_download(self):
         ticket = self._download_manager.request_stop()
         if not ticket.active:
@@ -2334,6 +2048,11 @@ class DownloadExecutor:
                 self._password_value = None
                 self._password_event.set()
         self._update_progress(0, "正在停止...", "", "")
+        if self._live_runner is not None or self._withny_live_active:
+            # The worker retains its slot through Ctrl+C, file closure and ffprobe.
+            # Never release it early or another task can collide with finalization.
+            self._broadcast_download_state()
+            return {"ok": True, "stopping": True, "stopped": False}
         if ticket.process is not None:
             self.kill_process_tree(ticket.process)
             self._log("[停止] 下载进程已终止", "warn")
@@ -2501,7 +2220,16 @@ class DownloadExecutor:
     def _finish(self, handle, process):
         self._download_manager.clear_process(handle, process)
         # 仅当前代际有权广播结束态，旧线程迟到收尾不会伪造"空闲"。
-        if self._download_manager.finish(handle):
+        finished = self._download_manager.finish(handle)
+        if finished:
             self._broadcast_download_state()
+        # complete_stop() can release the manager before this worker returns.
+        # Task queue slots still need an exactly-once cleanup notification.
+        if self._on_finished is not None:
+            with self._finish_lock:
+                notify = handle.generation not in self._finished_generations
+                self._finished_generations.add(handle.generation)
+            if notify:
+                self._on_finished(handle)
         if not self._app_state.has_sse_clients():
             self._start_idle_timer()
