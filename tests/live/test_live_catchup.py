@@ -1,5 +1,6 @@
 """Conditional metadata, tail isolation and actual FFmpeg overlap reconciliation."""
 from __future__ import annotations
+from tests.helpers import PROJECT_ROOT
 
 import io
 import json
@@ -25,7 +26,7 @@ from video_downloader.live.session import LiveSession
 from video_downloader.live.splice import overlap_boundary, packets, reconcile
 from video_downloader.live.urls import TargetKind, classify_target
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = PROJECT_ROOT
 
 
 class CatchUpTests(unittest.TestCase):

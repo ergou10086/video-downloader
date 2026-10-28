@@ -1,4 +1,5 @@
 """Clock proofs use encoded packets, including real TS-to-MP4 remuxes."""
+from tests.helpers import PROJECT_ROOT
 from pathlib import Path
 from unittest.mock import patch
 import subprocess
@@ -9,7 +10,7 @@ from video_downloader.live.clock import MediaClock, audio_packets, attributes, m
 from video_downloader.live.danmaku.timeline import project
 from video_downloader.live.danmaku.models import CommentEvent
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = PROJECT_ROOT
 
 
 def test_hls_clock_discontinuities_encryption_and_variant():

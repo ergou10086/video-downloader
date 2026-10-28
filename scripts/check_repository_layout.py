@@ -28,6 +28,8 @@ def violations(paths):
         if (top == 'temp'
                 or (top == 'dependency' and not (
                     len(parts) == 2 and parts[-1].endswith('.LICENSE')))
+                or (top == 'tests' and len(parts) == 2
+                    and parts[-1].startswith('test_') and parts[-1].endswith('.py'))
                 or (top == 'scripts' and normalized not in MAINTAINED_SCRIPTS)):
             invalid.append(path)
     return invalid
@@ -41,7 +43,7 @@ def check(*, staged=False):
     invalid = violations(paths)
     if invalid:
         print('拒绝提交：temp 仅留本地，dependency 仅保留根目录 *.LICENSE，'
-              'scripts 仅保留明确维护的脚本。', file=sys.stderr)
+              'scripts 仅保留明确维护的脚本；测试放入 tests 的功能子目录。', file=sys.stderr)
         for path in invalid:
             print(f'  {path}', file=sys.stderr)
         print('使用 git rm --cached 取消跟踪；不要用 git add -f 绕过目录规则。', file=sys.stderr)

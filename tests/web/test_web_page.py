@@ -1,3 +1,4 @@
+from tests.helpers import PROJECT_ROOT
 import os
 import re
 import unittest
@@ -23,7 +24,7 @@ class WebPageTests(unittest.TestCase):
 
     def test_template_keeps_expected_structure(self):
         _skip_if_frozen()
-        base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        base = str(PROJECT_ROOT)
         template_path = os.path.join(base, "resource", "templates", "index.html")
         self.assertTrue(os.path.isfile(template_path), f"Template missing: {template_path}")
         with open(template_path, "r", encoding="utf-8") as f:
@@ -81,7 +82,7 @@ class WebPageTests(unittest.TestCase):
 
     def test_reset_config_uses_post(self):
         _skip_if_frozen()
-        base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        base = str(PROJECT_ROOT)
         js_path = os.path.join(base, "resource", "static", "js", "app.js")
         with open(js_path, "r", encoding="utf-8") as f:
             js = f.read()
@@ -92,7 +93,7 @@ class WebPageTests(unittest.TestCase):
     def test_settings_javascript_only_references_existing_form_controls(self):
         """设置加载/保存不能读取模板中不存在的控件。"""
         _skip_if_frozen()
-        base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        base = str(PROJECT_ROOT)
         with open(os.path.join(base, "resource", "templates", "index.html"), "r", encoding="utf-8") as f:
             html = f.read()
         with open(os.path.join(base, "resource", "static", "js", "app.js"), "r", encoding="utf-8") as f:
@@ -109,7 +110,7 @@ class WebPageTests(unittest.TestCase):
     def test_only_light_dark_theme_remains(self):
         """配色切换（Everforest ↔ 中性）已整套删除，只剩明暗两态。"""
         _skip_if_frozen()
-        base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        base = str(PROJECT_ROOT)
         with open(os.path.join(base, "resource", "templates", "index.html"), "r", encoding="utf-8") as f:
             html = f.read()
         with open(os.path.join(base, "resource", "static", "js", "theme.js"), "r", encoding="utf-8") as f:
@@ -128,7 +129,7 @@ class WebPageTests(unittest.TestCase):
 
     def test_app_js_has_api_endpoints(self):
         _skip_if_frozen()
-        base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        base = str(PROJECT_ROOT)
         js_path = os.path.join(base, "resource", "static", "js", "app.js")
         with open(js_path, "r", encoding="utf-8") as f:
             js = f.read()
@@ -146,7 +147,7 @@ class WebPageTests(unittest.TestCase):
 
     def test_bilibili_part_title_uses_safe_dom_properties(self):
         _skip_if_frozen()
-        base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        base = str(PROJECT_ROOT)
         js_path = os.path.join(base, "resource", "static", "js", "app.js")
         with open(js_path, "r", encoding="utf-8") as f:
             js = f.read()

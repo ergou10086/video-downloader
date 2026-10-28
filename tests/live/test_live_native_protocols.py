@@ -1,4 +1,5 @@
 """Portable native plugin contracts and live rendition preservation."""
+from tests.helpers import PROJECT_ROOT
 import importlib.util
 import json
 import hashlib
@@ -9,7 +10,7 @@ from unittest.mock import Mock, patch
 from video_downloader.live.catchup import CatchUpPlanner, metadata_command
 from video_downloader.live.engines.withnydl import managed_binary
 
-ROOT=Path(__file__).resolve().parents[1]
+ROOT=PROJECT_ROOT
 
 
 def load_plugin(kind,name):

@@ -13,7 +13,7 @@ from video_downloader.live.classifier import is_live_url
 from video_downloader.live.urls import classify_target, TargetKind
 from video_downloader.services.storage import StorageService
 from video_downloader.state.app_state import AppState
-from tests.test_download_executor import create_executor, ImmediateThread
+from tests.helpers.download import create_executor, ImmediateThread
 
 
 @pytest.fixture

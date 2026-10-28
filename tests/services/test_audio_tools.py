@@ -1,3 +1,4 @@
+from tests.helpers import PROJECT_ROOT
 import base64
 import json
 import math
@@ -14,10 +15,10 @@ import pytest
 from video_downloader.core.paths import AppPaths
 from video_downloader.services.audio_tools import AudioToolService, codec_args
 from video_downloader.services.download_manager import DownloadManager
-from test_tool_service import create_service
+from tests.helpers.tools import create_service
 
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = PROJECT_ROOT
 
 
 def write_wave(path, seconds=4, silence=False):

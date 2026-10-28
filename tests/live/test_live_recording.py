@@ -1,5 +1,6 @@
 """Lifecycle failure injection plus real FFmpeg/yt-dlp/HTTP integration."""
 from __future__ import annotations
+from tests.helpers import PROJECT_ROOT
 
 import io
 import json
@@ -28,7 +29,7 @@ from video_downloader.live.integrity import IntegrityChecker
 from video_downloader.live.runner import LiveRunner
 from video_downloader.live.session import LiveSession, RecordingStore, atomic_json, media_files, redact_command, recover_interrupted
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = PROJECT_ROOT
 
 
 class RecordingTests(unittest.TestCase):
@@ -104,7 +105,7 @@ class RecordingTests(unittest.TestCase):
 
     def test_authenticated_http_reports_and_invalid_job_id(self):
         from dataclasses import replace
-        from test_http_service import make_dependencies
+        from tests.helpers.web import make_dependencies
         from video_downloader.web.handler import HttpService, create_handler
         s = self.session()
         s.finish("user", {"files":[], "conclusion":"failed"})
@@ -133,7 +134,7 @@ class RecordingTests(unittest.TestCase):
         self.assertFalse((self.root/'installed').exists())
 
     def test_task_slots_remain_held_during_live_finalization(self):
-        from test_download_executor import create_executor
+        from tests.helpers.download import create_executor
         executor, _ = create_executor(self.root)
         handle = executor._download_manager.begin("single")
         executor._live_runner = Mock()
@@ -145,7 +146,7 @@ class RecordingTests(unittest.TestCase):
         executor._finish(handle, None)
 
     def test_live_twitcasting_password_recovery_preserves_task_and_mode(self):
-        from test_download_executor import create_executor
+        from tests.helpers.download import create_executor
         executor, callbacks = create_executor(self.root)
         executor._on_finished=Mock()
         executor._wait_for_password=Mock(return_value='secret')
@@ -163,7 +164,7 @@ class RecordingTests(unittest.TestCase):
         executor._on_finished.assert_called_once_with(handle)
 
     def test_task_outcomes_preserve_stopped_timeout_and_gaps(self):
-        from test_tasks import make_manager, wait_until
+        from tests.helpers.tasks import make_manager, wait_until
         for outcome, expected in [("stopped","stopped"), ("timeout","timed_out"), ("gaps","partial"), ("earliest","partial"), ("fail","failed")]:
             manager, _, _, _ = make_manager()
             class Executor:

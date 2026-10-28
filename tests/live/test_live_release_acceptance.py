@@ -12,7 +12,7 @@ from video_downloader.live.probe import LiveProbe, LiveStatus
 from video_downloader.live.urls import TargetKind
 from video_downloader.live.danmaku.nicochannel import normalize
 from video_downloader.services.nicochannel_auth import NicochannelAuthService
-from tests.test_download_executor import create_executor
+from tests.helpers.download import create_executor
 
 URLS = {
  'YouTube':'https://www.youtube.com/watch?v=abcdef12345',

@@ -1,10 +1,11 @@
 """测试入口文件使用 AppContainer 结构。"""
+from tests.helpers import PROJECT_ROOT
 import ast
 import unittest
 from pathlib import Path
 
 
-MAIN_SCRIPT = Path(__file__).parents[1] / "视频下载工具v2.6.0-GUI.py"
+MAIN_SCRIPT = PROJECT_ROOT / "视频下载工具v2.6.0-GUI.py"
 
 
 class MainEntrypointTests(unittest.TestCase):

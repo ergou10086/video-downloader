@@ -7,8 +7,8 @@ from pathlib import Path
 from queue import Queue
 from unittest.mock import Mock, patch
 
-from tests import test_archive_choice as archive_helpers
-from tests.test_download_executor import DirectThread, ImmediateThread, create_executor
+from tests.helpers.archive import ArchiveFixture
+from tests.helpers.download import DirectThread, ImmediateThread, create_executor
 
 
 LIVE_FROM_START_ERROR = (
@@ -40,14 +40,7 @@ class ProviderLiveIntegrationTests(unittest.TestCase):
                 self.assertFalse(executor._download_manager.snapshot()["running"])
 
 
-class ArchiveLiveIntegrationTests(unittest.TestCase):
-    # Reuse the archive fixture and its scripted-process helper without inheriting
-    # its test class, so unittest only runs the integration cases defined here.
-    setUp = archive_helpers.ArchiveChoiceTests.setUp
-    answer_prompt = archive_helpers.ArchiveChoiceTests.answer_prompt
-    outputs = archive_helpers.ArchiveChoiceTests.outputs
-    prompt_calls = archive_helpers.ArchiveChoiceTests.prompt_calls
-
+class ArchiveLiveIntegrationTests(ArchiveFixture, unittest.TestCase):
     def _assert_redownload_survives_live_fallback(self, *, batch):
         self.choice = True
         url = "https://twitcasting.tv/user/movie/123"

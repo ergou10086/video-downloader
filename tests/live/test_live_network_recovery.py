@@ -1,4 +1,5 @@
 """Opt-in wall-clock network outage test using actual live HLS and FFmpeg."""
+from tests.helpers import PROJECT_ROOT
 import os
 import subprocess
 import threading
@@ -13,7 +14,7 @@ import pytest
 from video_downloader.core.paths import AppPaths
 from video_downloader.live.runner import LiveRunner
 
-ROOT=Path(__file__).resolve().parents[1]
+ROOT=PROJECT_ROOT
 
 
 @pytest.mark.skipif(os.environ.get('LIVE_EXTENDED_TESTS')!='1',reason='set LIVE_EXTENDED_TESTS=1 for 145-second outage acceptance')
