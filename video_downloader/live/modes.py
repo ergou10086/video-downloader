@@ -88,9 +88,9 @@ CAPABILITIES: Mapping[str, PlatformCapability] = MappingProxyType({
     ),
     "Rplay": PlatformCapability(
         catch_up=Support.UNSUPPORTED,
-        catch_up_reason="尚无可验证的 DVR；直播录制待真实验收",
-        live_edge=False,
-        wait=False,
+        catch_up_reason="尚无可验证的 DVR",
+        live_edge=True,
+        wait=True,
     ),
 })
 

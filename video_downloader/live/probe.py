@@ -357,6 +357,9 @@ def _ytdlp_status(info: dict) -> LiveStatus:
 
 def _probe_error_from_stderr(text: str) -> ProbeError:
     lowered = text.lower()
+    if 'rplay' in lowered and any(value in text for value in (
+            '尚未接入', '暂不支持', '身份与请求不一致', '场次时间', '转播来源无效')):
+        return ProbeError('Rplay 返回未支持或无法确认身份的直播信息', retryable=False)
     if any(part in lowered for part in ("not currently live", "is not live", "user is not live",
                                         "channel is not live", "not live", "offline")):
         return ProbeError(text.strip()[:500] or "未开播", status=LiveStatus.OFFLINE, retryable=True)

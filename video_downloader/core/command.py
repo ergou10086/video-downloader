@@ -192,15 +192,17 @@ def parse_custom_ytdlp_args(value):
 
 def _append_custom_ytdlp_args(cmd, cfg, custom_args, platform_name=None):
     # 默认参数在前、本次参数在后，让本次参数可以按 yt-dlp 的常规规则覆盖默认值。
-    cmd += parse_custom_ytdlp_args(cfg.get("YTDLP_DEFAULT_ARGS", ""))
-    cmd += parse_custom_ytdlp_args(custom_args)
+    custom = parse_custom_ytdlp_args(cfg.get("YTDLP_DEFAULT_ARGS", "")) + parse_custom_ytdlp_args(custom_args)
+    if platform_name == 'Rplay' and any(value.split('=', 1)[0] in {'--write-pages', '--dump-pages', '--print-traffic'} for value in custom):
+        raise ValueError('Rplay 不支持保存原始网络响应的调试参数')
+    cmd += custom
     if platform_name == 'Rplay':
         # Info JSON contains temporary signed playback URLs. Keep task/history
         # records at the application layer instead of persisting extractor output.
-        cmd += ['--no-write-info-json']
+        cmd += ['--no-write-info-json', '--no-continue', '--abort-on-unavailable-fragments']
 
 
-def build_ytdlp_cmd(url, config, tool_dir, exe_suffix="", *, is_live=False, live_mode=None, platform_override=None, cookie_file=None, bili_parts=None, nicochannel_auth_token=None, use_ffmpeg_for_hls=False, include_subtitles=True, subtitle_only=False, thumbnail_only=False, custom_args=None, po_token_base_url=None):
+def build_ytdlp_cmd(url, config, tool_dir, exe_suffix="", *, is_live=False, live_mode=None, platform_override=None, cookie_file=None, bili_parts=None, nicochannel_auth_token=None, use_ffmpeg_for_hls=False, include_subtitles=True, subtitle_only=False, thumbnail_only=False, custom_args=None, po_token_base_url=None, rplay_auth_dir=None):
     """构建 yt-dlp 下载命令行参数。
 
     根据配置项组装完整的 yt-dlp 命令行参数列表，包括输出模板、格式选择、
@@ -257,8 +259,13 @@ def build_ytdlp_cmd(url, config, tool_dir, exe_suffix="", *, is_live=False, live
         from video_downloader.live.urls import classify_target, TargetKind
         if classify_target(url, platform_name).kind not in {TargetKind.ARCHIVE, TargetKind.CHANNEL}:
             raise ValueError("Rplay 暂不支持此路径，请使用单个点播或直播间链接")
+        from video_downloader.platforms.rplay import auth_arguments
+        cmd += auth_arguments(cfg, rplay_auth_dir)
         if is_live:
-            raise ValueError("Rplay 直播录制尚未完成真实验收")
+            cmd += ['--downloader', 'http:ffmpeg', '--downloader-args',
+                    'ffmpeg_i:-rw_timeout 15000000 -reconnect 1 -reconnect_streamed 1 '
+                    '-reconnect_on_network_error 1 -reconnect_on_http_error 408,429,500,502,503,504 '
+                    '-reconnect_delay_max 5 -reconnect_delay_total_max 30']
         # Signed URLs can rotate between runs. Restart incomplete fragments until
         # resumption can verify the resource/format identity; never skip gaps.
         cmd += ["--ignore-config", "--no-continue", "--abort-on-unavailable-fragments", "--no-playlist"]

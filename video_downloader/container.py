@@ -30,6 +30,7 @@ from .state.app_state import AppState
 from .services.download_executor import DownloadExecutor
 from .services.download_archive import TaskArchiveSession
 from .services.nicochannel_auth import NicochannelAuthService
+from .platforms.rplay import AuthWorkspace as RplayAuthWorkspace
 from .services.download_manager import DownloadManager
 from .services.network_diagnostics import NetworkDiagnostics
 from .services.po_token_provider import PoTokenProviderService
@@ -175,6 +176,7 @@ class AppContainer:
 
         # ---- NicoChannel Auth ----
         nicochannel_auth = NicochannelAuthService(log=add_log)
+        rplay_auth = RplayAuthWorkspace(self._paths)
 
         # ---- 命令构建 ----
         def build_command(url: str, *, is_live: bool = False,
@@ -213,6 +215,7 @@ class AppContainer:
                 thumbnail_only=thumbnail_only,
                 custom_args=custom_args,
                 po_token_base_url=po_token_base_url,
+                rplay_auth_dir=rplay_auth.directory(cfg) if effective_platform == 'Rplay' else None,
             )
 
         def build_subtitle_command(url: str, *, subtitle_type: str, subtitle_langs: str) -> list[str]:
@@ -346,7 +349,7 @@ class AppContainer:
         probe_service = ProbeService(
             str(self._paths.executable("yt-dlp", exe_suffix)),
             plugin_dirs=[str(path) for path in self._paths.plugin_dirs()],
-            command_context=lambda target: build_command(target.url, is_live=target.platform != "Rplay", live_mode="live_edge",
+            command_context=lambda target: build_command(target.url, is_live=True, live_mode="live_edge",
                                                          platform_override=target.platform, include_subtitles=False),
         )
         watch_store = WatchJobStore(
@@ -552,6 +555,7 @@ class AppContainer:
             task_manager.stop()
             download_executor.wait_for_live_finalization()
             po_token_provider.stop()
+            rplay_auth.close()
             app_state.publish({"type": "exit"})
             exit_event.set()
 

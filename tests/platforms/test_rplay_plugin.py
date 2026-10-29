@@ -3,6 +3,7 @@
 import importlib.util
 import io
 import json
+import sys
 from pathlib import Path
 from unittest.mock import Mock
 
@@ -18,8 +19,9 @@ from yt_dlp.utils import ExtractorError
 
 PLUGIN = PROJECT_ROOT / 'resource/yt-dlp-plugins/video_downloader/yt_dlp_plugins/extractor/rplay.py'
 FIXTURES = Path(__file__).parent / 'fixtures/rplay'
-spec = importlib.util.spec_from_file_location('rplay_contract_test', PLUGIN)
+spec = importlib.util.spec_from_file_location('rplay_contract_test', PLUGIN, submodule_search_locations=[str(PLUGIN.parent)])
 rplay = importlib.util.module_from_spec(spec)
+sys.modules[spec.name] = rplay
 spec.loader.exec_module(rplay)
 OID = '682065da13ed2c564c77d8f7'
 VOD = f'https://rplay.live/play/{OID}'
@@ -153,11 +155,11 @@ def test_real_offline_response_does_not_fetch_keys_or_media():
     ie._download_json.assert_called_once()
 
 
-def test_normal_live_extraction_cannot_start_unvalidated_recording():
+def test_normal_live_extraction_cannot_record_an_offline_room():
     ie = live_ie(inspect=False)
-    with pytest.raises(ExtractorError, match='真实验收'):
+    with pytest.raises(ExtractorError, match='not live'):
         ie._real_extract(LIVE)
-    ie._download_json.assert_not_called()
+    ie._download_json.assert_called_once()
 
 
 @pytest.mark.parametrize('change,message', [
@@ -195,3 +197,54 @@ def test_unsupported_paths_have_an_actionable_error():
     assert not ie.suitable(LIVE)
     with pytest.raises(ExtractorError, match='单个'):
         ie._real_extract('https://rplay.live/c/custom')
+
+
+def test_authenticated_requests_retry_401_once_and_never_retry_403(monkeypatch):
+    import importlib
+    support=importlib.import_module(rplay.__name__+'._rplay_auth')
+    context=Mock()
+    context.credential.side_effect=[{'user_oid':OID,'access_token':'TEST_ACCESS','login_type':'rplay'},
+                                    {'user_oid':OID,'access_token':'TEST_RENEWED','login_type':'rplay'}]
+    ie=vod_ie()
+    ie._auth_context=Mock(return_value=context)
+    response=Response(io.BytesIO(b'SECRET'),'https://api.rplay.live/',{},401)
+    request=Mock(side_effect=[ExtractorError('SECRET',cause=HTTPError(response)),{'mode':'signed'}])
+    monkeypatch.setattr(support,'protected_json',request)
+    assert ie._json('live/bytedance/play-urls',OID,{}) == {'mode':'signed'}
+    assert context.credential.call_args.kwargs == {'rejected_token':'TEST_ACCESS'}
+    sent=request.call_args.kwargs
+    assert sent['query']['userId'] == OID and sent['query']['token'] == 'TEST_RENEWED'
+    assert sent['headers']['Authorization'] == 'TEST_RENEWED'
+    context.credential.side_effect=None
+    context.credential.return_value={'user_oid':OID,'access_token':'TEST_ACCESS','login_type':'rplay'}
+    request.reset_mock()
+    response=Response(io.BytesIO(b'SECRET'),'https://api.rplay.live/',{},403)
+    request.side_effect=ExtractorError('SECRET',cause=HTTPError(response))
+    with pytest.raises(ExtractorError,match='private'):
+        ie._json('content',OID,{})
+    assert request.call_count == 1
+    context.credential.side_effect=ValueError('SECRET')
+    with pytest.raises(ExtractorError,match='login required') as error:
+        ie._json('content',OID,{})
+    assert 'SECRET' not in str(error.value)
+
+
+def test_auth_configuration_preserves_paths_and_refresh_header(tmp_path,monkeypatch):
+    import importlib
+    from urllib.parse import quote
+    support=importlib.import_module(rplay.__name__+'._rplay_auth')
+    directory=tmp_path/'中文 Path;profile'
+    params={'quiet':True,'extractor_args':{'rplay':{'auth':['firefox'],'auth_dir':[quote(str(directory),safe='')],
+                                                  'profile':[quote('CaseSensitive.Profile',safe='')]}}}
+    ie=rplay.RplayVodIE(YoutubeDL(params))
+    assert ie._auth_context().directory == directory
+    assert ie._auth_context().profile == 'CaseSensitive.Profile'
+    request=Mock(return_value={'accessToken':'TEST'})
+    monkeypatch.setattr(support,'protected_json',request)
+    assert ie._refresh(OID,'TEST_REFRESH') == {'accessToken':'TEST'}
+    assert request.call_args.kwargs['headers']['refresh-token'] == 'TEST_REFRESH'
+    assert json.loads(request.call_args.kwargs['data']) == {'requestorOid':OID}
+    for config in [{'auth':['unknown']},{'auth':['firefox']}]:
+        ie=rplay.RplayVodIE(YoutubeDL({'quiet':True,'extractor_args':{'rplay':config}}))
+        with pytest.raises(ExtractorError):
+            ie._auth_context()

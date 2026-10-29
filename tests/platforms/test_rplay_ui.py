@@ -52,3 +52,36 @@ def test_source_plugin_is_found_in_a_simulated_frozen_resource_root(tmp_path):
         roots = AppPaths(tmp_path/'portable').plugin_dirs()
     assert bundled in roots
     assert (bundled/'video_downloader/yt_dlp_plugins/extractor/rplay.py').is_file()
+
+
+def test_actual_settings_form_loads_and_collects_rplay_auth_without_secrets():
+    node=shutil.which('node')
+    if not node:
+        pytest.skip('Node.js is unavailable')
+    from video_downloader.core.constants import DEFAULT_CONFIG
+    config=dict(DEFAULT_CONFIG,RPLAY_AUTH_SOURCE='firefox',RPLAY_FIREFOX_PROFILE='CaseSensitive.Profile')
+    script=r'''
+const fs=require('fs'),vm=require('vm'),elements=new Map();
+function element(id){
+  if(!elements.has(id)){
+    const flags=new Set();
+    elements.set(id,{value:'',style:{},dataset:{},classList:{add:x=>flags.add(x),remove:x=>flags.delete(x),contains:x=>flags.has(x)},getAttribute(){return ''},setAttribute(){}});
+  }
+  return elements.get(id);
+}
+const context={URL,window:{},document:{addEventListener(){},getElementById:element,querySelectorAll(){return []}},setTimeout(){}};
+vm.createContext(context);
+vm.runInContext(fs.readFileSync('resource/static/js/app.js','utf8').replace(/^init\(\);$/m,''),context);
+for(const name of ['selectPlatform','onBrowserChanged','renderLivePlatformModes','renderLiveCommentPlatforms','renderTasks','onTaskMixedChange','onTcPasswordChange','toggleCookieMode','paintRange','onSubtitleToggle','onSubtitleLanguagePresetChange']) context[name]=()=>{};
+vm.runInContext(`applyConfig(${process.argv[1]})`,context);
+const loaded={auth:element('s_rplay_auth').value,profile:element('s_rplay_profile').value};
+element('s_rplay_profile').value='  Changed.Profile  ';
+const saved=vm.runInContext('collectCfg()',context);
+process.stdout.write(JSON.stringify({loaded,saved}));
+'''
+    result=subprocess.run([node,'-e',script,json.dumps(config)],cwd=PROJECT_ROOT,capture_output=True,text=True,timeout=10)
+    assert result.returncode==0,result.stderr
+    data=json.loads(result.stdout)
+    assert data['loaded']=={'auth':'firefox','profile':'CaseSensitive.Profile'}
+    assert data['saved']['RPLAY_AUTH_SOURCE']=='firefox' and data['saved']['RPLAY_FIREFOX_PROFILE']=='Changed.Profile'
+    assert not any(key in data['saved'] for key in ['access_token','refresh_token'])

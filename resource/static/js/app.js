@@ -322,6 +322,8 @@ function applyConfig(s) {
   $('s_cookiemode').value = s.COOKIE_MODE;
   $('s_browser').value = s.BROWSER_NAME;
   $('s_profile').value = s.BROWSER_PROFILE;
+  $('s_rplay_auth').value = s.RPLAY_AUTH_SOURCE || 'none';
+  $('s_rplay_profile').value = s.RPLAY_FIREFOX_PROFILE || '';
   onBrowserChanged();
   $('s_hwaccel').value = s.HWACCEL;
   if(s.LIVE_STREAM_METHOD !== undefined) $('s_live_stream_method').value = s.LIVE_STREAM_METHOD;
@@ -573,6 +575,8 @@ function collectCfg() {
     USE_COOKIES: isOn('sw_cookies')?1:0,
     COOKIE_MODE: parseInt($('s_cookiemode').value),
     BROWSER_NAME: $('s_browser').value,
+    RPLAY_AUTH_SOURCE: $('s_rplay_auth').value,
+    RPLAY_FIREFOX_PROFILE: $('s_rplay_profile').value.trim(),
     BROWSER_PROFILE: $('s_profile').value,
     HWACCEL: $('s_hwaccel').value,
     LIVE_STREAM_METHOD: $('s_live_stream_method').value,

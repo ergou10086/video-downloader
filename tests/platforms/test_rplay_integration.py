@@ -12,7 +12,7 @@ from video_downloader.core.platform import detect_platform, is_live_url
 from video_downloader.core.validation import validate_config
 from video_downloader.live.inspect import LiveInspector
 from video_downloader.live.modes import resolve_mode, LiveModeError, capability_for
-from video_downloader.live.probe import ProbeService, LiveStatus, YtDlpProbe
+from video_downloader.live.probe import ProbeService, LiveStatus, YtDlpProbe, LiveProbe
 from video_downloader.live.urls import classify_target, TargetKind
 from video_downloader.live.wait import LiveWatchService, WatchJobStore
 
@@ -55,12 +55,13 @@ def test_platform_settings_paths_and_commands_reuse_existing_options():
     assert 'Rplay' in command[command.index('-o')+1]
 
 
-@pytest.mark.parametrize('mode', ['auto', 'live_edge', 'catch_up'])
-def test_recording_and_modes_are_closed_until_live_acceptance(mode):
+def test_catch_up_remains_closed_without_verified_dvr():
     with pytest.raises(LiveModeError):
-        resolve_mode('Rplay', mode)
-    with pytest.raises(ValueError, match='真实验收'):
-        build_ytdlp_cmd(LIVE, DEFAULT_CONFIG, PROJECT_ROOT, platform_override='Rplay', is_live=True, live_mode=mode)
+        resolve_mode('Rplay', 'catch_up')
+    for mode in ['auto', 'live_edge']:
+        assert resolve_mode('Rplay', mode).value == 'live_edge'
+        command = build_ytdlp_cmd(LIVE, DEFAULT_CONFIG, PROJECT_ROOT, platform_override='Rplay', is_live=True, live_mode=mode)
+        assert 'http:ffmpeg' in command and '--no-live-from-start' in command
 
 
 def test_unsupported_download_path_fails_before_network():
@@ -87,19 +88,23 @@ def test_live_probe_is_readonly_uses_proxy_and_has_stable_session_identity():
     assert '--download-archive' not in command and '--simulate' in command
     service = ProbeService(providers={'Rplay': SimpleNamespace(probe=lambda *a, **k: first)})
     inspection = LiveInspector(service).inspect(LIVE)
-    assert inspection['status'] == 'live' and inspection['can_wait'] is False
-    assert inspection['effective_mode'] == '' and '未开放' in inspection['error']
+    assert inspection['status'] == 'live' and inspection['can_wait'] is True
+    assert inspection['effective_mode'] == 'live_edge'
 
 
-def test_wait_rejection_does_not_persist_or_probe(tmp_path):
+def test_wait_privacy_failure_does_not_start_media(tmp_path):
     store = WatchJobStore(tmp_path/'jobs.sqlite')
     probe = Mock()
-    service = LiveWatchService(store=store, probe_service=probe, on_live=Mock(), start_thread=False)
+    probe.probe.return_value = LiveProbe('Rplay', TargetKind.CHANNEL, OID, LiveStatus.PRIVATE, retryable=False)
+    start = Mock()
+    service = LiveWatchService(store=store, probe_service=probe, on_live=start, start_thread=False)
     try:
         result = service.add(LIVE)
-        assert '未开放' in result['error']
-        probe.probe.assert_not_called()
-        assert capability_for('Rplay').wait is False
+        assert result['waiting'] is True
+        service.tick(wait=True)
+        assert store.get(result['job']['id']).status.value == 'expired'
+        start.assert_not_called()
+        assert capability_for('Rplay').wait is True
     finally:
         service.stop()
 
