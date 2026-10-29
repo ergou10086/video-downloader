@@ -40,7 +40,8 @@ const PLATFORMS = [
   {name:"Fantia",color:"#E6399B"},
   {name:"TwitCasting",color:"#00A0D1"},
   {name:"Twitter",color:"#1DA1F2"},
-  {name:"Withny",color:"#22C55E"}
+  {name:"Withny",color:"#22C55E"},
+  {name:"Rplay",color:"#F43F5E"}
 ];
 const PLATFORM_COLORS = Object.fromEntries(PLATFORMS.map(p => [p.name, p.color]));
 
@@ -1581,6 +1582,10 @@ function isLiveCandidateUrl(url) {
     const host = u.hostname.toLowerCase();
     const path = u.pathname.toLowerCase();
     const segs = path.split('/').filter(Boolean);
+    if((host === 'rplay.live' || host === 'www.rplay.live') && u.protocol === 'https:' &&
+       !u.username && !u.password && (!u.port || u.port === '443') &&
+       /^\/(live|creatorhome)\/[0-9a-fA-F]{24}\/?$/.test(u.pathname) &&
+       (segs[0] !== 'creatorhome' || !['contents','replays','playlists'].includes(u.searchParams.get('page')))) return true;
     if(host === 'live.bilibili.com' || host.endsWith('.live.bilibili.com')) return true;
     if(host === 'b23.tv' || host.endsWith('.b23.tv')) return true;
     if(host.includes('youtube.com') && (path.endsWith('/live') || path.startsWith('/live/'))) return true;

@@ -102,3 +102,13 @@ def test_wait_rejection_does_not_persist_or_probe(tmp_path):
         assert capability_for('Rplay').wait is False
     finally:
         service.stop()
+
+
+@pytest.mark.parametrize('status,expected', [('private', LiveStatus.PRIVATE), ('HTTP 429', LiveStatus.ERROR)])
+def test_probe_failure_cannot_expose_signed_urls(status, expected):
+    runner = Mock(return_value=SimpleNamespace(returncode=1, stdout='', stderr=(
+        f'{status}: https://api.rplay.live/live/play?token=SECRET')))
+    service = ProbeService('yt-dlp', runner=runner, command_context=lambda target: ['yt-dlp'])
+    result = service.probe(classify_target(LIVE))
+    assert result.status is expected
+    assert 'SECRET' not in result.error

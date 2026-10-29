@@ -272,7 +272,11 @@ class YtDlpProbe:
         stderr = getattr(result, "stderr", "") or ""
         returncode = getattr(result, "returncode", 1)
         if returncode != 0:
-            raise _probe_error_from_stderr(stderr or stdout)
+            message = stderr or stdout
+            if target.platform == 'Rplay':
+                from video_downloader.platforms.rplay import sanitize_output
+                message = sanitize_output(message)
+            raise _probe_error_from_stderr(message)
 
         try:
             info = json.loads(stdout)

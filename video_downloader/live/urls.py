@@ -78,7 +78,7 @@ def classify_target(url: str, platform: str | None = None) -> LiveTarget:
         except ValueError:
             return LiveTarget(raw_url, platform_name, TargetKind.UNKNOWN, reason="Rplay 端口无效")
         segments = _segments(path)
-        if len(segments) == 2 and re.fullmatch(r"[0-9a-fA-F]{24}", segments[1]):
+        if re.fullmatch(r"/(?:play|live|creatorhome)/[0-9a-fA-F]{24}/?", parsed.path):
             stable = segments[1].lower()
             if segments[0] == "play":
                 return LiveTarget(raw_url, platform_name, TargetKind.ARCHIVE, stable)
