@@ -260,6 +260,11 @@ class RplayLiveIE(_RplayBaseIE):
                     relay.close()
                     raise ExtractorError('Rplay 未返回可用的授权直播格式', expected=True)
                 result.update(formats=formats, is_live=True, http_headers=dict(_HEADERS),
+                              # Let LiveRunner reauthorize and validate the
+                              # broadcast after EOF/network loss. Transparent
+                              # FFmpeg reconnects could replay a finite response
+                              # or cross into another broadcast in one file.
+                              downloader_options={'ffmpeg_args': ['-rw_timeout', '15000000']},
                               thumbnail=f'https://pb.rplay.live/liveChannelThumbnails/{creator_id}')
                 return result
             if authorization.get('mode') != 'legacy':

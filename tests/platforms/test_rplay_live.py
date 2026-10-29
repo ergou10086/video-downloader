@@ -34,6 +34,7 @@ def test_signed_byteplus_formats_keep_remote_credentials_out_of_argv(monkeypatch
         assert result['is_live'] and len(result['formats']) == 1
         media = result['formats'][0]
         assert media['height'] == 360 and media['protocol'] == 'http'
+        assert result['downloader_options']['ffmpeg_args'] == ['-rw_timeout','15000000']
         assert media['url'].startswith('http://127.0.0.1:') and 'SECRET' not in str(result)
         request = ie._json.call_args.args
         assert request[0] == 'live/bytedance/play-urls'
@@ -138,6 +139,23 @@ def test_real_ffmpeg_relay_bypasses_upstream_proxy_and_recovers_from_early_eof(t
     subprocess.run([str(ffmpeg),'-v','error','-nostdin','-y','-f','lavfi','-i','testsrc2=size=160x90:rate=10',
                     '-f','lavfi','-i','sine=frequency=500:sample_rate=44100','-t','2','-c:v','libx264',
                     '-preset','ultrafast','-c:a','aac','-f','flv',str(source)],check=True,capture_output=True,timeout=20)
+    from yt_dlp import YoutubeDL
+    from video_downloader.live.integrity import IntegrityChecker
+    # Exercise yt-dlp's actual per-video FFmpeg options, rather than relying on
+    # global input arguments that would also affect a delegated HLS source.
+    with YoutubeDL({'quiet':True,'format':'ld','external_downloader':{'http':'ffmpeg'},
+                    'ffmpeg_location':str(ffmpeg.parent),'outtmpl':str(tmp_path/'native.%(ext)s')}) as downloader:
+        ie=rplay.RplayLiveIE(downloader)
+        ie._json=Mock(side_effect=[playing(useBytePlusStream=True),{'mode':'signed',
+                     'playUrls':{'ld':'https://livestream-play.rplay.live/native.flv?sign=SYNTHETIC'}}])
+        downloader.urlopen=Mock(side_effect=lambda *args:source.open('rb'))
+        info=ie._real_extract(LIVE)
+        try:
+            downloader.process_ie_result(info)
+        finally:
+            ie._rplay_relay.close()
+    native=tmp_path/'native.flv'
+    assert IntegrityChecker(PROJECT_ROOT/'dependency/ffprobe.exe',ffmpeg).inspect(native)['valid']
     monkeypatch.setenv('http_proxy','http://127.0.0.1:1')
     monkeypatch.setenv('HTTP_PROXY','http://127.0.0.1:1')
     monkeypatch.setenv('no_proxy','example.test')
@@ -235,6 +253,7 @@ def test_twitch_relay_resolves_canonical_source_without_forwarding_rplay_credent
     assert result['formats'][1]['rplay_resolution']==720
     assert 'rplay_resolution' not in result['formats'][2]
     assert 'SECRET' not in str(result) and 'http_headers' not in result
+    assert 'downloader_options' not in result
     ie._downloader.extract_info.assert_called_once_with('https://www.twitch.tv/test_channel',
                                                        download=False,process=False,ie_key='TwitchStream')
     for source in [None,{'is_live':False}]:

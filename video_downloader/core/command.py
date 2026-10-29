@@ -262,10 +262,7 @@ def build_ytdlp_cmd(url, config, tool_dir, exe_suffix="", *, is_live=False, live
         from video_downloader.platforms.rplay import auth_arguments
         cmd += auth_arguments(cfg, rplay_auth_dir)
         if is_live:
-            cmd += ['--downloader', 'http:ffmpeg', '--downloader-args',
-                    'ffmpeg_i:-rw_timeout 15000000 -reconnect 1 -reconnect_streamed 1 '
-                    '-reconnect_on_network_error 1 -reconnect_on_http_error 408,429,500,502,503,504 '
-                    '-reconnect_delay_max 5 -reconnect_delay_total_max 30']
+            cmd += ['--downloader', 'http:ffmpeg']
         # Signed URLs can rotate between runs. Restart incomplete fragments until
         # resumption can verify the resource/format identity; never skip gaps.
         cmd += ["--ignore-config", "--no-continue", "--abort-on-unavailable-fragments", "--no-playlist"]
