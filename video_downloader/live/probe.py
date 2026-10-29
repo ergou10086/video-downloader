@@ -252,6 +252,8 @@ class YtDlpProbe:
             command.extend(["--plugin-dirs", plugin_dir])
         if self._command_context:
             command += context_arguments(self._command_context(target))
+        if target.platform == "Rplay":
+            command += ["--encoding", "utf-8", "--extractor-args", "RplayLive:inspect=1", "--ignore-no-formats-error"]
         command += ["--no-live-from-start", "--no-playlist"]
         command.append(target.url)
         return command

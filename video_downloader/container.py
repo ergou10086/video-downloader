@@ -346,7 +346,7 @@ class AppContainer:
         probe_service = ProbeService(
             str(self._paths.executable("yt-dlp", exe_suffix)),
             plugin_dirs=[str(path) for path in self._paths.plugin_dirs()],
-            command_context=lambda target: build_command(target.url, is_live=True, live_mode="live_edge",
+            command_context=lambda target: build_command(target.url, is_live=target.platform != "Rplay", live_mode="live_edge",
                                                          platform_override=target.platform, include_subtitles=False),
         )
         watch_store = WatchJobStore(

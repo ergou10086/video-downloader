@@ -110,4 +110,5 @@ PLATFORM_INFO = [
     {"name": "TwitCasting", "color": "#4B4B4D", "domains": ["twitcasting.tv"]},
     {"name": "Twitter", "color": "#1DA1F2", "domains": ["twitter.com", "x.com", "t.co"]},
     {"name": "NicoChannel", "color": "#FF6B35", "domains": ["nicochannel.jp"]},
+    {"name": "Rplay", "color": "#F43F5E", "domains": ["rplay.live"]},
 ]
