@@ -71,6 +71,10 @@ def run_cli(argv):
         _print_help()
         return 0
 
+    if arg1 == "--fanbox-scan":
+        from .platforms.fanbox.cli import main as fanbox_scan
+        return fanbox_scan(argv[1:], root=_find_tool_dir())
+
     # --batch [file]
     if arg1 in ("--batch", "-b"):
         file_path = argv[1] if len(argv) > 1 else "urls.txt"
