@@ -20,6 +20,7 @@ from .constants import (
 
 # 校验错误的中文说明（key → 错误详情映射）
 _ERROR_REASONS = {
+    "FANBOX_OPTIONS": "FANBOX 设置必须是有效的版本化 JSON 配置",
     "RPLAY_AUTH_SOURCE": "Rplay 登录来源仅支持 none/firefox",
     "RPLAY_FIREFOX_PROFILE": "Firefox 配置路径长度不能超过 200 字符",
     "PLATFORM": "平台选项无效",
@@ -185,6 +186,15 @@ def validate_config(values, base=None):
                     or any(character.isspace() for character in value)
                 ):
                     raise ValueError
+            elif key == "FANBOX_OPTIONS":
+                from video_downloader.platforms.fanbox.options import options_json
+                from video_downloader.platforms.fanbox.errors import FanboxError
+                try:
+                    value = options_json(value)
+                    if value == options_json():
+                        value = "{}"
+                except FanboxError:
+                    raise ValueError from None
             elif key == "YTDLP_DEFAULT_ARGS":
                 value = str(value).strip()
                 if len(value) > 4000:

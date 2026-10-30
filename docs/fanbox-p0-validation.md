@@ -24,6 +24,8 @@
 
 三个作者的评论接口均返回 body.viewMode 与 body.commentList。正文和评论可用性分别判断。未在此次小样本中取得可访问的原生 file 附件，因此不宣称已完成附件下载实测；受限 file 不视为可下载。
 
+后续 [P1 验收](fanbox-p1-integration.md)扩展样本后，已取得可访问的 MP3/WAV 附件并完成内存前缀验证；完整附件落盘与完整性验收仍属于 P2。
+
 ### 与旧样本的重要差异
 
 当前 post.listCreator 的 body.posts 中是**摘要**：包含 id、creatorId、费用、日期、标签、isRestricted、cover 和统计；没有 type/body。body 缺失不等于 body=null。必须抓取详情确定帖子类型，不可仿照 Python `get('body') is None` 跳过全部摘要。

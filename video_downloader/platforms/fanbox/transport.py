@@ -126,7 +126,7 @@ class HttpTransport:
                     if status == 429:
                         delay = retry_after(response.headers.get("Retry-After"))
                         self.gate.defer(delay if delay is not None else 360.)
-                        raise FanboxError("rate_limited", "FANBOX 请求频率受限", retry_after=delay or 360.)
+                        raise FanboxError("rate_limited", "FANBOX 请求频率受限", retry_after=delay if delay is not None else 360.)
                     if status in (401, 403):
                         if (status == 403 and ("html" in response.headers.get("Content-Type", "").lower()
                                               or response.headers.get("cf-mitigated") == "challenge")):
@@ -209,6 +209,8 @@ class CurlTransport(HttpTransport):
                  max_json_bytes: int = 16 * 1024 * 1024):
         from .runtime import library
         lib = library("curl_cffi.requests")
+        curl_options = library("curl_cffi").CurlOpt
+        ca_bundle = library("certifi").where()
         self.gate = gate or RequestGate()
         self._limit, self._owned = max_json_bytes, True
         self._network_errors = (lib.exceptions.RequestException,)
@@ -219,5 +221,8 @@ class CurlTransport(HttpTransport):
                 raise FanboxError("invalid_config", "User-Agent 无效")
             headers["User-Agent"] = user_agent
         self._client = _CurlClient(lib.Session(cookies=(credentials or load_credentials()).jar,
-            headers=headers, impersonate="chrome", trust_env=False, proxy=proxy, verify=True,
-            timeout=(10, 30)))
+            headers=headers, impersonate="chrome", trust_env=False,
+            proxies={"all": proxy or ""}, verify=ca_bundle,
+            # 0.13.0 stores trust_env but does not apply it to libcurl's proxy
+            # environment. Explicit empty PROXY and NOPROXY prevent inheritance.
+            curl_options={curl_options.NOPROXY: ""}, timeout=(10, 30)))

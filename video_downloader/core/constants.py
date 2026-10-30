@@ -77,6 +77,7 @@ DEFAULT_CONFIG = {
     "YTDLP_DEFAULT_ARGS": "",
     "RPLAY_AUTH_SOURCE": "none",
     "RPLAY_FIREFOX_PROFILE": "",
+    "FANBOX_OPTIONS": "{}",
 }
 
 RESOLUTION_OPTIONS = ["best", "2160", "1440", "1080", "720", "480", "360"]
