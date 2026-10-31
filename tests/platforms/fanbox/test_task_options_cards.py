@@ -14,6 +14,8 @@ from video_downloader.platforms.fanbox.options import normalize_options
 from video_downloader.platforms.fanbox.urls import validate_api_url
 from .test_archive_io import Body
 from .test_controller import setup_controller
+from .test_content import post
+from .test_scan import FakeTransport
 
 
 def support():
@@ -59,6 +61,22 @@ def test_missing_card_fails_without_claiming_success(tmp_path):
     job=app.create('https://sample.fanbox.cc',{'fan_cards':{'only':True},'network':{'api_interval_seconds':0}})
     result=app.run(job['id'])
     assert result['status']=='failed' and result['counts']['fan_cards_failed']==1 and not result['output']
+
+
+@pytest.mark.parametrize('only',[False,True])
+def test_no_supporting_cards_preserves_other_accessible_posts(tmp_path,only):
+    class NoCards(Cards):
+        def get_json(self,url):
+            if urlsplit(url).path=='/plan.listSupporting':return {'body':{'plans':[]}}
+            return FakeTransport([[post('text',{'text':'accessible body'})]]).get_json(url)
+    app=ArchiveApplication(tmp_path,transport_factory=lambda *a,**k:NoCards(),binary_factory=lambda *a,**k:Body())
+    job=app.create('https://sample.fanbox.cc',{'fan_cards':{'enabled':True,'only':only,'scope':'all_supporting'},
+        'network':{'api_interval_seconds':0}})
+    result=app.run(job['id'])
+    assert result['status']==('failed' if only else 'partial')
+    assert result['counts']['fan_cards_failed']==1
+    assert bool(result['output']) is not only
+    if not only:assert len(app.repository.job(job['id'])['archives'])==1
 
 
 def test_card_schema_and_url_boundary():

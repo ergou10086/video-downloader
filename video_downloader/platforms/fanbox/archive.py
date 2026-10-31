@@ -190,11 +190,17 @@ class ArchiveApplication:
                 state['archives']=[]
                 if options['fan_cards']['enabled']:
                     log('开始保存粉丝卡')
-                    creators=(client.supporting_creators() if options['fan_cards']['scope']=='all_supporting'
-                              else [parse_source(state['source']).creator_id])
                     state['fan_cards']=[]
-                    if not creators:
-                        raise FanboxError('no_supporting_creators','当前账号没有可用的赞助粉丝卡')
+                    try:
+                        creators=(client.supporting_creators() if options['fan_cards']['scope']=='all_supporting'
+                                  else [parse_source(state['source']).creator_id])
+                        if not creators:raise FanboxError('no_supporting_creators','当前账号没有可用的赞助粉丝卡')
+                    except FanboxError as error:
+                        if error.code in _PAUSES:raise
+                        creators=[]
+                        state['fan_cards'].append({'creator_id':'','status':'failed','error':error.to_dict()})
+                        log('粉丝卡保存失败 · '+str(error),'warn')
+                        stats();save()
                     for creator in creators:
                         gate.check()
                         try:

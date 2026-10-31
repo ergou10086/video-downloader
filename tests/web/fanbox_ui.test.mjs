@@ -58,6 +58,10 @@ test('all settings render and one-run edits never mutate defaults',async()=>{
     assert.equal(d.getElementById('fanboxTaskDialog').open,false);
     ui.start('https://sample.fanbox.cc');
     assert.equal(d.querySelector('#fanboxTaskFields [data-fanbox-option="filters.fee.maximum"]').value,'');
+    const auto=d.querySelector('#fanboxTaskFields [data-fanbox-option="workflow.auto_download"]');
+    auto.checked=false;auto.dispatchEvent(new w.Event('change'));
+    assert.equal(d.getElementById('fanboxTaskConfirm').textContent,'确认预览');
+    assert.equal(JSON.parse(ui.configValues().FANBOX_OPTIONS).workflow.auto_download,true);
     d.querySelector('#fanboxTaskDialog [data-fb-close]').click();
     assert.equal(calls.filter(c=>c.path==='/api/fanbox/create').length,1);
   }finally{await close();}

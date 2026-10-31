@@ -44,7 +44,7 @@ try{
   await page.goto('http://127.0.0.1:'+server.address().port);await page.locator('[data-fanbox-option="fan_cards.scope"]').waitFor({state:'attached'});
   await page.locator('.ni[data-page="settings"]').click();
   await page.locator('#set-fanbox').scrollIntoViewIfNeeded();
-  
+
   const checkboxes=await page.locator('#set-fanbox .fb-switch').evaluateAll(items=>items.map(el=>({width:el.getBoundingClientRect().width,height:el.getBoundingClientRect().height})));
   assert.ok(checkboxes.every(box=>box.width===32&&box.height===18));
   const rows=await page.locator('#fanboxSettingsFields .fb-field').evaluateAll(items=>items.map(el=>el.getBoundingClientRect().y));
@@ -53,7 +53,7 @@ try{
   await page.locator('#btnStart').click();await page.locator('#fanboxTaskDialog').waitFor({state:'visible'});
   await page.locator('#fanboxTaskFields [data-fanbox-option="filters.fee.maximum"]').fill('1000');
   await page.locator('#fanboxTaskFields [data-fanbox-option="filters.fee.maximum"]').press('Tab');
-  
+
   await page.locator('#fanboxTaskConfirm').click();await page.locator('#fanboxTaskDialog').waitFor({state:'hidden'});
   assert.equal(created[0].options.filters.fee.maximum,1000);
   assert.equal(JSON.parse(config.FANBOX_OPTIONS).filters.fee.maximum,null);
@@ -66,7 +66,7 @@ try{
       await page.setViewportSize({width,height:900});await page.evaluate(()=>setActivePage('settings'));await page.locator('#set-fanbox').scrollIntoViewIfNeeded();
       const overflow=await page.locator('#set-fanbox').evaluate(el=>({client:el.clientWidth,scroll:el.scrollWidth}));
       assert.ok(overflow.scroll<=overflow.client+1,`${theme}/${width}: settings overflow ${JSON.stringify(overflow)}`);
-      
+
       await page.evaluate(()=>{setActivePage('download');FanboxUI.start('https://sample.fanbox.cc');});
       const modal=await page.locator('#fanboxTaskDialog').evaluate(el=>({right:el.getBoundingClientRect().right,width:innerWidth,body:el.scrollWidth,client:el.clientWidth}));
       assert.ok(modal.right<=modal.width&&modal.body<=modal.client+1,`${theme}/${width}: dialog overflow`);
@@ -74,6 +74,8 @@ try{
     }
   }
   assert.deepEqual(errors,[]);console.log('PASS: full page init, task overrides, grouped history, native controls, 6 theme/viewport layouts; no JS errors');
-}finally{await browser.close();server.closeAllConnections();server.close();}
-
-
+}finally{
+  // End the synthetic SSE stream before closing the browser. Otherwise test
+  // workers can retain an active connection while the browser is shutting down.
+  server.closeAllConnections();await new Promise(resolve=>server.close(resolve));await browser.close();
+}

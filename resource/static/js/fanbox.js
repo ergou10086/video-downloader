@@ -8,7 +8,7 @@
   let taskDraft=null,taskUrl='',historyMode=false,consoleMode=null,replayingLogs=false;
   const consoleEntries=[],logKeys=new Set(),notified=new Set();
   const statusNames = {queued:'排队中',running:'进行中',preview_ready:'待选择',completed:'已完成',
-    partial:'部分完成',failed:'失败',paused:'已暂停'};
+    partial:'部分完成',failed:'失败',paused:'已暂停',reused:'已复用',degraded:'缩略图',skipped:'已跳过',pending:'待下载'};
   const phases = {scanning:'抓取帖子',downloading:'下载文件',preview:'待选择',finished:'已结束',paused:'已暂停',queued:'排队中'};
   const element = (tag,text,attrs={}) => Object.assign(document.createElement(tag),attrs,text==null?{}:{textContent:text});
   const button = (text,action,key) => {
@@ -100,6 +100,7 @@
           else if(Array.isArray(type))value=Array.from(input.selectedOptions).map(o=>o.value);
           set(path,value,model);
           if(path==='naming.favorites')renderSettings(host,model);
+          if(model===taskDraft&&path==='workflow.auto_download')$('fanboxTaskConfirm').textContent=value?'确认下载':'确认预览';
           if(path==='notifications.on_complete'&&value&&'Notification' in window&&Notification.permission==='default')Notification.requestPermission();
         });row.append(input);grid.append(row);
       });group.append(grid);host.append(group);
@@ -182,6 +183,7 @@
     if(preview===true)return enqueue(url,true,options);
     if($('fanboxTaskDialog').open)return;
     taskDraft=structuredClone(options);taskUrl=url;
+    $('fanboxTaskConfirm').textContent=taskDraft.workflow.auto_download?'确认下载':'确认预览';
     renderSettings($('fanboxTaskFields'),taskDraft);$('fanboxTaskDialog').showModal();
   }
   async function action(id,name,selection) {
@@ -205,7 +207,9 @@
       if(version!==requestVersion||id!==selectedJob)return;
       accept(data.job);total=data.total;$('fanboxDetailTitle').textContent=historyMode?'已归档内容':'帖子预览';
       $('fanboxSelectAll').checked=draft().all;
-      $('fanboxScope').textContent=`${total} 帖 · ${data.job.scope?.limit_reached?'已达帖子上限':data.job.scope?.list_complete?'列表完整':'列表未完整'}`;
+      const counts=data.job.counts||{};
+      $('fanboxScope').textContent=`${total} 帖 · 文件 ${(counts.completed||0)+(counts.reused||0)} · 失败 ${(counts.failed||0)+(counts.fan_cards_failed||0)} · 粉丝卡 ${counts.fan_cards||0} · ${data.job.scope?.limit_reached?'已达帖子上限':data.job.scope?.list_complete?'列表完整':'列表未完整'}`;
+      $('fanboxOpenArchive').hidden=!data.job.output;
       $('fanboxPage').textContent=`${Math.floor(offset/25)+1} / ${Math.max(1,Math.ceil(total/25))}`;
       $('fanboxPrevious').disabled=offset===0;$('fanboxNext').disabled=offset+25>=total;
       $('fanboxDownloadSelected').disabled=['queued','running'].includes(data.job.status)||(!total&&!data.options.fan_cards.enabled);
@@ -247,7 +251,7 @@
           }catch(e){details.append(element('div',e.message,{className:'fb-error'}));details.dataset.loaded='';}
         });row.append(details);host.append(row);
       });
-      (data.fan_cards||[]).forEach(card=>host.append(element('p',`粉丝卡 · ${card.creator_id} · ${statusNames[card.status]||card.status} · ${card.path||card.error?.message||''}`)));
+      (data.fan_cards||[]).forEach(card=>host.append(element('p',`粉丝卡 · ${card.creator_id||'赞助列表'} · ${statusNames[card.status]||card.status} · ${card.path||card.error?.message||''}`)));
     }catch(e){showToast(e.message,'error');}
   }
   async function openHistory(url) {
@@ -281,6 +285,7 @@
     $('fanboxTaskConfirm').onclick=async()=>{const b=$('fanboxTaskConfirm');b.disabled=true;try{if(await enqueue(taskUrl,!taskDraft.workflow.auto_download,taskDraft))$('fanboxTaskDialog').close();}finally{b.disabled=false;}};
     $('fanboxHistoryDialog').addEventListener('close',()=>{selectedJob='';requestVersion++;historyMode=false;});
     $('fanboxRefresh').onclick=loadJobs;$('fanboxCloseDetail').onclick=()=>$('fanboxHistoryDialog').close();
+    $('fanboxOpenArchive').onclick=()=>action(selectedJob,'open');
     $('fanboxUsage').onclick=async()=>{try{const data=await api('/api/fanbox/usage');$('fanboxRuns').replaceChildren();$('fanboxHistoryTitle').textContent='FANBOX 下载流量';$('fanboxDetail').hidden=true;
       data.days.forEach(day=>$('fanboxRuns').append(element('p',day.date+' · '+fmt(day.bytes))));$('fanboxHistoryDialog').showModal();}catch(e){showToast(e.message,'error');}};
     $('fanboxAuthCheck').onclick=async()=>{await saveSettingsNoAlert();auth();};
