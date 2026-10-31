@@ -26,6 +26,38 @@ class FanboxClient:
             raise FanboxError("schema_changed", "创作者资料响应结构变化")
         return data
 
+    def supporting_creators(self):
+        data=self._get('plan.listSupporting')
+        plans=data.get('plans') if isinstance(data,dict) else None
+        if not isinstance(plans,list) or len(plans)>10000:
+            raise FanboxError('schema_changed','赞助列表响应结构变化')
+        from .urls import parse_source
+        creators=[]
+        for plan in plans:
+            if not isinstance(plan,dict) or not isinstance(plan.get('creatorId'),str):
+                raise FanboxError('schema_changed','赞助列表字段结构变化')
+            creators.append(parse_source('https://www.fanbox.cc/@'+plan['creatorId']).creator_id)
+        return list(dict.fromkeys(creators))
+
+    def fan_card(self,creator_id,*,show_username=True):
+        data=self._get('legacy/support/creator',creatorId=creator_id)
+        try:
+            plan=data['plan']
+            if plan['creatorId']!=creator_id:raise ValueError
+            transactions=data.get('supportTransactions',[])
+            own_name=(transactions[0]['supporter']['name'] if transactions else '') if show_username else ''
+            card={'creator_id':creator_id,'creator_name':plan['user']['name'],'title':plan['title'],
+                  'fee':plan['fee'],'since':data['supportStartDatetime'],'username':own_name,
+                  'background':plan.get('coverImageUrl') or data.get('supporterCardImageUrl')}
+            if (any(not isinstance(card[k],str) or len(card[k])>2000 for k in
+                    ('creator_name','title','since','username')) or type(card['fee']) is not int or card['fee']<0):raise ValueError
+            if card['background'] is not None:
+                from .urls import validate_resource_url
+                validate_resource_url(card['background'])
+            return card
+        except (KeyError,TypeError,ValueError,IndexError):
+            raise FanboxError('schema_changed','粉丝卡响应结构变化') from None
+
     def pages(self, creator_id):
         data = self._get("post.paginateCreator", creatorId=creator_id)
         pages = data.get("pageUrls") if isinstance(data, dict) else data

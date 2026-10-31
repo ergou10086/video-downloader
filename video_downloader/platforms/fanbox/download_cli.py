@@ -36,7 +36,7 @@ def main(argv=None,*,root=None):
         if args.max_posts is not None:options.setdefault('filters',{})['max_posts']=args.max_posts
         cookie=args.cookies or Path(config.get('FANBOX_COOKIE_FILE') or root/'cookies.txt')
         if not cookie.is_absolute():cookie=root/cookie
-        use_cookies=not args.anonymous and (args.cookies is not None or int(config.get('USE_COOKIES',1)))
+        use_cookies=not (args.anonymous or int(config.get('FANBOX_ANONYMOUS',0))) and (args.cookies is not None or int(config.get('USE_COOKIES',1)))
         credentials=load_credentials(cookie if use_cookies and (cookie.exists() or args.cookies is not None) else None)
         application=ArchiveApplication(args.directory or root/'download'/'Fanbox')
         if args.resume:

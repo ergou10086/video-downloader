@@ -18,7 +18,7 @@ from .errors import FanboxError
 
 
 class Repository:
-    VERSION = 1
+    VERSION = 2
 
     def __init__(self, path, *, clock=time.time):
         self.path = Path(path)
@@ -47,6 +47,21 @@ class Repository:
                     COMMIT;
                 ''')
             db.execute('PRAGMA journal_mode=WAL')
+            db.execute('BEGIN IMMEDIATE')
+            try:
+                if db.execute('PRAGMA user_version').fetchone()[0]==1:
+                    if version==1:
+                        backup=self.path.with_suffix(self.path.suffix+'.v1.bak')
+                        if backup.exists() or backup.is_symlink():
+                            backup=self.path.with_suffix(self.path.suffix+'.v1.'+uuid.uuid4().hex+'.bak')
+                        with sqlite3.connect(self.path) as source,sqlite3.connect(backup) as target:
+                            source.backup(target)
+                    db.execute('CREATE TABLE IF NOT EXISTS requests(key TEXT PRIMARY KEY, fingerprint TEXT NOT NULL, job TEXT NOT NULL)')
+                    db.execute('PRAGMA user_version=2')
+                db.commit()
+            except BaseException:
+                db.rollback()
+                raise
 
     @contextmanager
     def connect(self):
@@ -83,6 +98,33 @@ class Repository:
         with self.connect() as db:
             row = db.execute('SELECT state FROM jobs WHERE id=?', (job_id,)).fetchone()
             return json.loads(row['state']) if row else None
+
+    def create_requested(self,state,key,fingerprint):
+        with self.transaction() as db:
+            old=db.execute('SELECT fingerprint,job FROM requests WHERE key=?',(key,)).fetchone()
+            if old:
+                if old['fingerprint']!=fingerprint:
+                    raise FanboxError('request_conflict','重复请求标识对应了不同参数')
+                return json.loads(db.execute('SELECT state FROM jobs WHERE id=?',(old['job'],)).fetchone()[0]),False
+            state['version']=1;state['updated_at']=self.clock()
+            db.execute('INSERT INTO jobs VALUES(?,?,?,?,?)',(state['id'],1,state['status'],state['updated_at'],json.dumps(state,ensure_ascii=False)))
+            db.execute('INSERT INTO requests VALUES(?,?,?)',(key,fingerprint,state['id']))
+            return state,True
+
+    def transition(self,state,expected):
+        with self.transaction() as db:
+            old=db.execute('SELECT version FROM jobs WHERE id=?',(state['id'],)).fetchone()
+            if old is None or old[0]!=expected:
+                raise FanboxError('stale_version','任务版本已改变，请刷新后重试')
+            if db.execute('SELECT 1 FROM leases WHERE kind=? AND expires>?',('job:'+state['id'],self.clock())).fetchone():
+                raise FanboxError('job_busy','任务仍在运行或收尾')
+            state['version']=expected+1;state['updated_at']=self.clock()
+            db.execute('UPDATE jobs SET version=?,status=?,updated=?,state=? WHERE id=?',
+                       (state['version'],state['status'],state['updated_at'],json.dumps(state,ensure_ascii=False),state['id']))
+
+    def has_lease(self,kind):
+        with self.connect() as db:
+            return db.execute('SELECT 1 FROM leases WHERE kind=? AND expires>?',(kind,self.clock())).fetchone() is not None
 
     def jobs(self, limit=100):
         with self.connect() as db:
@@ -193,3 +235,13 @@ class Repository:
     def usage(self, zone):
         with self.connect() as db:
             return self._usage(db, zone)
+
+    def usage_history(self,zone,days=30):
+        tz=ZoneInfo(zone)
+        today=datetime.fromtimestamp(self.clock(),timezone.utc).astimezone(tz).date()
+        totals={str(today-timedelta(days=i)):0 for i in reversed(range(days))}
+        with self.connect() as db:
+            for row in db.execute('SELECT bucket,bytes FROM traffic WHERE bucket>=?',(int((self.clock()-days*86400)//60),)):
+                date=str(datetime.fromtimestamp(row['bucket']*60,timezone.utc).astimezone(tz).date())
+                if date in totals:totals[date]+=row['bytes']
+        return [{'date':date,'bytes':count} for date,count in totals.items()]

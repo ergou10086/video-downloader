@@ -27,7 +27,8 @@ for metadata in live_vendor.glob("*.dist-info"):
 datas += collect_data_files("certifi")
 fanbox_datas, fanbox_binaries, fanbox_hidden = collect_all("curl_cffi")
 timezone_datas, _, timezone_hidden = collect_all("tzdata")
-datas += fanbox_datas + timezone_datas
+pillow_datas, pillow_binaries, pillow_hidden = collect_all("PIL")
+datas += fanbox_datas + timezone_datas + pillow_datas
 datas += [(str(project_root / "resource" / "dependencies" / "fanbox-runtime.txt"), "licenses")]
 datas += [(str(path), "licenses") for path in (project_root / "dependency").glob("fanbox-*.LICENSE")]
 live_modules = ["pysubs2", "websocket", "python_socks", "httpx", "httpcore", "h2", "socksio",
@@ -36,10 +37,10 @@ live_modules = ["pysubs2", "websocket", "python_socks", "httpx", "httpcore", "h2
 a = Analysis(
     [str(entry_script)],
     pathex=[str(project_root), str(packaging_deps), str(project_root / "dependency" / "live-python")],
-    binaries=fanbox_binaries,
+    binaries=fanbox_binaries+pillow_binaries,
     datas=datas,
     hiddenimports=["tkinter", "tkinter.filedialog", "yt_dlp", "yt_dlp.cookies", "yt_dlp.utils", "cramjam",
-                   "_cffi_backend", *fanbox_hidden, *timezone_hidden,
+                   "_cffi_backend", *fanbox_hidden, *timezone_hidden, *pillow_hidden,
                    *(module for package in live_modules for module in collect_submodules(package)),
                    "defusedxml.ElementTree", "certifi"],
     hookspath=[],

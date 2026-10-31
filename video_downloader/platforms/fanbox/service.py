@@ -40,7 +40,7 @@ class ScanService:
     def __init__(self, client: FanboxClient):
         self.client = client
 
-    def scan(self, url, options=None, *, checkpoint=None, save_checkpoint=None, auth_scope="anonymous"):
+    def scan(self, url, options=None, *, checkpoint=None, save_checkpoint=None, auth_scope="anonymous",notify=None):
         source = parse_source(url)
         options = normalize_options(options)
         digest = hashlib.sha256(options_json(options).encode()).hexdigest()
@@ -87,6 +87,7 @@ class ScanService:
                             seen.add(item["id"])
                             state["summaries"].append({k:v for k,v in item.items() if k in _SUMMARY_KEYS})
                     state["page_index"] += 1
+                    if notify:notify('listing',{'pages':state['page_index'],'posts':len(state['summaries'])})
                     save()
                 state["list_complete"] = state["page_index"] == len(state["pages"])
         except FanboxError as error:
@@ -122,6 +123,7 @@ class ScanService:
                         self._comment_links(post.comments, collector)
                         post.links = collector.links
                 state["posts"][post_id] = post.to_dict()
+                if notify:notify('post',{'id':post_id,'restricted':post.access=='restricted','files':sum(a.selected for a in post.assets)})
                 save()
             except FanboxError as error:
                 failure("post", error, post_id)

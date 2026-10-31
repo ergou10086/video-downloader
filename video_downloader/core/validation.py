@@ -21,6 +21,9 @@ from .constants import (
 # 校验错误的中文说明（key → 错误详情映射）
 _ERROR_REASONS = {
     "FANBOX_OPTIONS": "FANBOX 设置必须是有效的版本化 JSON 配置",
+    "FANBOX_COOKIE_FILE": "凭据路径格式无效或超过 4000 字符",
+    "FANBOX_ENABLED": "平台开关仅支持 0 或 1",
+    "FANBOX_ANONYMOUS": "匿名访问开关仅支持 0 或 1",
     "RPLAY_AUTH_SOURCE": "Rplay 登录来源仅支持 none/firefox",
     "RPLAY_FIREFOX_PROFILE": "Firefox 配置路径长度不能超过 200 字符",
     "PLATFORM": "平台选项无效",
@@ -147,6 +150,8 @@ def validate_config(values, base=None):
         "YOUTUBE_PO_TOKEN_ENABLED", "TC_REMEMBER_PASSWORD", "TC_SAVE_PASSWORD_XLSX",
         "TASK_MIXED_PARALLEL", "AUDIO_RECURSIVE",
         "LIVE_DANMAKU_ENABLED", "LIVE_DANMAKU_ANONYMIZE",
+        "FANBOX_ENABLED",
+        "FANBOX_ANONYMOUS",
     }
     for key, value in values.items():
         if key not in DEFAULT_CONFIG:
@@ -195,6 +200,10 @@ def validate_config(values, base=None):
                         value = "{}"
                 except FanboxError:
                     raise ValueError from None
+            elif key == 'FANBOX_COOKIE_FILE':
+                value=str(value).strip()
+                if len(value)>4000 or any(char in value for char in '\r\n\0'):
+                    raise ValueError
             elif key == "YTDLP_DEFAULT_ARGS":
                 value = str(value).strip()
                 if len(value) > 4000:

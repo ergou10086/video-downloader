@@ -6,6 +6,8 @@ import hashlib
 from pathlib import Path
 import re
 import stat
+import calendar
+from zoneinfo import ZoneInfo
 
 from .errors import FanboxError
 from .options import timestamp
@@ -26,8 +28,10 @@ def component(value):
 def date_string(value, pattern):
     date = timestamp(value) if isinstance(value,str) else value
     mapping = dict(YYYY=f'{date.year:04}', MM=f'{date.month:02}', DD=f'{date.day:02}',
-                   hh=f'{date.hour:02}', mm=f'{date.minute:02}', ss=f'{date.second:02}')
-    return re.sub('YYYY|MM|DD|hh|mm|ss',lambda m:mapping[m[0]],pattern)
+                   hh=f'{date.hour:02}', mm=f'{date.minute:02}', ss=f'{date.second:02}',
+                   YY=f'{date.year%100:02}',MMM='Sept' if date.month==9 else calendar.month_abbr[date.month],
+                   MMMM=calendar.month_name[date.month])
+    return re.sub('YYYY|YY|MMMM|MMM|MM|DD|hh|mm|ss',lambda m:mapping[m[0]],pattern)
 
 
 def render(template, values):
@@ -56,8 +60,8 @@ def values_for(post, asset, options, task_date):
     result = dict(creator_id=post.creator_id,user_id=post.user_id,post_id=post.id,title=post.title,
                   user=(post.source or {}).get('user',{}).get('name',post.creator_id),
                   tags=','.join(post.tags),fee=post.fee,PVA=f'【{pva}】' if pva else '',
-                  date=date_string(post.published_at,naming['date_format']),
-                  task_date=date_string(task_date,naming['date_format']), name=asset.name if asset else 'post',
+                  date=date_string(timestamp(post.published_at).astimezone(ZoneInfo(naming['timezone'])),naming['date_format']),
+                  task_date=date_string(timestamp(task_date).astimezone(ZoneInfo(naming['timezone'])),naming['date_format']), name=asset.name if asset else 'post',
                   ext=asset.extension if asset else '',index=(str(asset.index).zfill(naming['pad_width'])
                       if naming['zero_pad'] else str(asset.index)) if asset else '')
     result.update(postid=post.id,create_id=post.creator_id,uid=post.user_id)

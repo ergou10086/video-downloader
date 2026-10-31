@@ -33,16 +33,18 @@ class FanboxExecutor:
             configured=config.get('FANBOX_COOKIE_FILE','')
             cookie=Path(configured) if configured else self.tool_dir/'cookies.txt'
             if configured and not cookie.is_absolute():cookie=self.tool_dir/cookie
-            if configured and int(config.get('USE_COOKIES',1)) and not cookie.is_file():
+            use_cookies=int(config.get('USE_COOKIES',1)) and not int(config.get('FANBOX_ANONYMOUS',0))
+            if configured and use_cookies and not cookie.is_file():
                 raise FanboxError('cookie_file_missing','FANBOX 凭据文件不存在')
-            credentials=load_credentials(cookie if int(config.get('USE_COOKIES',1)) and cookie.exists() else None)
+            credentials=load_credentials(cookie if use_cookies and cookie.exists() else None)
             job_id=self.requested_job_id or self.application.create(url,options)['id']
             self.job_id=job_id
             self.callbacks.cancel_idle_timer()
             def worker():
                 try:
                     def update(value):
-                        self.callbacks.update_progress(-1,value['phase'],stage='content')
+                        label={'scanning':'抓取中','downloading':'下载中','preview':'待选择','paused':'已暂停','finished':'归档完成'}.get(value['phase'],'排队中')
+                        self.callbacks.update_progress(-1,label,stage='content')
                         self.callbacks.emit_event('content_progress',{'content_kind':'fanbox','job_id':job_id,
                             'content_stats':value['counts'] or {},'archive_status':value['status']})
                     result=self.application.run(job_id,credentials=credentials,config=config,cancel=handle.cancel_event,
@@ -54,7 +56,9 @@ class FanboxExecutor:
                     self.callbacks.emit_event('content_result',self.last_result)
                     output=str(confined(self.application.root,result['output'])) if result.get('output') else ''
                     if status in {'completed','partial','failed'}:
-                        self.callbacks.add_history(url,'','Fanbox',{'completed':'success','partial':'partial','failed':'fail'}[status],output)
+                        from .urls import parse_source
+                        source=parse_source(url)
+                        self.callbacks.add_history(source.url,source.creator_id,'Fanbox',{'completed':'success','partial':'partial','failed':'fail'}[status],output)
                     self.callbacks.update_progress(1 if status=='completed' else -1,status,stage='content')
                 except BaseException:
                     self.last_result={'status':'failed','content_kind':'fanbox','content_stats':{},

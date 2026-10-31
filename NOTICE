@@ -33,6 +33,8 @@ curl_cffi 0.13.0: MIT; cffi 2.1.1: MIT; pycparser 3.12: BSD-3-Clause;
 certifi 2026.10.23: MPL-2.0; tzdata 2026.6: Apache-2.0 (IANA data: public domain).
 Pinned official wheel hashes: resource/dependencies/fanbox-runtime.txt.
 License texts: dependency/fanbox-{curl_cffi,cffi,pycparser,certifi,tzdata}.LICENSE.
+Pillow 12.2.0: HPND; license: dependency/fanbox-Pillow.LICENSE.
+Source: https://github.com/python-pillow/Pillow
 Sources: https://github.com/lexiforest/curl_cffi
          https://github.com/python-cffi/cffi
          https://github.com/eliben/pycparser

@@ -28,7 +28,11 @@ def post_reason(post: dict, options: dict):
         return "fee_type"
     rule = filters["fee"]
     if rule["enabled"]:
-        if not {">=": fee >= rule["value"], "<=": fee <= rule["value"], "=": fee == rule["value"]}[rule["op"]]:
+        if rule.get('minimum') is not None or rule.get('maximum') is not None:
+            if ((rule.get('minimum') is not None and fee<rule['minimum'])
+                    or (rule.get('maximum') is not None and fee>rule['maximum'])):
+                return 'fee_range'
+        elif not {">=": fee >= rule["value"], "<=": fee <= rule["value"], "=": fee == rule["value"]}[rule["op"]]:
             return "fee_range"
     rule = filters["post_id"]
     if rule["enabled"]:

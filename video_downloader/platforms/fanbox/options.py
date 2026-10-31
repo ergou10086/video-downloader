@@ -14,14 +14,16 @@ DEFAULT_OPTIONS = {
     "content": {"body": True, "body_formats": ["html"], "raw_snapshot": True,
                 "cover": True, "links": True, "comments": False, "comment_max_pages": 20,
                 "image_quality": "original", "image_fallback": "ask"},
+    "fan_cards": {"enabled": False, "only": False, "scope": "current", "show_username": True},
     "filters": {"include_free": True, "include_paid": True, "max_posts": None,
         "resource_types": dict.fromkeys(("image", "audio", "video", "archive", "source", "other"), True),
-        "fee": {"enabled": False, "op": ">=", "value": 500},
+        "fee": {"enabled": False, "op": ">=", "value": 500, "minimum": None, "maximum": None},
         "post_id": {"enabled": False, "op": ">", "value": "0"},
         "published": {"enabled": False, "start": None, "end": None},
         "title": {"include_enabled": False, "include": [], "exclude_enabled": False, "exclude": []},
         "attachment_name": {"include_enabled": False, "include": [], "exclude_enabled": False, "exclude": []}},
     "naming": {"post_dir": "{creator_id}/{date} [{post_id}] {title}", "images": "images/{index}-{name}",
+               "timezone": "Asia/Shanghai",
                "attachments": "attachments/{name}", "date_format": "YYYY-MM-DD", "zero_pad": True,
                "pad_width": 3, "conflict": "uniquify", "favorites": [], "layout": "post_directory"},
     "network": {"engine": "curl", "api_interval_seconds": 1., "file_concurrency": 2,
@@ -37,6 +39,7 @@ DEFAULT_OPTIONS = {
 
 _ENUMS = {
     "content.image_quality": {"original", "thumbnail"}, "content.image_fallback": {"ask", "never", "allow"},
+    "fan_cards.scope": {"current", "all_supporting"},
     "filters.fee.op": {">=", "=", "<="}, "filters.post_id.op": {">", "<"},
     "naming.conflict": {"uniquify", "overwrite", "prompt", "skip"},
     "naming.layout": {"post_directory", "legacy_full"}, "network.engine": {"curl", "httpx"},
@@ -111,7 +114,11 @@ def normalize_options(value=None) -> dict:
                     _invalid(path)
                 result[key] = list(dict.fromkeys(raw))
             elif original is None:
-                if path == "filters.max_posts":
+                if path in {"filters.fee.minimum","filters.fee.maximum"}:
+                    if raw is not None and (type(raw) is not int or not 0 <= raw <= 100000000):
+                        _invalid(path)
+                    result[key]=raw
+                elif path == "filters.max_posts":
                     if raw is not None and (type(raw) is not int or not 1 <= raw <= 1000000):
                         _invalid(path)
                     result[key] = raw
@@ -134,7 +141,7 @@ def normalize_options(value=None) -> dict:
                     _invalid(path)
                 if path == "filters.post_id.value" and (not raw.isascii() or not raw.isdigit()):
                     _invalid(path)
-                if path == "quota.timezone":
+                if path in {"quota.timezone","naming.timezone"}:
                     from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
                     try:
                         ZoneInfo(raw)
@@ -153,6 +160,16 @@ def normalize_options(value=None) -> dict:
         return result
 
     result = merge(DEFAULT_OPTIONS, value)
+    fee=result['filters']['fee']
+    if fee['minimum'] is not None and fee['maximum'] is not None and fee['minimum']>fee['maximum']:
+        _invalid('filters.fee')
+    if result['fan_cards']['only']:
+        result['fan_cards']['enabled']=True
+    from .naming import render
+    variables=dict.fromkeys(('creator_id','create_id','user_id','uid','user','post_id','postid','title',
+        'name','ext','index','date','task_date','fee','tags','PVA'),'value')
+    for field in ('post_dir','images','attachments'):
+        render(result['naming'][field] or DEFAULT_OPTIONS['naming'][field],variables)
     dates = result["filters"]["published"]
     if dates["enabled"] and (not dates["start"] or not dates["end"] or timestamp(dates["start"]) > timestamp(dates["end"])):
         _invalid("filters.published")

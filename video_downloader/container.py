@@ -35,6 +35,9 @@ from .services.download_manager import DownloadManager
 from .services.routed_executor import RoutedDownloadExecutor
 from .platforms.fanbox.archive import ArchiveApplication
 from .platforms.fanbox.executor import FanboxExecutor
+from .platforms.fanbox.controller import FanboxController
+from .tasks.context import TaskAppState
+from types import SimpleNamespace
 from .services.network_diagnostics import NetworkDiagnostics
 from .services.po_token_provider import PoTokenProviderService
 from .services.storage import StorageService
@@ -165,7 +168,7 @@ class AppContainer:
                 app_state.progress_data["status"] = status
             app_state.progress_data["speed"] = speed
             app_state.progress_data["eta"] = eta
-            if stage in {"video", "audio"}:
+            if stage in {"video", "audio", "content"}:
                 app_state.progress_data["stage"] = stage
             app_state.publish({"type": "progress", "data": dict(app_state.progress_data)})
 
@@ -339,7 +342,13 @@ class AppContainer:
             tool_dir=tool_dir,app_state=app_state,download_manager=download_manager,
             callbacks=TaskCallbacks(log=add_log,update_progress=update_progress,add_history=add_history,
                 broadcast_download_state=broadcast_download_state,emit_event=emit_event,
-                cancel_idle_timer=cancel_idle_timer,start_idle_timer=start_idle_timer)))
+                cancel_idle_timer=cancel_idle_timer,start_idle_timer=start_idle_timer)),
+            manager=download_manager,
+            callbacks=TaskCallbacks(log=add_log,update_progress=update_progress,add_history=add_history,
+                broadcast_download_state=broadcast_download_state,emit_event=emit_event,
+                cancel_idle_timer=cancel_idle_timer,start_idle_timer=start_idle_timer),
+            batch_factory=lambda manager,callbacks,finished,config:make_task_executor(SimpleNamespace(selection={}),
+                TaskAppState(app_state,None,config),manager,callbacks,finished))
 
         task_manager = TaskManager(
             base_app_state=app_state,
@@ -359,6 +368,29 @@ class AppContainer:
                 return int(app_state.config_snapshot().get("TASK_MODE", 1)) == 1
             except (TypeError, ValueError):
                 return True
+
+        def start_fanbox_job(job_id,url,preview,selection):
+            if task_mode_enabled():
+                return task_manager.submit([url],selection={'fanbox_job_id':job_id,'fanbox_preview':preview,
+                                                           'fanbox_selection':selection})
+            def exclusive():
+                executor=FanboxExecutor(fanbox_application,tool_dir=tool_dir,app_state=app_state,
+                    download_manager=download_manager,callbacks=download_executor.callbacks,
+                    job_id=job_id,preview=preview,selection=selection)
+                result=executor.start_download(url)
+                if result.get('ok'):download_executor.active=executor
+                return result
+            return task_manager.start_exclusive(exclusive)
+
+        def pause_fanbox_job(job_id,target):
+            if target!='exclusive':return task_manager.cancel(target)
+            if getattr(download_executor.active,'job_id',None)==job_id:
+                return download_executor.stop_download()
+            return {'ok':True}
+
+        fanbox_controller=FanboxController(fanbox_application,tool_dir=tool_dir,
+            config_getter=app_state.config_snapshot,start=start_fanbox_job,cancel=pause_fanbox_job,
+            publish=app_state.publish)
 
         # ---- 直播 WAIT 服务 ----
         probe_service = ProbeService(
@@ -564,6 +596,7 @@ class AppContainer:
             return live_watch_service.cancel(job_id)
 
         def request_exit() -> None:
+            fanbox_controller.stop()
             download_executor.stop_download()
             network_diagnostics.stop()
             live_watch_service.stop()
@@ -632,6 +665,7 @@ class AppContainer:
                 wav_to_mp3=wav_to_mp3,
                 audio_convert=tool_service.audio_convert,
                 stop_audio_tool=tool_service.stop_audio_tool,
+                fanbox=fanbox_controller,
                 audio_loudnorm=audio_loudnorm,
                 audio_volume=audio_volume,
                 request_exit=request_exit,

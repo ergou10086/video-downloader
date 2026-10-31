@@ -43,6 +43,30 @@ def paragraph_html(block):
     return ''.join(result)
 
 
+def export_index(root,state):
+    from .urls import parse_source
+    creator=parse_source(state['source']).creator_id
+    relative=f'{creator}/_jobs/{state["id"]}/index.html'
+    target=confined(root,relative,create=True)
+    titles={p['id']:p['title'] for p in state['scan']['posts']}
+    links=[]
+    for entry in state['archives']:
+        path=confined(root,entry['index'])
+        href=quote(Path(os.path.relpath(path,target.parent)).as_posix(),safe='/')
+        links.append('<li><a href="'+html.escape(href,quote=True)+'">'+html.escape(titles[entry['post_id']])+'</a></li>')
+    for card in state.get('fan_cards',[]):
+        if card['status']!='completed':continue
+        path=confined(root,card['path'])
+        href=quote(Path(os.path.relpath(path,target.parent)).as_posix(),safe='/')
+        links.append('<li><a href="'+html.escape(href,quote=True)+'">粉丝卡 · '+html.escape(card['creator_id'])+'</a></li>')
+    page='''<!doctype html><html lang="zh"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'">
+<style>body{max-width:900px;margin:2rem auto;padding:0 1rem;font-family:system-ui;line-height:1.8;overflow-wrap:anywhere}a{color:#2369a8}@media(prefers-color-scheme:dark){body{background:#202124;color:#eee}a{color:#8ab4f8}}</style>'''
+    page+='<title>'+html.escape(creator)+'</title><h1>'+html.escape(creator)+'</h1><p>'+html.escape(state['status'])+'</p><ul>'+''.join(links)+'</ul></html>'
+    write_text(target,page)
+    return relative
+
+
 def export_post(root,repository,post,options,task_date,files):
     candidate=post_directory(post,options,task_date)
     if not any(token in options['naming']['post_dir'] for token in ('{post_id}','{postid}')):

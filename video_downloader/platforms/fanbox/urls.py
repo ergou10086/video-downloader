@@ -9,7 +9,7 @@ from .errors import FanboxError
 
 API_HOST = "api.fanbox.cc"
 API_ENDPOINTS = frozenset({"creator.get", "post.paginateCreator", "post.listCreator",
-                           "post.info", "post.getComments"})
+                           "post.info", "post.getComments", "plan.listSupporting", "legacy/support/creator"})
 _SLUG = re.compile(r"[A-Za-z0-9_][A-Za-z0-9_-]{0,99}\Z")
 _RESERVED = {"www", "api", "downloads", "static", "help", "fanbox"}
 
@@ -66,7 +66,7 @@ def validate_api_url(value: str, *, endpoints=API_ENDPOINTS) -> str:
     parsed = split_http_url(value)
     if (parsed.scheme != "https" or parsed.hostname.lower() != API_HOST
             or parsed.port not in (None, 443) or parsed.fragment
-            or parsed.path.lstrip("/") not in endpoints or parsed.path.count("/") != 1):
+            or parsed.path not in {'/'+endpoint for endpoint in endpoints}):
         raise FanboxError("unsafe_api_url", "分页链接超出允许的 FANBOX 接口范围")
     return urlunsplit(("https", API_HOST, parsed.path, parsed.query, ""))
 

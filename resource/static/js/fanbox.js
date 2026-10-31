@@ -1,0 +1,302 @@
+/* FANBOX view adapter. All content is rendered as text; no source HTML executes. */
+(() => {
+  'use strict';
+  const $ = id => document.getElementById(id);
+  const jobs = new Map(), drafts = new Map();
+  let options = null, defaults = null, selectedJob = '', offset = 0, total = 0, requestVersion = 0;
+  let starting = false, retryRequest = null, searchTimer = null;
+  let taskDraft=null,taskUrl='',historyMode=false,consoleMode=null,replayingLogs=false;
+  const consoleEntries=[],logKeys=new Set(),notified=new Set();
+  const statusNames = {queued:'排队中',running:'进行中',preview_ready:'待选择',completed:'已完成',
+    partial:'部分完成',failed:'失败',paused:'已暂停'};
+  const phases = {scanning:'抓取帖子',downloading:'下载文件',preview:'待选择',finished:'已结束',paused:'已暂停',queued:'排队中'};
+  const element = (tag,text,attrs={}) => Object.assign(document.createElement(tag),attrs,text==null?{}:{textContent:text});
+  const button = (text,action,key) => {
+    const b=element('button',text,{className:'btn sm',type:'button'});
+    b.onclick=action;if(key)b.dataset.fbFocus=key;return b;
+  };
+  const fmt = value => value==null?'未知':value<1024?value+' B':value<1048576?(value/1024).toFixed(1)+' KiB':(value/1048576).toFixed(1)+' MiB';
+  function matches(value) {try {const h=new URL(value).hostname.toLowerCase();return h==='fanbox.cc'||h.endsWith('.fanbox.cc');}catch(e){return false;}}
+  function draft() {
+    if(!drafts.has(selectedJob))drafts.set(selectedJob,{excluded:new Set(),included:new Set(),assets:new Set(),all:true});
+    return drafts.get(selectedJob);
+  }
+  function get(path,model=options) {return path.split('.').reduce((value,key)=>value?.[key],model);}
+  function set(path,value,model=options) {const parts=path.split('.');let node=model;parts.slice(0,-1).forEach(key=>node=node[key]);node[parts.at(-1)]=value;if(model===options)sync();}
+  const groups = [
+    ['保存内容',[
+      ['workflow.auto_download','抓取后自动下载','bool'],['content.body','帖子正文','bool'],
+      ['content.body_formats','正文格式',['html','txt','md']],['content.raw_snapshot','原始 JSON','bool'],
+      ['content.cover','封面','bool'],['content.links','链接清单','bool'],['content.comments','评论','bool'],
+      ['content.comment_max_pages','评论页数上限','number'],['content.image_quality','图片质量',{original:'原图',thumbnail:'缩略图'}],
+      ['content.image_fallback','原图不可用时',{ask:'询问',never:'仅原图',allow:'允许缩略图'}]
+    ]],
+    ['筛选',[
+      ['filters.include_free','免费帖子','bool'],['filters.include_paid','付费帖子','bool'],['filters.max_posts','最多帖子数','nullable'],
+      ['filters.fee.enabled','按金额筛选','bool'],['filters.fee.op','金额比较',{'>=':'不低于','=':'等于','<=':'不高于'}],['filters.fee.value','金额（日元）','number'],
+      ['filters.fee.minimum','最低赞助金额（日元）','nullable'],['filters.fee.maximum','最高赞助金额（日元）','nullable'],
+      ['filters.post_id.enabled','按投稿 ID 筛选','bool'],['filters.post_id.op','ID 比较',{'>':'大于','<':'小于'}],['filters.post_id.value','投稿 ID','text'],
+      ['filters.published.enabled','按日期筛选','bool'],['filters.published.start','起始日期','date'],['filters.published.end','截止日期','date'],
+      ...['image','audio','video','archive','source','other'].map((type,i)=>['filters.resource_types.'+type,['图片','音频','视频','压缩包','源文件','其他附件'][i],'bool']),
+      ...[['title','标题'],['attachment_name','附件原名']].flatMap(([kind,label])=>[
+        [`filters.${kind}.include_enabled`,label+'包含筛选','bool'],[`filters.${kind}.include`,label+'包含（每行一项）','list'],
+        [`filters.${kind}.exclude_enabled`,label+'排除筛选','bool'],[`filters.${kind}.exclude`,label+'排除（每行一项）','list']])
+    ]],
+    ['目录与命名',[
+      ['naming.post_dir','帖子目录','text'],['naming.images','图片命名','text'],['naming.attachments','附件命名','text'],
+      ['naming.layout','目录方式',{post_directory:'按帖子归档',legacy_full:'完整路径模板'}],['naming.date_format','日期格式','text'],
+      ['naming.timezone','日期时区','text'],
+      ['naming.favorites','命名收藏（每行一项）','list'],
+      ['naming.zero_pad','序号补零','bool'],['naming.pad_width','序号位数','number'],
+      ['naming.conflict','同名文件',{uniquify:'添加序号',overwrite:'覆盖',prompt:'询问',skip:'跳过'}]
+    ]],
+    ['运行策略',[
+      ['network.file_concurrency','文件并发','number'],['network.api_interval_seconds','API 间隔（秒）','number'],
+      ['network.file_start_interval_seconds','文件启动间隔（秒）','number'],['network.proxy_policy','代理',{inherit:'沿用全局设置',direct:'直连'}],
+      ['archive.incremental','复用已验证文件','bool'],['quota.enabled','每日额度','bool'],['quota.limit_gib','额度（GiB）','number'],
+      ['quota.timezone','计量时区','text'],['quota.on_limit','额度用尽时',{wait_manual:'暂停',next_day:'次日继续'}]
+      ,['notifications.on_complete','完成通知','bool'],['ui.bold_keywords','匹配标题高亮','bool']
+    ]],
+    ['粉丝卡',[
+      ['fan_cards.enabled','下载粉丝卡','bool'],['fan_cards.only','仅下载粉丝卡','bool'],
+      ['fan_cards.scope','粉丝卡范围',{current:'当前作者',all_supporting:'所有赞助作者'}],
+      ['fan_cards.show_username','在粉丝卡显示我的用户名','bool']
+    ]]
+  ];
+  function renderSettings(host=$('fanboxSettingsFields'),model=options) {
+    if(!model)return;
+    host.replaceChildren();
+    groups.forEach(([title,fields],index)=>{
+      const group=element('section',null,{className:'fb-settings-group'});
+      group.append(element('h4',title));const grid=element('div',null,{className:'fb-settings-list'});
+      fields.forEach(([path,label,type])=>{
+        const row=element(Array.isArray(type)?'div':'label',null,{className:'fb-field'});row.append(element('span',label));let input;
+        if(Array.isArray(type)) {
+          const choices=element('span',null,{className:'fb-choices'});
+          row.setAttribute('role','group');row.setAttribute('aria-label',label);
+          type.forEach(value=>{const item=element('label'),check=element('input',null,{type:'checkbox',className:'fb-tick',checked:(get(path,model)||[]).includes(value),value});
+            check.dataset.fanboxOption=path;check.onchange=()=>set(path,Array.from(choices.querySelectorAll('input:checked')).map(v=>v.value),model);
+            item.append(check,document.createTextNode(value.toUpperCase()));choices.append(item);});
+          row.append(choices);grid.append(row);return;
+        } else if(typeof type==='object') {
+          input=element('select',null,{className:'ctl'});
+          Object.entries(type).forEach(([key,text])=>input.append(element('option',text,{value:key})));
+          input.value=get(path,model);
+        } else {
+          input=element(type==='list'?'textarea':'input',null,{className:'ctl'});
+          if(type==='bool'){input.type='checkbox';input.className='fb-switch';input.checked=!!get(path,model);}
+          else {if(input.tagName==='INPUT'){input.type=type==='date'?'datetime-local':(['number','nullable'].includes(type)?'number':'text');input.step='any';}
+            let value=get(path,model);if(type==='list')value=(value||[]).join('\n');
+            if(type==='date'&&value){const d=new Date(value);value=new Date(d-d.getTimezoneOffset()*60000).toISOString().slice(0,16);}
+            input.value=value??'';}
+        }
+        input.dataset.fanboxOption=path;
+        input.addEventListener('change',()=>{
+          let value=input.value;
+          if(type==='bool')value=input.checked;
+          else if(type==='number'||type==='nullable')value=type==='nullable'&&value===''?null:Number(value);
+          else if(type==='list')value=value.split(/\r?\n/).map(v=>v.trim()).filter(Boolean);
+          else if(type==='date')value=value?new Date(value).toISOString():null;
+          else if(Array.isArray(type))value=Array.from(input.selectedOptions).map(o=>o.value);
+          set(path,value,model);
+          if(path==='naming.favorites')renderSettings(host,model);
+          if(path==='notifications.on_complete'&&value&&'Notification' in window&&Notification.permission==='default')Notification.requestPermission();
+        });row.append(input);grid.append(row);
+      });group.append(grid);host.append(group);
+    });
+    const row=element('label',null,{className:'fb-field'}),select=element('select',null,{className:'ctl'});
+    row.append(element('span','应用图片命名收藏'));select.append(element('option','选择收藏',{value:''}));
+    (model.naming.favorites||[]).forEach(value=>select.append(element('option',value,{value})));
+    select.onchange=()=>{if(select.value){set('naming.images',select.value,model);host.querySelector('[data-fanbox-option="naming.images"]').value=select.value;}};
+    row.append(select);host.append(row);
+  }
+  function applyConfig(config) {
+    $('fanboxEnabled').checked=String(config.FANBOX_ENABLED??1)==='1';
+    $('fanboxAnonymous').checked=String(config.FANBOX_ANONYMOUS??0)==='1';
+    $('fanboxCookieFile').value=config.FANBOX_COOKIE_FILE||'';
+    if(options){const saved=JSON.parse(config.FANBOX_OPTIONS||'{}');options=structuredClone(defaults);merge(options,saved);renderSettings();}
+    sync();
+  }
+  function merge(target,source) {Object.entries(source).forEach(([key,value])=>{
+    if(value&&typeof value==='object'&&!Array.isArray(value)&&target[key])merge(target[key],value);else target[key]=value;
+  });}
+  function configValues() {return options?{FANBOX_OPTIONS:JSON.stringify(options),FANBOX_ENABLED:$('fanboxEnabled').checked?1:0,
+    FANBOX_ANONYMOUS:$('fanboxAnonymous').checked?1:0,FANBOX_COOKIE_FILE:$('fanboxCookieFile').value.trim()}:{};}
+  function sync() {
+    const urls=$('urlInput').value.trim().split(/\s+/).filter(Boolean);
+    const pure=urls.length?urls.every(matches):currentPlatform==='Fanbox';
+    $('fanboxPreview').hidden=!pure;
+    $('fanboxJobsPanel').hidden=!pure||!jobs.size;
+    $('btnCopyCommand').style.display=pure?'none':'';
+    document.querySelector('.task-args-row').style.display=pure?'none':'';
+    if(pure)$('btnStartLabel').textContent='抓取并下载';
+    if(consoleMode!==pure){consoleMode=pure;renderConsole();}
+  }
+  function accept(job) {
+    if(!job?.id||Number(jobs.get(job.id)?.version||0)>Number(job.version||0))return;
+    const previous=jobs.get(job.id);jobs.set(job.id,job);renderJobs();
+    if(previous&&previous.status!==job.status&&job.status==='completed'&&job.notify&&!notified.has(job.id)) {
+      notified.add(job.id);showToast('FANBOX 下载完成','success');
+      if('Notification' in window&&Notification.permission==='granted')new Notification('FANBOX 下载完成',{body:job.source});
+    }
+    if(selectedJob===job.id&&previous?.status!==job.status&&job.status!=='running')loadDetail();
+  }
+  async function loadJobs() {try {const data=await api('/api/fanbox/jobs');(data.jobs||[]).forEach(accept);if(data.error)showToast(data.error,'error');}catch(e){showToast(e.message,'error');}}
+  function renderJobs() {
+    const host=$('fanboxJobs'),focus=document.activeElement?.dataset.fbFocus;
+    $('fanboxJobsPanel').hidden=!jobs.size||!consoleMode;host.replaceChildren();
+    Array.from(jobs.values()).sort((a,b)=>b.created_at-a.created_at).slice(0,30).forEach(job=>{
+      const row=element('article',null,{className:'fb-job'}),counts=job.counts||{};
+      row.append(element('div',job.source,{className:'fb-job-title'}));
+      row.append(element('div',`${statusNames[job.status]||job.status} · ${phases[job.phase]||''} · 帖子 ${counts.posts||0} · 文件 ${(counts.completed||0)+(counts.reused||0)} · 失败 ${(counts.failed||0)+(counts.fan_cards_failed||0)} · 粉丝卡 ${counts.fan_cards||0} · 链接 ${counts.links||0} · ${fmt(counts.bytes_received||0)}`,{className:'fb-metrics'}));
+      if(job.error)row.append(element('div',job.error.message,{className:'fb-error'}));
+      const actions=element('div',null,{className:'fb-actions'});
+      actions.append(button('详情',()=>{historyMode=false;$('fanboxRuns').replaceChildren();openDetail(job.id);},job.id+'-detail'));
+      if(['queued','running'].includes(job.status))actions.append(button('暂停',()=>action(job.id,'pause'),job.id+'-pause'));
+      else if(job.status==='preview_ready')actions.append(button('选择帖子',()=>openDetail(job.id),job.id+'-select'));
+      else if(['paused','partial','failed'].includes(job.status))actions.append(button('继续',()=>action(job.id,'continue'),job.id+'-continue'));
+      if(job.output)actions.append(button('打开归档',()=>action(job.id,'open'),job.id+'-open'));
+      row.append(actions);host.append(row);
+    });
+    if(focus)host.querySelector(`[data-fb-focus="${CSS.escape(focus)}"]`)?.focus({preventScroll:true});
+  }
+  async function enqueue(url,preview,settings) {
+    if(starting)return;starting=true;$('fanboxPreview').disabled=true;
+    try {
+      await saveSettingsNoAlert();
+      const urls=[...new Set(url.split(/\s+/).filter(Boolean))];
+      if(!urls.length||!urls.every(matches))throw new Error('请输入 FANBOX 主页或帖子链接');
+      if(!retryRequest||retryRequest.url!==url||retryRequest.preview!==preview||JSON.stringify(retryRequest.options)!==JSON.stringify(settings))retryRequest={url,preview,options:structuredClone(settings),request_id:crypto.randomUUID()};
+      let last;
+      for(const [index,source] of urls.entries()){
+        const result=await api('/api/fanbox/create',{method:'POST',body:JSON.stringify({...retryRequest,url:source,request_id:retryRequest.request_id+'-'+index})});
+        accept(result.job);last=result.job.id;
+      }
+      retryRequest=null;if(preview){historyMode=false;$('fanboxRuns').replaceChildren();openDetail(last);}loadTasks();
+      return true;
+    }catch(e){showToast(e.message,'error');loadJobs();}
+    finally{starting=false;$('fanboxPreview').disabled=false;}
+  }
+  function start(url,preview=null) {
+    if(!options){showToast('设置尚未加载','error');return;}
+    if(preview===true)return enqueue(url,true,options);
+    if($('fanboxTaskDialog').open)return;
+    taskDraft=structuredClone(options);taskUrl=url;
+    renderSettings($('fanboxTaskFields'),taskDraft);$('fanboxTaskDialog').showModal();
+  }
+  async function action(id,name,selection) {
+    try {
+      const result=await api('/api/fanbox/action',{method:'POST',body:JSON.stringify({id,action:name,version:jobs.get(id)?.version, ...(selection?{selection}:{})})});
+      if(result.job)accept(result.job);loadTasks();
+    }catch(e){showToast(e.message,'error');}
+    await loadJobs();if(selectedJob===id)loadDetail();
+  }
+  async function openDetail(id) {
+    selectedJob=id;offset=0;$('fanboxSearch').value='';draft();$('fanboxDetail').hidden=false;
+    if(!$('fanboxHistoryDialog').open)$('fanboxHistoryDialog').showModal();
+    try{const records=await api('/api/fanbox/logs?id='+encodeURIComponent(id));records.logs.forEach(acceptLog);}catch(e){showToast(e.message,'error');}
+    await loadDetail();
+  }
+  async function loadDetail() {
+    if(!selectedJob)return;
+    const id=selectedJob,version=++requestVersion,q=$('fanboxSearch').value;
+    try {
+      const data=await api(`/api/fanbox/job?id=${encodeURIComponent(id)}&offset=${offset}&q=${encodeURIComponent(q)}`);
+      if(version!==requestVersion||id!==selectedJob)return;
+      accept(data.job);total=data.total;$('fanboxDetailTitle').textContent=historyMode?'已归档内容':'帖子预览';
+      $('fanboxSelectAll').checked=draft().all;
+      $('fanboxScope').textContent=`${total} 帖 · ${data.job.scope?.limit_reached?'已达帖子上限':data.job.scope?.list_complete?'列表完整':'列表未完整'}`;
+      $('fanboxPage').textContent=`${Math.floor(offset/25)+1} / ${Math.max(1,Math.ceil(total/25))}`;
+      $('fanboxPrevious').disabled=offset===0;$('fanboxNext').disabled=offset+25>=total;
+      $('fanboxDownloadSelected').disabled=['queued','running'].includes(data.job.status)||(!total&&!data.options.fan_cards.enabled);
+      $('fanboxDownloadSelected').textContent=!total&&data.options.fan_cards.enabled?'下载粉丝卡':'下载所选';
+      $('fanboxDownloadSelected').hidden=historyMode;$('fanboxSelectAll').parentElement.hidden=historyMode;
+      const host=$('fanboxPosts');host.replaceChildren();
+      data.posts.forEach(post=>{
+        const row=element('article',null,{className:'fb-post'}),head=element('div',null,{className:'fb-post-head'});
+        const checkbox=element('input',null,{type:'checkbox',checked:draft().all?!draft().excluded.has(post.id):draft().included.has(post.id),disabled:post.access==='restricted'});
+        checkbox.hidden=historyMode;checkbox.setAttribute('aria-label','选择 '+post.title);checkbox.checked=checkbox.checked&&!checkbox.disabled;
+        checkbox.onchange=()=>{if(draft().all)checkbox.checked?draft().excluded.delete(post.id):draft().excluded.add(post.id);else checkbox.checked?draft().included.add(post.id):draft().included.delete(post.id);};
+        const info=element('div'),title=element('div',null,{className:'fb-post-title'});
+        const match=get('ui.bold_keywords',data.options)&&q&&post.title.toLowerCase().indexOf(q.toLowerCase());
+        if(typeof match==='number'&&match>=0){title.append(document.createTextNode(post.title.slice(0,match)),element('mark',post.title.slice(match,match+q.length)),document.createTextNode(post.title.slice(match+q.length)));}
+        else title.textContent=post.title;info.append(title);
+        info.append(element('div',`${post.published_at.slice(0,10)} · ${post.access==='restricted'?'受限':post.fee?'付费 · 可访问':'公开'} · ${post.resources} 文件 · ${fmt(post.known_bytes)}${post.unknown_sizes?' + '+post.unknown_sizes+' 个未知大小':''}`,{className:'fb-post-meta'}));
+        head.append(checkbox,info);row.append(head);
+        const details=element('details');details.append(element('summary','正文 · 文件 · 链接'));
+        details.addEventListener('toggle',async()=>{
+          if(!details.open||details.dataset.loaded)return;details.dataset.loaded='1';
+          try {
+            const detail=await api(`/api/fanbox/job?id=${encodeURIComponent(id)}&post_id=${encodeURIComponent(post.id)}`);
+            const text=(detail.post.blocks||[]).filter(b=>typeof b.text==='string').map(b=>b.text).join('\n\n');
+            details.append(element('pre',text||'—'));
+            const comments=(items,depth=0)=>{if(depth>=20)return;(items||[]).forEach(item=>{
+              if(typeof item.body==='string')details.append(element('p',item.body));
+              const replies=item.replies;comments(Array.isArray(replies)?replies:replies?.items,depth+1);
+            });};comments(detail.post.comments);
+            detail.assets.forEach(asset=>{
+              const line=element('label',null,{className:'fb-asset'}),check=element('input',null,{type:'checkbox',checked:asset.selected&&!draft().assets.has(asset.id),disabled:!asset.selected||post.access==='restricted'});
+              check.onchange=()=>check.checked?draft().assets.delete(asset.id):draft().assets.add(asset.id);
+              check.hidden=historyMode;
+              line.append(check,element('span',`${asset.name} · ${asset.variant==='original'?'原始文件':'缩略图'} · ${fmt(asset.size)} · ${statusNames[asset.status]||asset.status} · ${asset.path}${asset.error?' · '+asset.error.message:''}`));details.append(line);
+            });
+            (detail.post.links||[]).forEach(link=>{
+              let safe;try{safe=new URL(link.url);if(!['http:','https:'].includes(safe.protocol))return;}catch(e){return;}
+              const line=element('p'),anchor=element('a',link.url,{href:safe.href,target:'_blank',rel:'noopener noreferrer'});line.append(anchor);details.append(line);
+            });
+          }catch(e){details.append(element('div',e.message,{className:'fb-error'}));details.dataset.loaded='';}
+        });row.append(details);host.append(row);
+      });
+      (data.fan_cards||[]).forEach(card=>host.append(element('p',`粉丝卡 · ${card.creator_id} · ${statusNames[card.status]||card.status} · ${card.path||card.error?.message||''}`)));
+    }catch(e){showToast(e.message,'error');}
+  }
+  async function openHistory(url) {
+    try {
+      historyMode=true;const data=await api('/api/fanbox/history?source='+encodeURIComponent(url));
+      $('fanboxRuns').replaceChildren();$('fanboxHistoryTitle').textContent='FANBOX 下载历史';
+      data.runs.forEach(job=>{accept(job);$('fanboxRuns').append(button(`${new Date(job.created_at*1000).toLocaleString()} · ${statusNames[job.status]||job.status} · ${job.counts?.posts||0} 帖`,()=>openDetail(job.id)));});
+      if(data.runs.length)await openDetail(data.runs[0].id);
+      else showToast('该链接没有可用的归档记录','error');
+    }catch(e){showToast(e.message,'error');}
+  }
+  function consoleEntry(entry) {
+    if(!replayingLogs){consoleEntries.push(entry);if(consoleEntries.length>1200)consoleEntries.shift();}
+    return !!entry.job_id===!!consoleMode;
+  }
+  function renderConsole() {
+    $('logBox').replaceChildren();replayingLogs=true;
+    try{consoleEntries.filter(entry=>!!entry.job_id===!!consoleMode).slice(-300).forEach(entry=>_addToBox('logBox',entry));}
+    finally{replayingLogs=false;}
+  }
+  function acceptLog(entry) {
+    const key=entry.job_id+':'+entry.seq;if(logKeys.has(key))return;logKeys.add(key);
+    if(logKeys.size>5000)logKeys.delete(logKeys.values().next().value);addLog(entry);
+  }
+  function clearConsole(){for(let i=consoleEntries.length-1;i>=0;i--)if(!!consoleEntries[i].job_id===!!consoleMode)consoleEntries.splice(i,1);}
+  async function auth() {try {const value=await api('/api/fanbox/auth');$('fanboxAuth').textContent=value.runtime.available?(value.status==='loaded'?'凭据已载入':'匿名'):'运行依赖缺失';$('fanboxSettingsStatus').textContent=$('fanboxAuth').textContent;}catch(e){showToast(e.message,'error');}}
+  async function init() {
+    $('fanboxPreview').onclick=()=>start($('urlInput').value.trim(),true);
+    $('fanboxHistoryContent').append($('fanboxDetail'));
+    document.querySelectorAll('[data-fb-close]').forEach(b=>b.onclick=()=>b.closest('dialog').close());
+    $('fanboxTaskConfirm').onclick=async()=>{const b=$('fanboxTaskConfirm');b.disabled=true;try{if(await enqueue(taskUrl,!taskDraft.workflow.auto_download,taskDraft))$('fanboxTaskDialog').close();}finally{b.disabled=false;}};
+    $('fanboxHistoryDialog').addEventListener('close',()=>{selectedJob='';requestVersion++;historyMode=false;});
+    $('fanboxRefresh').onclick=loadJobs;$('fanboxCloseDetail').onclick=()=>$('fanboxHistoryDialog').close();
+    $('fanboxUsage').onclick=async()=>{try{const data=await api('/api/fanbox/usage');$('fanboxRuns').replaceChildren();$('fanboxHistoryTitle').textContent='FANBOX 下载流量';$('fanboxDetail').hidden=true;
+      data.days.forEach(day=>$('fanboxRuns').append(element('p',day.date+' · '+fmt(day.bytes))));$('fanboxHistoryDialog').showModal();}catch(e){showToast(e.message,'error');}};
+    $('fanboxAuthCheck').onclick=async()=>{await saveSettingsNoAlert();auth();};
+    $('fanboxSelectAll').onchange=()=>{draft().all=$('fanboxSelectAll').checked;draft().excluded.clear();draft().included.clear();loadDetail();};
+    $('fanboxPrevious').onclick=()=>{offset=Math.max(0,offset-25);loadDetail();};$('fanboxNext').onclick=()=>{offset+=25;loadDetail();};
+    $('fanboxSearch').oninput=()=>{clearTimeout(searchTimer);searchTimer=setTimeout(()=>{offset=0;loadDetail();},200);};
+    $('fanboxDownloadSelected').onclick=()=>{
+      if(!draft().all&&!draft().included.size){showToast('请先选择帖子','error');return;}
+      action(selectedJob,'download',{...(draft().all?{exclude_post_ids:[...draft().excluded]}:{post_ids:[...draft().included]}),exclude_asset_ids:[...draft().assets],title_query:$('fanboxSearch').value});
+    };
+    $('urlInput').addEventListener('input',()=>{sync();const lines=$('urlInput').value.trim().split(/\s+/).filter(Boolean);if(lines.length&&lines.every(matches)&&currentPlatform!=='Fanbox')selectPlatform('Fanbox');});
+    try {const data=await api('/api/fanbox/options');options=data.options;defaults=data.defaults;
+      $('fanboxEnabled').checked=data.enabled;$('fanboxAnonymous').checked=data.anonymous;$('fanboxCookieFile').value=data.cookie_file;renderSettings();sync();auth();loadJobs();
+    }catch(e){$('fanboxSettingsStatus').textContent=e.message;}
+  }
+  window.FanboxUI={matches,start,sync,applyConfig,configValues,event:accept,log:acceptLog,consoleEntry,clearConsole,openHistory,
+    ready:values=>(values||[]).forEach(accept)};
+  init();
+})();
