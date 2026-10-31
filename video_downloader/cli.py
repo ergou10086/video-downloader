@@ -75,6 +75,10 @@ def run_cli(argv):
         from .platforms.fanbox.cli import main as fanbox_scan
         return fanbox_scan(argv[1:], root=_find_tool_dir())
 
+    if arg1 == '--fanbox-download':
+        from .platforms.fanbox.download_cli import main as fanbox_download
+        return fanbox_download(argv[1:],root=_find_tool_dir())
+
     # --batch [file]
     if arg1 in ("--batch", "-b"):
         file_path = argv[1] if len(argv) > 1 else "urls.txt"
@@ -103,6 +107,10 @@ def _cmd_download(url):
         return 1
 
     platform = detect_platform(url)
+    from .services.routed_executor import is_fanbox
+    if is_fanbox(url):
+        from .platforms.fanbox.download_cli import main as fanbox_download
+        return fanbox_download([url],root=tool_dir)
     if platform == 'Rplay':
         from .platforms.rplay_cli import download
         return download(url, paths, exe_suffix)

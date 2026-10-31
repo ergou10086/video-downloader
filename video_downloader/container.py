@@ -32,12 +32,16 @@ from .services.download_archive import TaskArchiveSession
 from .services.nicochannel_auth import NicochannelAuthService
 from .platforms.rplay import AuthWorkspace as RplayAuthWorkspace
 from .services.download_manager import DownloadManager
+from .services.routed_executor import RoutedDownloadExecutor
+from .platforms.fanbox.archive import ArchiveApplication
+from .platforms.fanbox.executor import FanboxExecutor
 from .services.network_diagnostics import NetworkDiagnostics
 from .services.po_token_provider import PoTokenProviderService
 from .services.storage import StorageService
 from .services.tools import ToolService
 from .services.updater import UpdaterService
 from .tasks import TaskManager
+from .tasks.manager import TaskCallbacks
 from .web.handler import HttpHandlerDependencies, HttpService, create_handler
 from .web.rendering import render_html_page, serve_static_file
 
@@ -266,6 +270,7 @@ class AppContainer:
         )
 
         # ---- 下载执行器 ----
+        fanbox_application=ArchiveApplication(self._paths.download_dir/'Fanbox',publish=app_state.publish)
         po_token_provider = PoTokenProviderService(tool_dir=tool_dir, log=add_log)
         download_executor = DownloadExecutor(
             tool_dir=tool_dir,
@@ -304,7 +309,7 @@ class AppContainer:
                 finally:
                     on_finished(handle)
 
-            return DownloadExecutor(
+            video_executor = DownloadExecutor(
                 tool_dir=tool_dir,
                 exe_suffix=exe_suffix,
                 app_state=task_state,
@@ -325,6 +330,16 @@ class AppContainer:
                 save_twitcasting_password=storage.save_twitcasting_password,
                 forget_twitcasting_password=storage.forget_twitcasting_password,
             )
+            return RoutedDownloadExecutor(video_executor,FanboxExecutor(fanbox_application,
+                tool_dir=tool_dir,app_state=task_state,download_manager=manager,callbacks=callbacks,
+                on_finished=on_finished,job_id=task.selection.get('fanbox_job_id'),
+                preview=task.selection.get('fanbox_preview',False),selection=task.selection.get('fanbox_selection')))
+
+        download_executor=RoutedDownloadExecutor(download_executor,FanboxExecutor(fanbox_application,
+            tool_dir=tool_dir,app_state=app_state,download_manager=download_manager,
+            callbacks=TaskCallbacks(log=add_log,update_progress=update_progress,add_history=add_history,
+                broadcast_download_state=broadcast_download_state,emit_event=emit_event,
+                cancel_idle_timer=cancel_idle_timer,start_idle_timer=start_idle_timer)))
 
         task_manager = TaskManager(
             base_app_state=app_state,
